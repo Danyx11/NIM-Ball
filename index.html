@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>NIM Ball</title>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title">NIM Ball</div>
+    <div class="score"><span class="a" id="scoreA">0</span><span class="dash">–</span><span class="b" id="scoreB">0</span></div>
+  </header>
+
+  <div id="stage-wrap">
+    <canvas id="stage" width="900" height="520"></canvas>
+    <div id="overlay" class="hidden"><div id="ovContent"></div></div>
+    <div id="startOverlay">
+      <div class="half a" id="halfA">
+        <div class="check" id="checkA">○</div>
+        <div class="tag">ÉQUIPE BLEUE</div>
+        <div class="sub">Touche ici quand tu es prêt</div>
+      </div>
+      <div class="half b" id="halfB">
+        <div class="check" id="checkB">○</div>
+        <div class="tag">ÉQUIPE ROUGE</div>
+        <div class="sub">Touche ici quand tu es prêt</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="hud">
+    <div id="turnLabel">Écran de démarrage</div>
+    <div style="display:flex; gap:8px;">
+      <button id="resetShotsBtn" disabled>Annuler mes tirs</button>
+      <button id="validateBtn" disabled>Valider mon tour</button>
+    </div>
+  </div>
+
+  <div class="hint">Clique (ou touche) une bille, tire vers l'arrière comme une fronde, relâche pour tirer. Tu peux viser plusieurs de tes billes avant de valider. L'adversaire ne voit pas tes tirs.</div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
