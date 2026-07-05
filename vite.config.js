@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 // can load it (see README for the "load a local mini app" workflow).
 export default defineConfig({
   server: {
-    port: 5173,
+    port: Number(process.env.PORT) || 5173,
     host: true,
   },
 });

@@ -13,25 +13,80 @@ export function startGame() {
   // ---------- Identicons ----------
   // Strips the near-pure-white background behind the identicon's hexagon,
   // so the translucent bubble color shows through instead of a white square.
-  function stripWhiteBackground(img, threshold) {
+  // The background tone is sampled from the image's own corner (it's an
+  // off-white grey, not pure white) and pixels fade out by their color
+  // distance to it. Un-mixing the background tint out of the edge pixels'
+  // color (dividing by a small alpha) blew up into a brighter white/grey
+  // ring than the hard cutoff it replaced, so this only fades alpha and
+  // leaves the anti-aliased color alone — at low alpha its exact color
+  // barely shows once blended with the bubble underneath.
+  function stripWhiteBackground(img) {
     const c = document.createElement('canvas');
     c.width = img.naturalWidth || img.width; c.height = img.naturalHeight || img.height;
     const cctx = c.getContext('2d');
     cctx.drawImage(img, 0, 0, c.width, c.height);
     const data = cctx.getImageData(0, 0, c.width, c.height);
     const d = data.data;
+    const bg = [d[0], d[1], d[2]];
+    const lo = 6, hi = 46;
     for (let i = 0; i < d.length; i += 4) {
       const r = d[i], g = d[i + 1], b = d[i + 2];
-      const minC = Math.min(r, g, b), maxC = Math.max(r, g, b);
-      if (minC >= threshold && (maxC - minC) <= 14) d[i + 3] = 0;
+      const dist = Math.max(Math.abs(r - bg[0]), Math.abs(g - bg[1]), Math.abs(b - bg[2]));
+      if (dist <= lo) { d[i + 3] = 0; }
+      else if (dist < hi) { d[i + 3] = Math.round(255 * (dist - lo) / (hi - lo)); }
     }
     cctx.putImageData(data, 0, 0);
     return c;
   }
+  // Shrinks in halving steps (each a properly box-filtered average) rather than
+  // one big jump, which is what drawImage's own bilinear scaler does when asked
+  // to shrink an image a lot in one go — that undersamples the diagonal hex
+  // edge and left a dotted light fringe. Baking the result at the exact size
+  // it's drawn at means the per-frame draw is ~1:1 with no further resampling.
+  function downscaleToFit(src, targetW, targetH) {
+    let cur = src, cw = src.width, ch = src.height;
+    while (cw > targetW * 2 && ch > targetH * 2) {
+      const nw = Math.round(cw / 2), nh = Math.round(ch / 2);
+      const step = document.createElement('canvas');
+      step.width = nw; step.height = nh;
+      const sctx = step.getContext('2d');
+      sctx.imageSmoothingEnabled = true;
+      sctx.imageSmoothingQuality = 'high';
+      sctx.drawImage(cur, 0, 0, nw, nh);
+      cur = step; cw = nw; ch = nh;
+    }
+    const out = document.createElement('canvas');
+    out.width = targetW; out.height = targetH;
+    const octx = out.getContext('2d');
+    octx.imageSmoothingEnabled = true;
+    octx.imageSmoothingQuality = 'high';
+    octx.drawImage(cur, 0, 0, targetW, targetH);
+    return out;
+  }
   const identiconImages = {};
   for (const team of ['A', 'B']) {
     const img = new Image();
-    img.onload = () => { identiconImages[team] = stripWhiteBackground(img, 235); };
+    img.onload = () => {
+      const stripped = stripWhiteBackground(img);
+      // matches the fit-by-longer-side sizing drawGlob uses for the identicon clip
+      const imgR = GLOB_R * IDENTICON_FIT;
+      const s = imgR * 1.9;
+      const scale = s / Math.max(stripped.width, stripped.height);
+      const dw = Math.round(stripped.width * scale), dh = Math.round(stripped.height * scale);
+      let sized = downscaleToFit(stripped, dw, dh);
+      // team B starts on the right side of the pitch, so mirror it to face the
+      // ball at kickoff instead of away from it
+      if (team === 'B') {
+        const flipped = document.createElement('canvas');
+        flipped.width = sized.width; flipped.height = sized.height;
+        const fctx = flipped.getContext('2d');
+        fctx.translate(flipped.width, 0);
+        fctx.scale(-1, 1);
+        fctx.drawImage(sized, 0, 0);
+        sized = flipped;
+      }
+      identiconImages[team] = sized;
+    };
     img.src = IDENTICON_SRC[team];
   }
 
@@ -51,6 +106,8 @@ export function startGame() {
 
   const SCALE = 1200 / 900;                   // physics scaled up vs the original 900-wide prototype
   const GLOB_R = 33 * SCALE;                  // ~44
+  const IDENTICON_FIT = 0.82 * 0.9;           // identicon radius as a fraction of the bubble radius (shrunk ~10% so the rim reads chunkier)
+  const BUBBLE_VISUAL_SCALE = 0.85;           // draws the bubble halo/rim tighter around the now-smaller identicon (visual only, doesn't touch collision radius)
   const BALL_R = 20 * SCALE;                  // ~27
   const GLOB_MASS = 2.4;
   const BALL_MASS = 0.55;
@@ -398,7 +455,7 @@ export function startGame() {
     ctx.restore();
   }
 
-  function drawGlob(g, color, colorDark, pattern, faded) {
+  function drawGlob(g, color, colorDark, pattern, rimAlpha = 0.38) {
     const fs = (g.fallScale !== undefined) ? g.fallScale : 1;
     if (fs <= 0) return; // fully fallen: nothing left to draw
     ctx.save();
@@ -409,27 +466,31 @@ export function startGame() {
       ctx.scale(fs, fs);
       ctx.translate(-g.x, -g.y);
     }
-    drawShadow(g);
+    drawShadow(g, BUBBLE_VISUAL_SCALE);
     withSquish(g, () => {
       ctx.save();
-      if (faded) ctx.globalAlpha = 0.55;
+
+      // bubble halo/rim is drawn at a tighter visual radius than the physical g.r,
+      // so it hugs the (now smaller) identicon instead of leaving a translucent gap
+      const br = g.r * BUBBLE_VISUAL_SCALE;
 
       // translucent team-tinted bubble (less opaque per feedback)
-      const grad = ctx.createRadialGradient(g.x - g.r * 0.34, g.y - g.r * 0.36, g.r * 0.05, g.x, g.y, g.r);
-      grad.addColorStop(0, 'rgba(255,255,255,0.45)');
-      grad.addColorStop(0.3, 'rgba(255,255,255,0.12)');
-      grad.addColorStop(0.6, hexToRgba(color, 0.20));
-      grad.addColorStop(1, hexToRgba(colorDark, 0.32));
-      ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
+      const grad = ctx.createRadialGradient(g.x - br * 0.34, g.y - br * 0.36, br * 0.05, g.x, g.y, br);
+      grad.addColorStop(0, 'rgba(255,255,255,0.36)');
+      grad.addColorStop(0.3, 'rgba(255,255,255,0.09)');
+      grad.addColorStop(0.6, hexToRgba(color, 0.15));
+      grad.addColorStop(1, hexToRgba(colorDark, 0.25));
+      ctx.beginPath(); ctx.arc(g.x, g.y, br, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
 
       // identicon, clipped smaller than the bubble itself (no extra tint on it, as requested)
       const img = identiconImages[g.team];
-      const imgR = g.r * 0.82;
+      const imgR = g.r * IDENTICON_FIT;
       if (img) {
-        const s = imgR * 1.9;
+        // pre-sized (and pre-downscaled) at load time to this exact on-screen size,
+        // so this draw is ~1:1 with no further browser resampling of the edges
         ctx.save();
         ctx.beginPath(); ctx.arc(g.x, g.y, imgR, 0, Math.PI * 2); ctx.clip();
-        ctx.drawImage(img, g.x - s / 2, g.y - s / 2, s, s);
+        ctx.drawImage(img, g.x - img.width / 2, g.y - img.height / 2);
         ctx.restore();
       } else {
         drawFallbackIdenticon(g.x, g.y, g.r * 0.55, pattern, lighten(color, 15), colorDark);
@@ -437,25 +498,25 @@ export function startGame() {
 
       // inner top glow / bottom shadow for the glassy bubble feel
       ctx.save();
-      ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.clip();
-      const glowTop = ctx.createRadialGradient(g.x, g.y - g.r * 0.6, 1, g.x, g.y - g.r * 0.6, g.r * 1.1);
-      glowTop.addColorStop(0, 'rgba(255,255,255,0.5)'); glowTop.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = glowTop; ctx.fillRect(g.x - g.r, g.y - g.r, g.r * 2, g.r * 2);
-      const shadowBot = ctx.createRadialGradient(g.x, g.y + g.r * 0.75, 1, g.x, g.y + g.r * 0.75, g.r);
-      shadowBot.addColorStop(0, 'rgba(0,0,0,0.22)'); shadowBot.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = shadowBot; ctx.fillRect(g.x - g.r, g.y - g.r, g.r * 2, g.r * 2);
+      ctx.beginPath(); ctx.arc(g.x, g.y, br, 0, Math.PI * 2); ctx.clip();
+      const glowTop = ctx.createRadialGradient(g.x, g.y - br * 0.6, 1, g.x, g.y - br * 0.6, br * 1.1);
+      glowTop.addColorStop(0, 'rgba(255,255,255,0.42)'); glowTop.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = glowTop; ctx.fillRect(g.x - br, g.y - br, br * 2, br * 2);
+      const shadowBot = ctx.createRadialGradient(g.x, g.y + br * 0.75, 1, g.x, g.y + br * 0.75, br);
+      shadowBot.addColorStop(0, 'rgba(0,0,0,0.18)'); shadowBot.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = shadowBot; ctx.fillRect(g.x - br, g.y - br, br * 2, br * 2);
       ctx.restore();
 
       // translucent team-colored rim
-      ctx.lineWidth = g.r * 0.1;
-      ctx.strokeStyle = hexToRgba(color, 0.45);
-      ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = br * 0.16;
+      ctx.strokeStyle = hexToRgba(color, rimAlpha);
+      ctx.beginPath(); ctx.arc(g.x, g.y, br, 0, Math.PI * 2); ctx.stroke();
 
       // two glassy shine highlights
-      ctx.beginPath(); ctx.ellipse(g.x - g.r * 0.32, g.y - g.r * 0.42, g.r * 0.28, g.r * 0.16, -0.5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fill();
-      ctx.beginPath(); ctx.ellipse(g.x + g.r * 0.28, g.y - g.r * 0.1, g.r * 0.14, g.r * 0.09, -0.3, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fill();
+      ctx.beginPath(); ctx.ellipse(g.x - br * 0.32, g.y - br * 0.42, br * 0.28, br * 0.16, -0.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fill();
+      ctx.beginPath(); ctx.ellipse(g.x + br * 0.28, g.y - br * 0.1, br * 0.14, br * 0.09, -0.3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.fill();
 
       ctx.restore();
     });
@@ -572,8 +633,8 @@ export function startGame() {
 
   function render() {
     drawBackground();
-    entities.A.forEach(g => { if (!g.out) drawGlob(g, '#3fa9f5', '#1f6fa8', PATTERN_A, phase === 'aimB'); });
-    entities.B.forEach(g => { if (!g.out) drawGlob(g, '#ff4d5e', '#c81e3a', PATTERN_B, phase === 'aimA'); });
+    entities.A.forEach(g => { if (!g.out) drawGlob(g, '#0582ca', '#0071c3', PATTERN_A); });
+    entities.B.forEach(g => { if (!g.out) drawGlob(g, '#fae7d9', '#e0c3a3', PATTERN_B); });
     drawBall(entities.ball);
     if (phase === 'aimA') entities.A.forEach(g => { if (!g.out) drawAimArrow(g); });
     if (phase === 'aimB') entities.B.forEach(g => { if (!g.out) drawAimArrow(g); });
