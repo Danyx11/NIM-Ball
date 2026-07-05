@@ -1,7 +1,9 @@
-// Ported from prototypes/orb-cup-prototype.html — same physics/render logic,
-// with the identicons loaded from real files instead of inline base64.
+// Ported from prototypes/nimball-merged.html — merges the illustrated arena
+// background, translucent bubble-style avatars, and arcade physics/goal
+// capture mechanics explored across the earlier prototypes.
 
 const IDENTICON_SRC = { A: '/identicons/team-a.png', B: '/identicons/team-b.png' };
+const ARENA_FRAME_SRC = '/arena/frame.webp';
 
 export function startGame() {
   const canvas = document.getElementById('stage');
@@ -9,33 +11,63 @@ export function startGame() {
   const W = canvas.width, H = canvas.height;
 
   // ---------- Identicons ----------
+  // Strips the near-pure-white background behind the identicon's hexagon,
+  // so the translucent bubble color shows through instead of a white square.
+  function stripWhiteBackground(img, threshold) {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth || img.width; c.height = img.naturalHeight || img.height;
+    const cctx = c.getContext('2d');
+    cctx.drawImage(img, 0, 0, c.width, c.height);
+    const data = cctx.getImageData(0, 0, c.width, c.height);
+    const d = data.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      const minC = Math.min(r, g, b), maxC = Math.max(r, g, b);
+      if (minC >= threshold && (maxC - minC) <= 14) d[i + 3] = 0;
+    }
+    cctx.putImageData(data, 0, 0);
+    return c;
+  }
   const identiconImages = {};
   for (const team of ['A', 'B']) {
     const img = new Image();
-    img.onload = () => { identiconImages[team] = img; };
+    img.onload = () => { identiconImages[team] = stripWhiteBackground(img, 235); };
     img.src = IDENTICON_SRC[team];
   }
 
+  const arenaFrameImage = new Image();
+  arenaFrameImage.src = ARENA_FRAME_SRC;
+
   // ---------- Config ----------
-  const GLOB_R = 33;
-  const BALL_R = 20;
+  // Field bounds match the illustrated arena (light-blue Nimiq accents),
+  // scaled from the reference art — the pitch bounds match where the grass
+  // actually sits in that artwork; the artwork itself (grass, lines, hex
+  // marking, goals) is used as-is.
+  const FX0 = 140, FY0 = 238, FX1 = 1051, FY1 = 773;
+  const GY0 = 431, GY1 = 595;                 // goal mouth y-range
+  const CY = (FY0 + FY1) / 2;
+  const GOAL_HALF_HEIGHT = (GY1 - GY0) / 2;
+  const GOAL_NET_DEPTH = 38;                  // how deep the goal box is (glob falls in past this)
+
+  const SCALE = 1200 / 900;                   // physics scaled up vs the original 900-wide prototype
+  const GLOB_R = 33 * SCALE;                  // ~44
+  const BALL_R = 20 * SCALE;                  // ~27
   const GLOB_MASS = 2.4;
   const BALL_MASS = 0.55;
   const FRICTION = 0.975;
-  const WALL_RESTITUTION = 0.7;
-  const BODY_RESTITUTION = 0.88;
-  const MAX_DRAG = 130;
+  const WALL_RESTITUTION = 0.92;              // bouncier walls
+  const BODY_RESTITUTION = 1.05;              // bouncier glob/ball impacts (amplified per feedback)
+  const BOUNCE_BOOST = 1.18;                  // extra kick on glob-glob impacts, arcade feel
+  const MAX_DRAG = 130 * SCALE;                // ~173
   const POWER_SCALE = 0.07;
+  const MAX_SPEED = 10 * SCALE;                // ~13.3
   const STOP_THRESHOLD = 0.045;
-  const GOAL_HALF_HEIGHT = 78;
-  const GOAL_DEPTH = 28;
-  const ARENA_MARGIN = 24;
-  const ARENA_CORNER = 16;
   const WIN_SCORE = 3;
 
+  const PW = FX1 - FX0, PH = FY1 - FY0;
   const startPositions = {
-    A: [{ x: 160, y: 150 }, { x: 135, y: 260 }, { x: 160, y: 370 }],
-    B: [{ x: 740, y: 150 }, { x: 765, y: 260 }, { x: 740, y: 370 }],
+    A: [{ x: FX0 + 0.16 * PW, y: FY0 + 0.267 * PH }, { x: FX0 + 0.13 * PW, y: FY0 + 0.5 * PH }, { x: FX0 + 0.16 * PW, y: FY0 + 0.733 * PH }],
+    B: [{ x: FX1 - 0.16 * PW, y: FY0 + 0.267 * PH }, { x: FX1 - 0.13 * PW, y: FY0 + 0.5 * PH }, { x: FX1 - 0.16 * PW, y: FY0 + 0.733 * PH }],
   };
 
   let scoreA = 0, scoreB = 0;
@@ -48,14 +80,15 @@ export function startGame() {
   function makeGlob(team, idx, pos) {
     return {
       id: team + idx, team, x: pos.x, y: pos.y, vx: 0, vy: 0, r: GLOB_R, mass: GLOB_MASS,
-      used: false, squish: 0, squishNX: 1, squishNY: 0, squishGain: 2.1,
+      used: false, squish: 0, squishNX: 1, squishNY: 0, squishGain: 2.9, out: false,
+      falling: false, fallScale: 1,
     };
   }
   function resetPositions() {
     entities.A = startPositions.A.map((p, i) => makeGlob('A', i, p));
     entities.B = startPositions.B.map((p, i) => makeGlob('B', i, p));
     entities.ball = {
-      x: W / 2, y: H / 2, vx: 0, vy: 0, r: BALL_R, mass: BALL_MASS,
+      x: (FX0 + FX1) / 2, y: CY, vx: 0, vy: 0, r: BALL_R, mass: BALL_MASS,
       squish: 0, squishNX: 1, squishNY: 0, rot: 0, squishGain: 1.1,
     };
   }
@@ -84,8 +117,8 @@ export function startGame() {
     return { x: (t.clientX - rect.left) * scaleX, y: (t.clientY - rect.top) * scaleY };
   }
   function currentTeamGlobs() {
-    if (phase === 'aimA') return entities.A;
-    if (phase === 'aimB') return entities.B;
+    if (phase === 'aimA') return entities.A.filter(g => !g.out && !g.falling);
+    if (phase === 'aimB') return entities.B.filter(g => !g.out && !g.falling);
     return [];
   }
   function findGlobAt(pos) {
@@ -189,35 +222,50 @@ export function startGame() {
 
   // ---------- Physics ----------
   function triggerSquish(e, nx, ny, strength) {
-    const amt = Math.min(0.68, strength * 0.06 * (e.squishGain || 1));
+    const amt = Math.min(0.78, strength * 0.06 * (e.squishGain || 1));
     if (amt > e.squish) { e.squish = amt; e.squishNX = nx; e.squishNY = ny; }
   }
   function physicsStep() {
     const list = allEntities();
     for (const e of list) {
+      if (e.falling) {
+        // shrinking-into-the-void animation; frozen otherwise, no normal physics while it plays
+        e.fallScale -= 0.045;
+        if (e.fallScale <= 0) { e.fallScale = 0; e.falling = false; e.out = true; }
+        continue;
+      }
       e.x += e.vx; e.y += e.vy;
       e.vx *= FRICTION; e.vy *= FRICTION;
-      if (Math.hypot(e.vx, e.vy) < STOP_THRESHOLD) { e.vx = 0; e.vy = 0; }
+      const spd0 = Math.hypot(e.vx, e.vy);
+      if (spd0 < STOP_THRESHOLD) { e.vx = 0; e.vy = 0; }
+      else if (spd0 > MAX_SPEED) { const s = MAX_SPEED / spd0; e.vx *= s; e.vy *= s; }
       e.squish *= 0.8; if (e.squish < 0.01) e.squish = 0;
       if (e.rot !== undefined) e.rot += (e.vx * 0.03 + e.vy * 0.01);
     }
     for (const e of list) {
-      if (e.y - e.r < ARENA_MARGIN) { const spd = Math.abs(e.vy); e.y = ARENA_MARGIN + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); }
-      if (e.y + e.r > H - ARENA_MARGIN) { const spd = Math.abs(e.vy); e.y = H - ARENA_MARGIN - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); }
-      const inGoalMouthY = Math.abs(e.y - H / 2) < GOAL_HALF_HEIGHT;
+      if (e.out || e.falling) continue; // fallen (or falling) into the goal: frozen until next round
+      if (e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); }
+      if (e.y + e.r > FY1) { const spd = Math.abs(e.vy); e.y = FY1 - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); }
+      const inGoalMouthY = Math.abs(e.y - CY) < GOAL_HALF_HEIGHT;
       if (!inGoalMouthY) {
-        if (e.x - e.r < ARENA_MARGIN) { const spd = Math.abs(e.vx); e.x = ARENA_MARGIN + e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); }
-        if (e.x + e.r > W - ARENA_MARGIN) { const spd = Math.abs(e.vx); e.x = W - ARENA_MARGIN - e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); }
+        if (e.x - e.r < FX0) { const spd = Math.abs(e.vx); e.x = FX0 + e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); }
+        if (e.x + e.r > FX1) { const spd = Math.abs(e.vx); e.x = FX1 - e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); }
       } else if (e !== entities.ball) {
-        const inset = GOAL_DEPTH;
-        if (e.x - e.r < inset) { const spd = Math.abs(e.vx); e.x = inset + e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); }
-        if (e.x + e.r > W - inset) { const spd = Math.abs(e.vx); e.x = W - inset - e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); }
+        // a glob may now fall fully into the goal, instead of bouncing off the net;
+        // once it's gone deep enough, it starts shrinking away until the next round
+        if (e.x + e.r < FX0 - GOAL_NET_DEPTH || e.x - e.r > FX1 + GOAL_NET_DEPTH) {
+          e.falling = true; e.fallScale = 1; e.vx = 0; e.vy = 0;
+        }
       }
     }
-    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) resolveCollision(list[i], list[j]);
+    const activeList = list.filter(e => !e.out && !e.falling);
+    for (let i = 0; i < activeList.length; i++) for (let j = i + 1; j < activeList.length; j++) resolveCollision(activeList[i], activeList[j]);
     const b = entities.ball;
-    if (b.x + b.r < -4) return 'goalB';
-    if (b.x - b.r > W + 4) return 'goalA';
+    if (b.x + b.r < FX0) return 'goalB';
+    if (b.x - b.r > FX1) return 'goalA';
+    // if an entire team has fallen into the goal, the other team scores the point
+    if (entities.A.every(g => g.out)) return 'wipeoutB';
+    if (entities.B.every(g => g.out)) return 'wipeoutA';
     return null;
   }
   function resolveCollision(a, b2) {
@@ -235,6 +283,7 @@ export function startGame() {
     const invMassA = 1 / a.mass, invMassB = 1 / b2.mass;
     let j = -(1 + BODY_RESTITUTION) * velAlongNormal;
     j /= (invMassA + invMassB);
+    j *= BOUNCE_BOOST;
     const impX = j * nx, impY = j * ny;
     a.vx -= impX * invMassA; a.vy -= impY * invMassA;
     b2.vx += impX * invMassB; b2.vy += impY * invMassB;
@@ -242,7 +291,7 @@ export function startGame() {
     triggerSquish(a, -nx, -ny, impact);
     triggerSquish(b2, nx, ny, impact);
   }
-  function allSettled() { return allEntities().every(e => e.vx === 0 && e.vy === 0); }
+  function allSettled() { return allEntities().every(e => e.vx === 0 && e.vy === 0 && !e.falling); }
 
   // ---------- Round / goal flow ----------
   function onGoal(scoringTeam) {
@@ -276,139 +325,47 @@ export function startGame() {
     document.getElementById('nextRoundBtn').onclick = () => { resetPositions(); phase = 'aimA'; hideOverlay(); refreshTurnLabel(); };
   }
 
-  // ---------- Textures ----------
-  const grassSpeckles = [];
-  const asphaltSpeckles = [];
-  (function initTextures() {
-    let seed = 42;
-    function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
-    for (let i = 0; i < 220; i++) grassSpeckles.push({ x: 22 + rnd() * (W - 44), y: 22 + rnd() * (H - 44), r: 1 + rnd() * 2, a: 0.02 + rnd() * 0.04 });
-    for (let i = 0; i < 260; i++) asphaltSpeckles.push({ x: rnd() * W, y: rnd() * H, r: 0.6 + rnd() * 1.6, a: 0.08 + rnd() * 0.12 });
-  })();
-
-  // ---------- Render ----------
-  function pitchPath() {
-    const m = ARENA_MARGIN, r = ARENA_CORNER;
-    const gy1 = H / 2 - GOAL_HALF_HEIGHT, gy2 = H / 2 + GOAL_HALF_HEIGHT;
-    ctx.beginPath();
-    ctx.moveTo(m + r, m);
-    ctx.lineTo(W - m - r, m);
-    ctx.arcTo(W - m, m, W - m, m + r, r);
-    ctx.lineTo(W - m, gy1);
-    ctx.lineTo(W, gy1);
-    ctx.lineTo(W, gy2);
-    ctx.lineTo(W - m, gy2);
-    ctx.lineTo(W - m, H - m - r);
-    ctx.arcTo(W - m, H - m, W - m - r, H - m, r);
-    ctx.lineTo(m + r, H - m);
-    ctx.arcTo(m, H - m, m, H - m - r, r);
-    ctx.lineTo(m, gy2);
-    ctx.lineTo(0, gy2);
-    ctx.lineTo(0, gy1);
-    ctx.lineTo(m, gy1);
-    ctx.arcTo(m, m, m + r, m, r);
-    ctx.closePath();
-  }
-
-  function drawField() {
+  // ---------- Render: arena background is the user's original artwork, used as-is ----------
+  // The physics bounds (FX0..FY1, GY0/GY1) are invisible constraints only — no vector
+  // pitch is drawn on top; the grass, lines, hex marking and goals are all part of the art.
+  function drawBackground() {
     ctx.clearRect(0, 0, W, H);
 
-    const asphalt = ctx.createLinearGradient(0, 0, 0, H);
-    asphalt.addColorStop(0, '#d3cdbd');
-    asphalt.addColorStop(1, '#b7b0a0');
-    ctx.fillStyle = asphalt;
-    ctx.fillRect(0, 0, W, H);
-    for (const s of asphaltSpeckles) {
-      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(60,55,45,${s.a})`; ctx.fill();
+    if (arenaFrameImage.complete) {
+      ctx.drawImage(arenaFrameImage, 0, 0, W, H);
+    } else {
+      ctx.fillStyle = '#142451'; ctx.fillRect(0, 0, W, H);
     }
 
-    ctx.save();
-    pitchPath(); ctx.clip();
-
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#a3ef74');
-    grad.addColorStop(0.5, '#82df5a');
-    grad.addColorStop(1, '#5cba3f');
-    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
-
-    for (let i = 0; i < 10; i++) {
-      ctx.fillStyle = (i % 2 === 0) ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.045)';
-      ctx.fillRect(i * (W / 10), 0, W / 10, H);
-    }
-    for (const s of grassSpeckles) {
-      ctx.beginPath(); ctx.ellipse(s.x, s.y, s.r, s.r * 1.8, 0, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(15,70,30,${s.a})`; ctx.fill();
-    }
-
-    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, W * 0.7);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,40,10,0.10)');
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-    ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(W / 2, ARENA_MARGIN); ctx.lineTo(W / 2, H - ARENA_MARGIN); ctx.stroke();
-    ctx.beginPath(); ctx.arc(W / 2, H / 2, 70, 0, Math.PI * 2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(W / 2, H / 2, 3, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fill();
-    ctx.beginPath(); ctx.arc(ARENA_MARGIN, H / 2, 110, -0.5, 0.5); ctx.stroke();
-    ctx.beginPath(); ctx.arc(W - ARENA_MARGIN, H / 2, 110, Math.PI - 0.5, Math.PI + 0.5); ctx.stroke();
-
-    drawGoal('left'); drawGoal('right');
-    ctx.restore();
-
-    drawArenaFramePass(ARENA_MARGIN - 8, ARENA_CORNER + 4, 'rgba(6,20,10,0.30)', 13, 0.5);
-    drawArenaFramePass(ARENA_MARGIN - 3, ARENA_CORNER + 1, 'rgba(6,20,10,0.22)', 7, 0.6);
-    drawArenaFramePass(ARENA_MARGIN, ARENA_CORNER, '#12181a', 9, 1);
-    drawArenaFramePass(ARENA_MARGIN, ARENA_CORNER, '#ffd166', 3, 1);
-    drawArenaFramePass(ARENA_MARGIN + 5, ARENA_CORNER - 2, 'rgba(255,255,255,0.65)', 4, 0.9);
-    drawArenaFramePass(ARENA_MARGIN + 11, ARENA_CORNER - 3, 'rgba(0,0,0,0.16)', 6, 0.5);
+    drawLiveScore();
   }
 
-  function drawArenaFramePass(m, r, color, width, alpha) {
-    const gy1 = H / 2 - GOAL_HALF_HEIGHT, gy2 = H / 2 + GOAL_HALF_HEIGHT;
+  function drawLiveScore() {
+    // box scaled from the reference art's readout panel (~x:660-840, y:115-180 at 1536x1024)
+    const bx0 = 495, bx1 = 667, by0 = 110, by1 = 171;
+    const bw = bx1 - bx0, bh = by1 - by0;
     ctx.save();
-    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
-    ctx.strokeStyle = color; ctx.lineWidth = width;
-    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-
     ctx.beginPath();
-    ctx.moveTo(m, gy1);
-    ctx.lineTo(m, m + r);
-    ctx.arcTo(m, m, m + r, m, r);
-    ctx.lineTo(W - m - r, m);
-    ctx.arcTo(W - m, m, W - m, m + r, r);
-    ctx.lineTo(W - m, gy1);
-    ctx.stroke();
+    const r = 10;
+    ctx.moveTo(bx0 + r, by0);
+    ctx.lineTo(bx1 - r, by0); ctx.arcTo(bx1, by0, bx1, by0 + r, r);
+    ctx.lineTo(bx1, by1 - r); ctx.arcTo(bx1, by1, bx1 - r, by1, r);
+    ctx.lineTo(bx0 + r, by1); ctx.arcTo(bx0, by1, bx0, by1 - r, r);
+    ctx.lineTo(bx0, by0 + r); ctx.arcTo(bx0, by0, bx0 + r, by0, r);
+    ctx.closePath();
+    ctx.fillStyle = '#0a2b46';
+    ctx.fill();
 
-    ctx.beginPath();
-    ctx.moveTo(m, gy2);
-    ctx.lineTo(m, H - m - r);
-    ctx.arcTo(m, H - m, m + r, H - m, r);
-    ctx.lineTo(W - m - r, H - m);
-    ctx.arcTo(W - m, H - m, W - m, H - m - r, r);
-    ctx.lineTo(W - m, gy2);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  function drawGoal(side) {
-    const depth = GOAL_DEPTH;
-    const yTop = H / 2 - GOAL_HALF_HEIGHT, yBot = H / 2 + GOAL_HALF_HEIGHT;
-    const x0 = side === 'left' ? 0 : W - depth;
-    ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.fillRect(x0, yTop, depth, yBot - yTop);
-    ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1;
-    for (let x = x0; x <= x0 + depth; x += 7) { ctx.beginPath(); ctx.moveTo(x, yTop); ctx.lineTo(x, yBot); ctx.stroke(); }
-    for (let y = yTop; y <= yBot; y += 8) { ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + depth, y); ctx.stroke(); }
-    ctx.fillStyle = '#f4f1ea'; ctx.strokeStyle = '#12181a'; ctx.lineWidth = 2;
-    const postW = 6;
-    ctx.fillRect(x0 - 1, yTop - postW, depth + 2, postW); ctx.strokeRect(x0 - 1, yTop - postW, depth + 2, postW);
-    ctx.fillRect(x0 - 1, yBot, depth + 2, postW); ctx.strokeRect(x0 - 1, yBot, depth + 2, postW);
-    const farX = side === 'left' ? x0 + depth - postW : x0;
-    ctx.fillRect(farX, yTop - postW, postW, yBot - yTop + postW * 2);
-    ctx.strokeRect(farX, yTop - postW, postW, yBot - yTop + postW * 2);
+    ctx.font = `800 ${Math.round(bh * 0.62)}px 'Baloo 2', Arial, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const cy = by0 + bh / 2 + 2;
+    const cx = bx0 + bw / 2;
+    ctx.fillStyle = '#3fa9f5';
+    ctx.fillText(String(scoreA), cx - bw * 0.24, cy);
+    ctx.fillStyle = '#faf6ee';
+    ctx.fillText('-', cx, cy);
+    ctx.fillStyle = '#ff9d3b';
+    ctx.fillText(String(scoreB), cx + bw * 0.24, cy);
     ctx.restore();
   }
 
@@ -442,31 +399,73 @@ export function startGame() {
   }
 
   function drawGlob(g, color, colorDark, pattern, faded) {
+    const fs = (g.fallScale !== undefined) ? g.fallScale : 1;
+    if (fs <= 0) return; // fully fallen: nothing left to draw
+    ctx.save();
+    if (fs < 1) {
+      // shrinks and fades as it falls into the goal, like it's dropping into the void
+      ctx.globalAlpha = fs;
+      ctx.translate(g.x, g.y);
+      ctx.scale(fs, fs);
+      ctx.translate(-g.x, -g.y);
+    }
     drawShadow(g);
     withSquish(g, () => {
       ctx.save();
       if (faded) ctx.globalAlpha = 0.55;
-      const grad = ctx.createRadialGradient(g.x - g.r * 0.35, g.y - g.r * 0.4, g.r * 0.2, g.x, g.y, g.r);
-      grad.addColorStop(0, lighten(color, 35));
-      grad.addColorStop(1, colorDark);
+
+      // translucent team-tinted bubble (less opaque per feedback)
+      const grad = ctx.createRadialGradient(g.x - g.r * 0.34, g.y - g.r * 0.36, g.r * 0.05, g.x, g.y, g.r);
+      grad.addColorStop(0, 'rgba(255,255,255,0.45)');
+      grad.addColorStop(0.3, 'rgba(255,255,255,0.12)');
+      grad.addColorStop(0.6, hexToRgba(color, 0.20));
+      grad.addColorStop(1, hexToRgba(colorDark, 0.32));
       ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
 
+      // identicon, clipped smaller than the bubble itself (no extra tint on it, as requested)
       const img = identiconImages[g.team];
+      const imgR = g.r * 0.82;
       if (img) {
-        const s = g.r * 1.5;
+        const s = imgR * 1.9;
         ctx.save();
-        ctx.beginPath(); ctx.arc(g.x, g.y, g.r * 0.92, 0, Math.PI * 2); ctx.clip();
+        ctx.beginPath(); ctx.arc(g.x, g.y, imgR, 0, Math.PI * 2); ctx.clip();
         ctx.drawImage(img, g.x - s / 2, g.y - s / 2, s, s);
         ctx.restore();
       } else {
-        drawFallbackIdenticon(g.x, g.y, g.r * 0.62, pattern, lighten(color, 15), colorDark);
+        drawFallbackIdenticon(g.x, g.y, g.r * 0.55, pattern, lighten(color, 15), colorDark);
       }
 
-      ctx.lineWidth = g.r * 0.14;
-      ctx.strokeStyle = '#12181a';
+      // inner top glow / bottom shadow for the glassy bubble feel
+      ctx.save();
+      ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.clip();
+      const glowTop = ctx.createRadialGradient(g.x, g.y - g.r * 0.6, 1, g.x, g.y - g.r * 0.6, g.r * 1.1);
+      glowTop.addColorStop(0, 'rgba(255,255,255,0.5)'); glowTop.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = glowTop; ctx.fillRect(g.x - g.r, g.y - g.r, g.r * 2, g.r * 2);
+      const shadowBot = ctx.createRadialGradient(g.x, g.y + g.r * 0.75, 1, g.x, g.y + g.r * 0.75, g.r);
+      shadowBot.addColorStop(0, 'rgba(0,0,0,0.22)'); shadowBot.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = shadowBot; ctx.fillRect(g.x - g.r, g.y - g.r, g.r * 2, g.r * 2);
+      ctx.restore();
+
+      // translucent team-colored rim
+      ctx.lineWidth = g.r * 0.1;
+      ctx.strokeStyle = hexToRgba(color, 0.45);
       ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.stroke();
+
+      // two glassy shine highlights
+      ctx.beginPath(); ctx.ellipse(g.x - g.r * 0.32, g.y - g.r * 0.42, g.r * 0.28, g.r * 0.16, -0.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fill();
+      ctx.beginPath(); ctx.ellipse(g.x + g.r * 0.28, g.y - g.r * 0.1, g.r * 0.14, g.r * 0.09, -0.3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fill();
+
       ctx.restore();
     });
+    ctx.restore();
+  }
+  function hexToRgba(hex, alpha) {
+    const c = hex.replace('#', '');
+    const num = parseInt(c, 16);
+    const r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
+    return `rgba(${r},${g},${b},${alpha})`;
   }
   function lighten(hex, amt) {
     const c = hex.replace('#', '');
@@ -524,29 +523,30 @@ export function startGame() {
     const angle = Math.atan2(toY - fromY, toX - fromX);
     const headLen = width * 3.2, headWide = width * 2.4;
     const nx = -Math.sin(angle), ny = Math.cos(angle);
+    const bx = toX - Math.cos(angle) * headLen, by = toY - Math.sin(angle) * headLen;
+    const halfW = width / 2, halfHeadW = headWide / 2;
 
-    function pass(shaftW, hLen, hWide) {
-      const bx = toX - Math.cos(angle) * hLen, by = toY - Math.sin(angle) * hLen;
-      ctx.beginPath();
-      ctx.moveTo(fromX, fromY);
-      ctx.lineTo(bx, by);
-      ctx.lineWidth = shaftW;
-      ctx.lineCap = 'round';
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(toX, toY);
-      ctx.lineTo(bx + nx * hWide / 2, by + ny * hWide / 2);
-      ctx.lineTo(bx - nx * hWide / 2, by - ny * hWide / 2);
-      ctx.closePath();
-      ctx.fill();
-    }
-
+    // Single silhouette path (shaft rectangle + head triangle), stroked once and
+    // filled on top — this is the only way to get a uniform-width outline on
+    // every edge (including the tip), instead of layering independently sized
+    // shapes and hoping their margins line up.
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.strokeStyle = '#12181a'; ctx.fillStyle = '#12181a';
-    pass(width + 4, headLen + 2, headWide + 4);
-    ctx.strokeStyle = '#ffffff'; ctx.fillStyle = '#ffffff';
-    pass(width, headLen, headWide);
+    ctx.beginPath();
+    ctx.moveTo(fromX + nx * halfW, fromY + ny * halfW);
+    ctx.lineTo(bx + nx * halfW, by + ny * halfW);
+    ctx.lineTo(bx + nx * halfHeadW, by + ny * halfHeadW);
+    ctx.lineTo(toX, toY);
+    ctx.lineTo(bx - nx * halfHeadW, by - ny * halfHeadW);
+    ctx.lineTo(bx - nx * halfW, by - ny * halfW);
+    ctx.lineTo(fromX - nx * halfW, fromY - ny * halfW);
+    ctx.closePath();
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#12181a';
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
     ctx.restore();
   }
 
@@ -571,12 +571,12 @@ export function startGame() {
   }
 
   function render() {
-    drawField();
-    entities.A.forEach(g => drawGlob(g, '#3fa9f5', '#1f6fa8', PATTERN_A, phase === 'aimB'));
-    entities.B.forEach(g => drawGlob(g, '#f5566b', '#a83247', PATTERN_B, phase === 'aimA'));
+    drawBackground();
+    entities.A.forEach(g => { if (!g.out) drawGlob(g, '#3fa9f5', '#1f6fa8', PATTERN_A, phase === 'aimB'); });
+    entities.B.forEach(g => { if (!g.out) drawGlob(g, '#ff4d5e', '#c81e3a', PATTERN_B, phase === 'aimA'); });
     drawBall(entities.ball);
-    if (phase === 'aimA') entities.A.forEach(drawAimArrow);
-    if (phase === 'aimB') entities.B.forEach(drawAimArrow);
+    if (phase === 'aimA') entities.A.forEach(g => { if (!g.out) drawAimArrow(g); });
+    if (phase === 'aimB') entities.B.forEach(g => { if (!g.out) drawAimArrow(g); });
     drawDragPreview();
   }
 
@@ -585,8 +585,10 @@ export function startGame() {
   function loop() {
     if (phase === 'sim') {
       const result = physicsStep();
-      if (result === 'goalA' || result === 'goalB') { phase = 'goal'; onGoal(result === 'goalA' ? 'A' : 'B'); }
-      else if (allSettled()) {
+      if (result === 'goalA' || result === 'goalB' || result === 'wipeoutA' || result === 'wipeoutB') {
+        phase = 'goal';
+        onGoal(result.endsWith('A') ? 'A' : 'B');
+      } else if (allSettled()) {
         settleFrames++;
         if (settleFrames > 6) {
           settleFrames = 0; phase = 'aimA';

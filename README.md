@@ -13,6 +13,7 @@ src/
   style.css       game styles
 public/
   identicons/     team avatar images, rendered on each glob
+  arena/          illustrated arena background, drawn behind the pitch
 prototypes/       earlier single-file HTML explorations, kept for reference
 ```
 
