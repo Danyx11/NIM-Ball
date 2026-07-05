@@ -4,6 +4,7 @@
 
 const IDENTICON_SRC = { A: '/identicons/team-a.png', B: '/identicons/team-b.png' };
 const ARENA_FRAME_SRC = '/arena/frame.webp';
+const PLAY_CAP_SRC = '/arena/play-cap.png';
 
 export function startGame() {
   const canvas = document.getElementById('stage');
@@ -93,14 +94,21 @@ export function startGame() {
   const arenaFrameImage = new Image();
   arenaFrameImage.src = ARENA_FRAME_SRC;
 
+  // PLAY cap: cut out of the arena artwork itself (same pixels, same look) so it can be
+  // pressed/animated independently of the static background it was extracted from.
+  const PLAY_CAP_X0 = 738, PLAY_CAP_Y0 = 120, PLAY_CAP_X1 = 888, PLAY_CAP_Y1 = 192;
+  const playCapImage = new Image();
+  playCapImage.src = PLAY_CAP_SRC;
+
   // ---------- Config ----------
   // Field bounds match the illustrated arena (light-blue Nimiq accents),
   // scaled from the reference art — the pitch bounds match where the grass
   // actually sits in that artwork; the artwork itself (grass, lines, hex
   // marking, goals) is used as-is.
-  const FX0 = 140, FY0 = 238, FX1 = 1051, FY1 = 773;
-  const GY0 = 431, GY1 = 595;                 // goal mouth y-range
+  const FX0 = 169, FY0 = 234, FX1 = 1032, FY1 = 714;
+  const GY0 = 380, GY1 = 548;                 // goal mouth y-range
   const CY = (FY0 + FY1) / 2;
+  const CENTER_X = (FX0 + FX1) / 2;           // pitch's true horizontal center — ball spawn and score readout share this axis
   const GOAL_HALF_HEIGHT = (GY1 - GY0) / 2;
   const GOAL_NET_DEPTH = 38;                  // how deep the goal box is (glob falls in past this)
 
@@ -145,7 +153,7 @@ export function startGame() {
     entities.A = startPositions.A.map((p, i) => makeGlob('A', i, p));
     entities.B = startPositions.B.map((p, i) => makeGlob('B', i, p));
     entities.ball = {
-      x: (FX0 + FX1) / 2, y: CY, vx: 0, vy: 0, r: BALL_R, mass: BALL_MASS,
+      x: CENTER_X, y: CY, vx: 0, vy: 0, r: BALL_R, mass: BALL_MASS,
       squish: 0, squishNX: 1, squishNY: 0, rot: 0, squishGain: 1.1,
     };
   }
@@ -184,9 +192,14 @@ export function startGame() {
     return null;
   }
   function onPointerDown(evt) {
+    const pos = getPointerPos(evt);
+    if (isPlayButtonActive() && pointInPlayButton(pos)) {
+      evt.preventDefault();
+      pressPlayButton();
+      return;
+    }
     if (phase !== 'aimA' && phase !== 'aimB') return;
     evt.preventDefault();
-    const pos = getPointerPos(evt);
     const g = findGlobAt(pos);
     if (!g) return;
     g.pendingVx = 0; g.pendingVy = 0;
@@ -263,10 +276,11 @@ export function startGame() {
     `);
     document.getElementById('passContinueBtn').onclick = () => { hideOverlay(); phase = nextPhase; refreshTurnLabel(); };
   }
-  validateBtn.addEventListener('click', () => {
+  function onValidate() {
     if (phase === 'aimA') startPassScreen('aimB', 'ÉQUIPE ROUGE', 'b');
     else if (phase === 'aimB') { hideOverlay(); launchSimulation(); }
-  });
+  }
+  validateBtn.addEventListener('click', onValidate);
   resetShotsBtn.addEventListener('click', () => {
     currentTeamGlobs().forEach(g => { g.pendingVx = 0; g.pendingVy = 0; g.used = false; });
   });
@@ -394,35 +408,71 @@ export function startGame() {
       ctx.fillStyle = '#142451'; ctx.fillRect(0, 0, W, H);
     }
 
-    drawLiveScore();
+    drawScorePanel();
+    drawPlayButton();
   }
 
-  function drawLiveScore() {
-    // box scaled from the reference art's readout panel (~x:660-840, y:115-180 at 1536x1024)
-    const bx0 = 495, bx1 = 667, by0 = 110, by1 = 171;
-    const bw = bx1 - bx0, bh = by1 - by0;
+  // Score lives inside the "NIM-BALL" panel — this version of the artwork ships with the
+  // "-" already baked in and no digits at all, so there's nothing to patch/inpaint; we just
+  // draw the two digits directly into the empty slot flanking the original dash.
+  // Screen interior (measured from the art): x:[323,437], y:[157,188]; dash center: (380,173.5).
+  const SCORE_SLOT_CX_A = 349, SCORE_SLOT_CX_B = 411, SCORE_SLOT_CY = 177;
+  function drawScorePanel() {
     ctx.save();
-    ctx.beginPath();
-    const r = 10;
-    ctx.moveTo(bx0 + r, by0);
-    ctx.lineTo(bx1 - r, by0); ctx.arcTo(bx1, by0, bx1, by0 + r, r);
-    ctx.lineTo(bx1, by1 - r); ctx.arcTo(bx1, by1, bx1 - r, by1, r);
-    ctx.lineTo(bx0 + r, by1); ctx.arcTo(bx0, by1, bx0, by1 - r, r);
-    ctx.lineTo(bx0, by0 + r); ctx.arcTo(bx0, by0, bx0 + r, by0, r);
-    ctx.closePath();
-    ctx.fillStyle = '#0a2b46';
-    ctx.fill();
-
-    ctx.font = `800 ${Math.round(bh * 0.62)}px 'Baloo 2', Arial, sans-serif`;
+    ctx.font = `800 38px 'Baloo 2', Arial, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const cy = by0 + bh / 2 + 2;
-    const cx = bx0 + bw / 2;
-    ctx.fillStyle = '#3fa9f5';
-    ctx.fillText(String(scoreA), cx - bw * 0.24, cy);
-    ctx.fillStyle = '#faf6ee';
-    ctx.fillText('-', cx, cy);
-    ctx.fillStyle = '#ff9d3b';
-    ctx.fillText(String(scoreB), cx + bw * 0.24, cy);
+    ctx.fillStyle = '#5ecbf5';
+    ctx.fillText(String(scoreA), SCORE_SLOT_CX_A, SCORE_SLOT_CY);
+    ctx.fillStyle = '#ffc94d';
+    ctx.fillText(String(scoreB), SCORE_SLOT_CX_B, SCORE_SLOT_CY);
+    ctx.restore();
+  }
+
+  // PLAY cap: extracted from the artwork, drawn back on top of the socket that was
+  // patched into the background where it used to sit — see PLAY_CAP_X0..Y1 above.
+  // Pressing it squashes/dips it toward the socket and springs it back, like a real button.
+  const PLAY_PRESS_DURATION = 220;
+  let playPressAt = 0;
+  function playButtonBounds() {
+    return { x0: PLAY_CAP_X0, y0: PLAY_CAP_Y0, x1: PLAY_CAP_X1, y1: PLAY_CAP_Y1 };
+  }
+  function isPlayButtonActive() {
+    return !validateBtn.disabled && (phase === 'aimA' || phase === 'aimB');
+  }
+  function pointInPlayButton(pos) {
+    const b = playButtonBounds();
+    return pos.x >= b.x0 && pos.x <= b.x1 && pos.y >= b.y0 && pos.y <= b.y1;
+  }
+  function pressPlayButton() {
+    playPressAt = performance.now();
+    onValidate();
+  }
+  function drawPlayButton() {
+    if (!playCapImage.complete || !playCapImage.naturalWidth) return;
+    const b = playButtonBounds();
+    const cw = b.x1 - b.x0, ch = b.y1 - b.y0;
+    const cx = b.x0 + cw / 2, cy = b.y0 + ch / 2;
+    let p = 0;
+    if (playPressAt) {
+      const t = performance.now() - playPressAt;
+      if (t >= PLAY_PRESS_DURATION) playPressAt = 0;
+      else p = t / PLAY_PRESS_DURATION;
+    }
+    const squash = Math.sin(p * Math.PI); // 0 -> 1 -> 0 over the press/return cycle
+    const scale = 1 - 0.09 * squash;
+    const dy = 3 * squash;
+    const dim = isPlayButtonActive() ? 1 : 0.55; // read as disabled once the round is resolving
+
+    ctx.save();
+    ctx.globalAlpha = dim;
+    ctx.translate(cx, cy + dy);
+    ctx.scale(scale, scale);
+    ctx.drawImage(playCapImage, -cw / 2, -ch / 2, cw, ch);
+    if (squash > 0) {
+      ctx.globalAlpha = dim * squash * 0.25;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(-cw / 2, -ch / 2, cw, ch);
+    }
     ctx.restore();
   }
 
