@@ -3,6 +3,7 @@
 // capture mechanics explored across the earlier prototypes.
 
 const IDENTICON_SRC = { A: '/identicons/team-a.png', B: '/identicons/team-b.png' };
+const MODULE_SRC = { A: '/identicons/module-cyan-v3.png', B: '/identicons/module-orange-v3.png' };
 const ARENA_FRAME_SRC = '/arena/frame.webp';
 const PLAY_CAP_SRC = '/arena/play-cap.png';
 const BALL_SRC = '/ball/ball.png';
@@ -65,31 +66,83 @@ export function startGame() {
     octx.drawImage(cur, 0, 0, targetW, targetH);
     return out;
   }
-  const identiconImages = {};
+  // hex slot on the module art (module-cyan-v3.png / module-orange-v3.png, 716x716,
+  // real alpha), measured as a fraction of the module's own square canvas
+  const HEX = { cxFrac: 0.503, cyFrac: 0.516, halfWFrac: 0.261, halfHFrac: 0.241 };
+  function hexPath(hctx, cx, cy, halfW, halfH) {
+    hctx.beginPath();
+    hctx.moveTo(cx + halfW, cy);
+    hctx.lineTo(cx + halfW * 0.5, cy - halfH);
+    hctx.lineTo(cx - halfW * 0.5, cy - halfH);
+    hctx.lineTo(cx - halfW, cy);
+    hctx.lineTo(cx - halfW * 0.5, cy + halfH);
+    hctx.lineTo(cx + halfW * 0.5, cy + halfH);
+    hctx.closePath();
+  }
+
+  const identiconStripped = {};
+  const moduleImages = {};
+  const bubbleSprites = {};
+  // bakes the module ring (hex hole punched through it) + identicon into one
+  // sprite per team, once both images are in — avoids doing this per-glob per-frame
+  function tryBakeBubble(team) {
+    const mod = moduleImages[team], id = identiconStripped[team];
+    if (!mod || !id) return;
+    // baked at 2x the on-screen diameter, same oversample convention as ballSprite
+    const S = Math.round(GLOB_R * 2 * 2);
+    const cx = S * HEX.cxFrac, cy = S * HEX.cyFrac;
+    const halfW = S * HEX.halfWFrac, halfH = S * HEX.halfHFrac;
+
+    const sizedModule = downscaleToFit(mod, S, S);
+    const punched = document.createElement('canvas');
+    punched.width = S; punched.height = S;
+    const pctx = punched.getContext('2d');
+    pctx.drawImage(sizedModule, 0, 0);
+    pctx.globalCompositeOperation = 'destination-out';
+    hexPath(pctx, cx, cy, halfW, halfH);
+    pctx.fill();
+
+    const fit = Math.max(halfW * 2, halfH * 2) * 1.05;
+    const scale = fit / Math.max(id.width, id.height);
+    const dw = Math.round(id.width * scale), dh = Math.round(id.height * scale);
+    const sizedIdenticon = downscaleToFit(id, dw, dh);
+
+    const bubble = document.createElement('canvas');
+    bubble.width = S; bubble.height = S;
+    const bctx = bubble.getContext('2d');
+    bctx.imageSmoothingEnabled = true; bctx.imageSmoothingQuality = 'high';
+    bctx.save();
+    hexPath(bctx, cx, cy, halfW, halfH);
+    bctx.clip();
+    bctx.drawImage(sizedIdenticon, cx - dw / 2, cy - dh / 2);
+    bctx.restore();
+    bctx.drawImage(punched, 0, 0);
+
+    bubbleSprites[team] = bubble;
+  }
   for (const team of ['A', 'B']) {
     const img = new Image();
     img.onload = () => {
-      const stripped = stripWhiteBackground(img);
-      // matches the fit-by-longer-side sizing drawGlob uses for the identicon clip
-      const imgR = GLOB_R * IDENTICON_FIT;
-      const s = imgR * 1.9;
-      const scale = s / Math.max(stripped.width, stripped.height);
-      const dw = Math.round(stripped.width * scale), dh = Math.round(stripped.height * scale);
-      let sized = downscaleToFit(stripped, dw, dh);
+      let stripped = stripWhiteBackground(img);
       // team B starts on the right side of the pitch, so mirror it to face the
       // ball at kickoff instead of away from it
       if (team === 'B') {
         const flipped = document.createElement('canvas');
-        flipped.width = sized.width; flipped.height = sized.height;
+        flipped.width = stripped.width; flipped.height = stripped.height;
         const fctx = flipped.getContext('2d');
         fctx.translate(flipped.width, 0);
         fctx.scale(-1, 1);
-        fctx.drawImage(sized, 0, 0);
-        sized = flipped;
+        fctx.drawImage(stripped, 0, 0);
+        stripped = flipped;
       }
-      identiconImages[team] = sized;
+      identiconStripped[team] = stripped;
+      tryBakeBubble(team);
     };
     img.src = IDENTICON_SRC[team];
+
+    const modImg = new Image();
+    modImg.onload = () => { moduleImages[team] = modImg; tryBakeBubble(team); };
+    modImg.src = MODULE_SRC[team];
   }
 
   const arenaFrameImage = new Image();
@@ -128,8 +181,6 @@ export function startGame() {
 
   const SCALE = 1200 / 900;                   // physics scaled up vs the original 900-wide prototype
   const GLOB_R = 38;                          // between the old size (33 * SCALE ≈ 44) and the Globulos-proportioned size (26)
-  const IDENTICON_FIT = 0.82 * 0.9;           // identicon radius as a fraction of the bubble radius (shrunk ~10% so the rim reads chunkier)
-  const BUBBLE_VISUAL_SCALE = 0.85;           // draws the bubble halo/rim tighter around the now-smaller identicon (visual only, doesn't touch collision radius)
   const BALL_R = GLOB_R / 2 * 0.9;             // half a glob's diameter, shrunk 10% further (~17), rendered as the soccer-ball sprite
   const GLOB_MASS = 2.4;
   const BALL_MASS = 0.55;
@@ -174,18 +225,11 @@ export function startGame() {
   resetPositions();
   function allEntities() { return [...entities.A, ...entities.B, entities.ball]; }
 
-  // Fallback mosaic patterns (used only if the identicon images haven't loaded yet)
-  const PATTERN_A = [[1, 0, 1, 0, 1], [0, 1, 0, 1, 0], [1, 1, 1, 1, 1], [0, 1, 0, 1, 0], [1, 0, 0, 0, 1]];
-  const PATTERN_B = [[0, 1, 0, 1, 0], [1, 0, 1, 0, 1], [0, 1, 1, 1, 0], [1, 0, 1, 0, 1], [0, 0, 1, 0, 0]];
-  function drawFallbackIdenticon(cx, cy, r, pattern, baseColor, darkColor) {
-    ctx.save();
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
-    ctx.fillStyle = baseColor; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-    const cell = (r * 2) / 5;
-    ctx.fillStyle = darkColor;
-    for (let row = 0; row < 5; row++) for (let col = 0; col < 5; col++)
-      if (pattern[row][col]) ctx.fillRect(cx - r + col * cell, cy - r + row * cell, cell, cell);
-    ctx.restore();
+  // team tint shown for the brief window before the module+identicon sprite has baked
+  const FALLBACK_COLOR = { A: '#0582ca', B: '#e0c3a3' };
+  function drawFallbackBubble(g) {
+    ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2);
+    ctx.fillStyle = FALLBACK_COLOR[g.team]; ctx.fill();
   }
 
   // ---------- Input ----------
@@ -522,7 +566,7 @@ export function startGame() {
     ctx.restore();
   }
 
-  function drawGlob(g, color, colorDark, pattern, rimAlpha = 0.38) {
+  function drawGlob(g) {
     const fs = (g.fallScale !== undefined) ? g.fallScale : 1;
     if (fs <= 0) return; // fully fallen: nothing left to draw
     ctx.save();
@@ -533,74 +577,20 @@ export function startGame() {
       ctx.scale(fs, fs);
       ctx.translate(-g.x, -g.y);
     }
-    drawShadow(g, BUBBLE_VISUAL_SCALE);
+    drawShadow(g, 1);
     withSquish(g, () => {
-      ctx.save();
-
-      // bubble halo/rim is drawn at a tighter visual radius than the physical g.r,
-      // so it hugs the (now smaller) identicon instead of leaving a translucent gap
-      const br = g.r * BUBBLE_VISUAL_SCALE;
-
-      // translucent team-tinted bubble (less opaque per feedback)
-      const grad = ctx.createRadialGradient(g.x - br * 0.34, g.y - br * 0.36, br * 0.05, g.x, g.y, br);
-      grad.addColorStop(0, 'rgba(255,255,255,0.36)');
-      grad.addColorStop(0.3, 'rgba(255,255,255,0.09)');
-      grad.addColorStop(0.6, hexToRgba(color, 0.15));
-      grad.addColorStop(1, hexToRgba(colorDark, 0.25));
-      ctx.beginPath(); ctx.arc(g.x, g.y, br, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
-
-      // identicon, clipped smaller than the bubble itself (no extra tint on it, as requested)
-      const img = identiconImages[g.team];
-      const imgR = g.r * IDENTICON_FIT;
-      if (img) {
-        // pre-sized (and pre-downscaled) at load time to this exact on-screen size,
-        // so this draw is ~1:1 with no further browser resampling of the edges
-        ctx.save();
-        ctx.beginPath(); ctx.arc(g.x, g.y, imgR, 0, Math.PI * 2); ctx.clip();
-        ctx.drawImage(img, g.x - img.width / 2, g.y - img.height / 2);
-        ctx.restore();
+      const sprite = bubbleSprites[g.team];
+      if (sprite) {
+        // pre-baked (module ring + identicon) at load time, so this draw is
+        // ~1:1 (2x oversampled) with no further resampling of fine edges
+        const d = g.r * 2;
+        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(sprite, g.x - g.r, g.y - g.r, d, d);
       } else {
-        drawFallbackIdenticon(g.x, g.y, g.r * 0.55, pattern, lighten(color, 15), colorDark);
+        drawFallbackBubble(g);
       }
-
-      // inner top glow / bottom shadow for the glassy bubble feel
-      ctx.save();
-      ctx.beginPath(); ctx.arc(g.x, g.y, br, 0, Math.PI * 2); ctx.clip();
-      const glowTop = ctx.createRadialGradient(g.x, g.y - br * 0.6, 1, g.x, g.y - br * 0.6, br * 1.1);
-      glowTop.addColorStop(0, 'rgba(255,255,255,0.42)'); glowTop.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = glowTop; ctx.fillRect(g.x - br, g.y - br, br * 2, br * 2);
-      const shadowBot = ctx.createRadialGradient(g.x, g.y + br * 0.75, 1, g.x, g.y + br * 0.75, br);
-      shadowBot.addColorStop(0, 'rgba(0,0,0,0.18)'); shadowBot.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = shadowBot; ctx.fillRect(g.x - br, g.y - br, br * 2, br * 2);
-      ctx.restore();
-
-      // translucent team-colored rim
-      ctx.lineWidth = br * 0.16;
-      ctx.strokeStyle = hexToRgba(color, rimAlpha);
-      ctx.beginPath(); ctx.arc(g.x, g.y, br, 0, Math.PI * 2); ctx.stroke();
-
-      // two glassy shine highlights
-      ctx.beginPath(); ctx.ellipse(g.x - br * 0.32, g.y - br * 0.42, br * 0.28, br * 0.16, -0.5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fill();
-      ctx.beginPath(); ctx.ellipse(g.x + br * 0.28, g.y - br * 0.1, br * 0.14, br * 0.09, -0.3, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.fill();
-
-      ctx.restore();
     });
     ctx.restore();
-  }
-  function hexToRgba(hex, alpha) {
-    const c = hex.replace('#', '');
-    const num = parseInt(c, 16);
-    const r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
-    return `rgba(${r},${g},${b},${alpha})`;
-  }
-  function lighten(hex, amt) {
-    const c = hex.replace('#', '');
-    const num = parseInt(c, 16);
-    let r = (num >> 16) + amt, g = ((num >> 8) & 0xff) + amt, b = (num & 0xff) + amt;
-    r = Math.min(255, r); g = Math.min(255, g); b = Math.min(255, b);
-    return `rgb(${r},${g},${b})`;
   }
   function drawBall(b) {
     drawShadow(b, 1.15);
@@ -714,8 +704,8 @@ export function startGame() {
     if (phase === 'aimA') entities.A.forEach(g => { if (!g.out) drawAimArrow(g); });
     if (phase === 'aimB') entities.B.forEach(g => { if (!g.out) drawAimArrow(g); });
     drawDragPreview();
-    entities.A.forEach(g => { if (!g.out) drawGlob(g, '#0582ca', '#0071c3', PATTERN_A); });
-    entities.B.forEach(g => { if (!g.out) drawGlob(g, '#fae7d9', '#e0c3a3', PATTERN_B); });
+    entities.A.forEach(g => { if (!g.out) drawGlob(g); });
+    entities.B.forEach(g => { if (!g.out) drawGlob(g); });
     drawBall(entities.ball);
   }
 
