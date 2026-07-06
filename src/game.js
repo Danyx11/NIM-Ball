@@ -113,10 +113,10 @@ export function startGame() {
   const GOAL_NET_DEPTH = 38;                  // how deep the goal box is (glob falls in past this)
 
   const SCALE = 1200 / 900;                   // physics scaled up vs the original 900-wide prototype
-  const GLOB_R = 33 * SCALE;                  // ~44
+  const GLOB_R = 38;                          // between the old size (33 * SCALE ≈ 44) and the Globulos-proportioned size (26)
   const IDENTICON_FIT = 0.82 * 0.9;           // identicon radius as a fraction of the bubble radius (shrunk ~10% so the rim reads chunkier)
   const BUBBLE_VISUAL_SCALE = 0.85;           // draws the bubble halo/rim tighter around the now-smaller identicon (visual only, doesn't touch collision radius)
-  const BALL_R = 20 * SCALE;                  // ~27
+  const BALL_R = 20;                          // ~80% of a glob's diameter (was 20 * SCALE ≈ 27)
   const GLOB_MASS = 2.4;
   const BALL_MASS = 0.55;
   const FRICTION = 0.975;
@@ -683,12 +683,14 @@ export function startGame() {
 
   function render() {
     drawBackground();
-    entities.A.forEach(g => { if (!g.out) drawGlob(g, '#0582ca', '#0071c3', PATTERN_A); });
-    entities.B.forEach(g => { if (!g.out) drawGlob(g, '#fae7d9', '#e0c3a3', PATTERN_B); });
-    drawBall(entities.ball);
+    // arrows drawn before the bubbles/identicons so they read as coming from
+    // underneath the glob instead of overlapping its face
     if (phase === 'aimA') entities.A.forEach(g => { if (!g.out) drawAimArrow(g); });
     if (phase === 'aimB') entities.B.forEach(g => { if (!g.out) drawAimArrow(g); });
     drawDragPreview();
+    entities.A.forEach(g => { if (!g.out) drawGlob(g, '#0582ca', '#0071c3', PATTERN_A); });
+    entities.B.forEach(g => { if (!g.out) drawGlob(g, '#fae7d9', '#e0c3a3', PATTERN_B); });
+    drawBall(entities.ball);
   }
 
   // ---------- Main loop ----------
