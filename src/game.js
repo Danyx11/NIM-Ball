@@ -108,7 +108,9 @@ export function startGame() {
 
   // PLAY cap: cut out of the arena artwork itself (same pixels, same look) so it can be
   // pressed/animated independently of the static background it was extracted from.
-  const PLAY_CAP_X0 = 738, PLAY_CAP_Y0 = 120, PLAY_CAP_X1 = 888, PLAY_CAP_Y1 = 192;
+  // Cropped tight to just the orange capsule (alpha-masked) — the panel/frame around it
+  // stays in arena/frame.webp and must never move when the cap is pressed.
+  const PLAY_CAP_X0 = 761, PLAY_CAP_Y0 = 130, PLAY_CAP_X1 = 888, PLAY_CAP_Y1 = 187;
   const playCapImage = new Image();
   playCapImage.src = PLAY_CAP_SRC;
 
