@@ -5,6 +5,7 @@
 const IDENTICON_SRC = { A: '/identicons/team-a.png', B: '/identicons/team-b.png' };
 const ARENA_FRAME_SRC = '/arena/frame.webp';
 const PLAY_CAP_SRC = '/arena/play-cap.png';
+const BALL_SRC = '/ball/ball.png';
 
 export function startGame() {
   const canvas = document.getElementById('stage');
@@ -94,6 +95,17 @@ export function startGame() {
   const arenaFrameImage = new Image();
   arenaFrameImage.src = ARENA_FRAME_SRC;
 
+  // Ball sprite, baked at 2x its on-screen diameter: the ball rotates every
+  // frame so it never sits on a 1:1 pixel grid anyway, and downsampling a 2x
+  // source at draw time keeps the rotated edges crisp.
+  let ballSprite = null;
+  const ballImg = new Image();
+  ballImg.onload = () => {
+    const s = Math.round(BALL_R * 4);
+    ballSprite = downscaleToFit(ballImg, s, s);
+  };
+  ballImg.src = BALL_SRC;
+
   // PLAY cap: cut out of the arena artwork itself (same pixels, same look) so it can be
   // pressed/animated independently of the static background it was extracted from.
   const PLAY_CAP_X0 = 738, PLAY_CAP_Y0 = 120, PLAY_CAP_X1 = 888, PLAY_CAP_Y1 = 192;
@@ -116,7 +128,7 @@ export function startGame() {
   const GLOB_R = 38;                          // between the old size (33 * SCALE ≈ 44) and the Globulos-proportioned size (26)
   const IDENTICON_FIT = 0.82 * 0.9;           // identicon radius as a fraction of the bubble radius (shrunk ~10% so the rim reads chunkier)
   const BUBBLE_VISUAL_SCALE = 0.85;           // draws the bubble halo/rim tighter around the now-smaller identicon (visual only, doesn't touch collision radius)
-  const BALL_R = 20;                          // ~80% of a glob's diameter (was 20 * SCALE ≈ 27)
+  const BALL_R = GLOB_R / 2 * 0.9;             // half a glob's diameter, shrunk 10% further (~17), rendered as the soccer-ball sprite
   const GLOB_MASS = 2.4;
   const BALL_MASS = 0.55;
   const FRICTION = 0.975;
@@ -154,7 +166,7 @@ export function startGame() {
     entities.B = startPositions.B.map((p, i) => makeGlob('B', i, p));
     entities.ball = {
       x: CENTER_X, y: CY, vx: 0, vy: 0, r: BALL_R, mass: BALL_MASS,
-      squish: 0, squishNX: 1, squishNY: 0, rot: 0, squishGain: 1.1,
+      squish: 0, squishNX: 1, squishNY: 0, rot: 0, squishGain: 1.1, stretch: 0,
     };
   }
   resetPositions();
@@ -292,9 +304,18 @@ export function startGame() {
   }
 
   // ---------- Physics ----------
+  const BALL_STRETCH_RATE = 0.05, BALL_STRETCH_MAX = 0.28;
   function triggerSquish(e, nx, ny, strength) {
     const amt = Math.min(0.78, strength * 0.06 * (e.squishGain || 1));
     if (amt > e.squish) { e.squish = amt; e.squishNX = nx; e.squishNY = ny; }
+    // ball only: a one-shot stretch impulse along its direction of travel,
+    // seeded by impact strength and left to decay on its own (see physicsStep)
+    // rather than tracked live off current speed — so it snaps back to round
+    // shortly after a hit instead of staying deformed for the whole roll.
+    if (e.stretch !== undefined) {
+      const sAmt = Math.min(BALL_STRETCH_MAX, strength * BALL_STRETCH_RATE);
+      if (sAmt > e.stretch) e.stretch = sAmt;
+    }
   }
   function physicsStep() {
     const list = allEntities();
@@ -311,6 +332,7 @@ export function startGame() {
       if (spd0 < STOP_THRESHOLD) { e.vx = 0; e.vy = 0; }
       else if (spd0 > MAX_SPEED) { const s = MAX_SPEED / spd0; e.vx *= s; e.vy *= s; }
       e.squish *= 0.8; if (e.squish < 0.01) e.squish = 0;
+      if (e.stretch) { e.stretch *= 0.8; if (e.stretch < 0.01) e.stretch = 0; }
       if (e.rot !== undefined) e.rot += (e.vx * 0.03 + e.vy * 0.01);
     }
     for (const e of list) {
@@ -487,6 +509,20 @@ export function startGame() {
     drawFn();
     ctx.restore();
   }
+  // Ball-only stretch: elongates along its direction of travel, sized off the
+  // decaying e.stretch impulse (seeded once per hit in triggerSquish) rather
+  // than live speed, so it snaps back to round shortly after contact instead
+  // of staying deformed for as long as the ball keeps rolling fast.
+  function withStretch(e, drawFn) {
+    if (!e.stretch || e.stretch <= 0.001) { drawFn(); return; }
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    const ang = Math.atan2(e.vy, e.vx);
+    ctx.rotate(ang); ctx.scale(1 + e.stretch, 1 - e.stretch * 0.7); ctx.rotate(-ang);
+    ctx.translate(-e.x, -e.y);
+    drawFn();
+    ctx.restore();
+  }
   const LIGHT_DX = 0.42, LIGHT_DY = 0.62;
   function drawShadow(e, rMul) {
     const mul = rMul || 1;
@@ -587,10 +623,19 @@ export function startGame() {
   }
   function drawBall(b) {
     drawShadow(b, 1.15);
-    withSquish(b, () => {
+    withStretch(b, () => withSquish(b, () => {
       ctx.save();
       ctx.translate(b.x, b.y); ctx.rotate(b.rot || 0);
 
+      if (ballSprite) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(ballSprite, -b.r, -b.r, b.r * 2, b.r * 2);
+        ctx.restore();
+        return;
+      }
+
+      // vector fallback, only visible for the frames before the sprite loads
       ctx.beginPath(); ctx.arc(0, 0, b.r + 2.5, 0, Math.PI * 2);
       ctx.fillStyle = '#12181a'; ctx.fill();
 
@@ -617,7 +662,7 @@ export function startGame() {
       ctx.fill();
 
       ctx.restore();
-    });
+    }));
   }
   function drawPentagon(cx, cy, r, rot) {
     ctx.beginPath();
