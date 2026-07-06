@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Preview__preview_screenshot",
+      "mcp__Claude_Preview__preview_console_logs",
+      "mcp__Claude_Preview__preview_snapshot",
+      "Bash(sips -g *)",
+      "mcp__Claude_Preview__preview_list",
+      "mcp__Claude_Preview__preview_network",
+      "Bash(command -v *)",
+      "mcp__Claude_Preview__preview_logs",
+      "Bash(node --check *)",
+      "Bash(npm --version)"
+    ]
+  }
+}
