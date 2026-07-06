@@ -248,9 +248,6 @@ export function startGame() {
   window.addEventListener('touchend', onPointerUp, { passive: false });
 
   // ---------- UI ----------
-  const turnLabel = document.getElementById('turnLabel');
-  const validateBtn = document.getElementById('validateBtn');
-  const resetShotsBtn = document.getElementById('resetShotsBtn');
   const overlay = document.getElementById('overlay');
   const ovContent = document.getElementById('ovContent');
   const startOverlay = document.getElementById('startOverlay');
@@ -258,49 +255,32 @@ export function startGame() {
   const halfB = document.getElementById('halfB');
   const checkA = document.getElementById('checkA');
   const checkB = document.getElementById('checkB');
-  const scoreAEl = document.getElementById('scoreA');
-  const scoreBEl = document.getElementById('scoreB');
 
-  function refreshTurnLabel() {
-    if (phase === 'aimA') { turnLabel.textContent = "Au tour de l'équipe bleue — vise tes billes"; turnLabel.className = 'a'; }
-    else if (phase === 'aimB') { turnLabel.textContent = "Au tour de l'équipe rouge — vise tes billes"; turnLabel.className = 'b'; }
-    else { turnLabel.textContent = 'Résolution du tour…'; turnLabel.className = ''; }
-  }
+  let controlsEnabled = false;
+
   halfA.addEventListener('click', () => { readyA = true; halfA.classList.add('ready'); checkA.textContent = '✓'; maybeStart(); });
   halfB.addEventListener('click', () => { readyB = true; halfB.classList.add('ready'); checkB.textContent = '✓'; maybeStart(); });
   function maybeStart() {
     if (readyA && readyB) {
       startOverlay.classList.add('hidden');
-      validateBtn.disabled = false; resetShotsBtn.disabled = false;
-      phase = 'aimA'; refreshTurnLabel();
+      controlsEnabled = true;
+      phase = 'aimA';
     }
   }
 
   function showOverlay(html) { overlay.classList.remove('hidden'); ovContent.innerHTML = html; }
   function hideOverlay() { overlay.classList.add('hidden'); }
-  function startPassScreen(nextPhase, teamLabel, teamClass) {
-    phase = 'pass';
-    showOverlay(`
-      <span class="team-pill ${teamClass}">${teamLabel}</span>
-      <h2>Passe l'appareil</h2>
-      <p>Les tirs de l'autre équipe sont en place mais cachés. Passe l'écran, puis appuie pour viser tes billes.</p>
-      <button class="bigbtn" id="passContinueBtn">C'est mon tour</button>
-    `);
-    document.getElementById('passContinueBtn').onclick = () => { hideOverlay(); phase = nextPhase; refreshTurnLabel(); };
-  }
+  // J1->J2: no "pass the device" screen, straight into the other team's aim phase.
+  // J2->sim: a fixed 2s beat after the PLAY press before the shots actually launch.
+  const PRE_SIM_DELAY = 1000;
   function onValidate() {
-    if (phase === 'aimA') startPassScreen('aimB', 'ÉQUIPE ROUGE', 'b');
-    else if (phase === 'aimB') { hideOverlay(); launchSimulation(); }
+    if (phase === 'aimA') phase = 'aimB';
+    else if (phase === 'aimB') { phase = 'pending'; setTimeout(launchSimulation, PRE_SIM_DELAY); }
   }
-  validateBtn.addEventListener('click', onValidate);
-  resetShotsBtn.addEventListener('click', () => {
-    currentTeamGlobs().forEach(g => { g.pendingVx = 0; g.pendingVy = 0; g.used = false; });
-  });
   function launchSimulation() {
     entities.A.forEach(g => { g.vx = g.pendingVx || 0; g.vy = g.pendingVy || 0; });
     entities.B.forEach(g => { g.vx = g.pendingVx || 0; g.vy = g.pendingVy || 0; });
     phase = 'sim';
-    turnLabel.className = ''; turnLabel.textContent = 'Ça bouge…';
   }
 
   // ---------- Physics ----------
@@ -389,7 +369,6 @@ export function startGame() {
   // ---------- Round / goal flow ----------
   function onGoal(scoringTeam) {
     if (scoringTeam === 'A') scoreA++; else scoreB++;
-    scoreAEl.textContent = scoreA; scoreBEl.textContent = scoreB;
     if (scoreA >= WIN_SCORE || scoreB >= WIN_SCORE) {
       phase = 'gameover';
       const winner = scoreA >= WIN_SCORE ? 'BLEUE' : 'ROUGE';
@@ -401,8 +380,8 @@ export function startGame() {
         <button class="bigbtn" id="playAgainBtn">Rejouer</button>
       `);
       document.getElementById('playAgainBtn').onclick = () => {
-        scoreA = 0; scoreB = 0; scoreAEl.textContent = 0; scoreBEl.textContent = 0; round = 1;
-        resetPositions(); phase = 'aimA'; hideOverlay(); refreshTurnLabel();
+        scoreA = 0; scoreB = 0; round = 1;
+        resetPositions(); phase = 'aimA'; hideOverlay();
       };
       return;
     }
@@ -415,7 +394,7 @@ export function startGame() {
       <p>Score : ${scoreA} – ${scoreB}</p>
       <button class="bigbtn" id="nextRoundBtn">Manche suivante</button>
     `);
-    document.getElementById('nextRoundBtn').onclick = () => { resetPositions(); phase = 'aimA'; hideOverlay(); refreshTurnLabel(); };
+    document.getElementById('nextRoundBtn').onclick = () => { resetPositions(); phase = 'aimA'; hideOverlay(); };
   }
 
   // ---------- Render: arena background is the user's original artwork, used as-is ----------
@@ -459,7 +438,7 @@ export function startGame() {
     return { x0: PLAY_CAP_X0, y0: PLAY_CAP_Y0, x1: PLAY_CAP_X1, y1: PLAY_CAP_Y1 };
   }
   function isPlayButtonActive() {
-    return !validateBtn.disabled && (phase === 'aimA' || phase === 'aimB');
+    return controlsEnabled && (phase === 'aimA' || phase === 'aimB');
   }
   function pointInPlayButton(pos) {
     const b = playButtonBounds();
@@ -483,7 +462,7 @@ export function startGame() {
     const squash = Math.sin(p * Math.PI); // 0 -> 1 -> 0 over the press/return cycle
     const scale = 1 - 0.09 * squash;
     const dy = 3 * squash;
-    const dim = isPlayButtonActive() ? 1 : 0.55; // read as disabled once the round is resolving
+    const dim = 1; // always reads full color once back to size, even while resolving/simulating
 
     ctx.save();
     ctx.globalAlpha = dim;
@@ -752,7 +731,6 @@ export function startGame() {
           settleFrames = 0; phase = 'aimA';
           entities.A.forEach(g => { g.used = false; g.pendingVx = 0; g.pendingVy = 0; });
           entities.B.forEach(g => { g.used = false; g.pendingVx = 0; g.pendingVy = 0; });
-          refreshTurnLabel();
         }
       } else settleFrames = 0;
     }

@@ -7,11 +7,6 @@
 </head>
 <body>
 <div id="app">
-  <header>
-    <div class="title">NIM Ball</div>
-    <div class="score"><span class="a" id="scoreA">0</span><span class="dash">–</span><span class="b" id="scoreB">0</span></div>
-  </header>
-
   <div id="stage-wrap">
     <canvas id="stage" width="1200" height="905"></canvas>
     <div id="overlay" class="hidden"><div id="ovContent"></div></div>
@@ -28,16 +23,6 @@
       </div>
     </div>
   </div>
-
-  <div id="hud">
-    <div id="turnLabel">Écran de démarrage</div>
-    <div style="display:flex; gap:8px;">
-      <button id="resetShotsBtn" disabled>Annuler mes tirs</button>
-      <button id="validateBtn" disabled>Valider mon tour</button>
-    </div>
-  </div>
-
-  <div class="hint">Clique (ou touche) une bille, tire vers l'arrière comme une fronde, relâche pour tirer. Tu peux viser plusieurs de tes billes avant de valider. L'adversaire ne voit pas tes tirs.</div>
 </div>
 
 <script type="module" src="/src/main.js"></script>
