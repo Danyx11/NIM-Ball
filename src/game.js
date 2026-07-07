@@ -359,7 +359,9 @@ export function startGame() {
       else if (spd0 > MAX_SPEED) { const s = MAX_SPEED / spd0; e.vx *= s; e.vy *= s; }
       e.squish *= 0.8; if (e.squish < 0.01) e.squish = 0;
       if (e.stretch) { e.stretch *= 0.8; if (e.stretch < 0.01) e.stretch = 0; }
-      if (e.rot !== undefined) e.rot += (e.vx * 0.03 + e.vy * 0.01);
+      // ball only: a slow roll-spin, well under its real rolling speed so the
+      // (mostly symmetric) disc face doesn't blur/spin distractingly fast
+      if (e.rot !== undefined) e.rot += (e.vx * 0.008 + e.vy * 0.003);
     }
     for (const e of list) {
       if (e.out || e.falling) continue; // fallen (or falling) into the goal: frozen until next round
@@ -505,9 +507,11 @@ export function startGame() {
       if (t >= PLAY_PRESS_DURATION) playPressAt = 0;
       else p = t / PLAY_PRESS_DURATION;
     }
-    const squash = Math.sin(p * Math.PI); // 0 -> 1 -> 0 over the press/return cycle
-    const scale = 1 - 0.09 * squash;
-    const dy = 3 * squash;
+    // Sharp snap down, slower ease back — a linear tent (not a sine bell) reads as a
+    // crisp mechanical press instead of a soft/floaty squish.
+    const squash = p < 0.2 ? p / 0.2 : Math.max(0, 1 - (p - 0.2) / 0.8);
+    const scale = 1 - 0.04 * squash;
+    const dy = 1.5 * squash;
     const dim = 1; // always reads full color once back to size, even while resolving/simulating
 
     ctx.save();
@@ -516,7 +520,7 @@ export function startGame() {
     ctx.scale(scale, scale);
     ctx.drawImage(playCapImage, -cw / 2, -ch / 2, cw, ch);
     if (squash > 0) {
-      ctx.globalAlpha = dim * squash * 0.25;
+      ctx.globalAlpha = dim * squash * 0.15;
       ctx.fillStyle = '#000000';
       ctx.fillRect(-cw / 2, -ch / 2, cw, ch);
     }
@@ -548,22 +552,20 @@ export function startGame() {
     drawFn();
     ctx.restore();
   }
-  const LIGHT_DX = 0.42, LIGHT_DY = 0.62;
-  function drawShadow(e, rMul) {
-    const mul = rMul || 1;
-    const rx = e.r * 0.72 * mul, ry = e.r * 0.34 * mul;
-    const sx = e.x + e.r * 0.55 * LIGHT_DX * mul;
-    const sy = e.y + e.r * 0.55 * LIGHT_DY * mul + e.r * 0.18;
-    ctx.save();
-    const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, rx);
-    grad.addColorStop(0, 'rgba(8,28,14,0.30)');
-    grad.addColorStop(0.55, 'rgba(8,28,14,0.16)');
-    grad.addColorStop(1, 'rgba(8,28,14,0)');
+  // tight contact shadow shared by the bubbles and the ball — matched to the
+  // arena's own light direction but barely spilling past the entity's own
+  // footprint, like it's floating just above the grass rather than resting on it
+  function drawContactShadow(g) {
+    // blur scales with the entity's own radius rather than a fixed pixel amount —
+    // a flat 3px blur reads as a subtle soft edge on a 38px glob, but on the much
+    // smaller 17px ball it was smearing away most of the shadow's density
+    const blur = Math.max(1.2, g.r * 0.08);
     ctx.beginPath();
-    ctx.ellipse(sx, sy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
+    ctx.ellipse(g.x + g.r * 0.1, g.y + g.r * 0.16, g.r, g.r * 0.92, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.filter = `blur(${blur}px)`;
     ctx.fill();
-    ctx.restore();
+    ctx.filter = 'none';
   }
 
   function drawGlob(g) {
@@ -577,7 +579,7 @@ export function startGame() {
       ctx.scale(fs, fs);
       ctx.translate(-g.x, -g.y);
     }
-    drawShadow(g, 1);
+    drawContactShadow(g);
     withSquish(g, () => {
       const sprite = bubbleSprites[g.team];
       if (sprite) {
@@ -592,8 +594,24 @@ export function startGame() {
     });
     ctx.restore();
   }
+  // soft, cool-tinted specular highlight — gives the flat monochrome disc a
+  // bit of metallic shine/depth without recoloring it. Kept subtle: a pale
+  // Nimiq-blue tint rather than a full glow ring.
+  function drawBallHighlight(b) {
+    const hx = b.x - b.r * 0.32, hy = b.y - b.r * 0.38;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.clip();
+    const grad = ctx.createRadialGradient(hx, hy, 0, hx, hy, b.r * 0.6);
+    grad.addColorStop(0, 'rgba(205,228,255,0.5)');
+    grad.addColorStop(1, 'rgba(205,228,255,0)');
+    ctx.beginPath();
+    ctx.ellipse(hx, hy, b.r * 0.55, b.r * 0.32, -0.5, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.restore();
+  }
   function drawBall(b) {
-    drawShadow(b, 1.15);
+    drawContactShadow(b);
     withStretch(b, () => withSquish(b, () => {
       ctx.save();
       ctx.translate(b.x, b.y); ctx.rotate(b.rot || 0);
@@ -603,6 +621,9 @@ export function startGame() {
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(ballSprite, -b.r, -b.r, b.r * 2, b.r * 2);
         ctx.restore();
+        // drawn after restoring the roll rotation, so the highlight stays put
+        // relative to the arena's light instead of spinning with the disc
+        drawBallHighlight(b);
         return;
       }
 
