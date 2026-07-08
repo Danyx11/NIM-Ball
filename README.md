@@ -11,9 +11,13 @@ src/
   game.js         canvas game: physics, rendering, input, turn flow
   nimiq.js        thin wrapper around @nimiq/mini-app-sdk
   style.css       game styles
-public/
+public/           only assets actually loaded by the game (kept lean — this ships)
   identicons/     team avatar images, rendered on each glob
-  arena/          illustrated arena background, drawn behind the pitch
+  arena/          illustrated arena background + PLAY button sprite
+  ball/           ball sprite
+design/           source art not wired into the game (drafts, superseded
+                  versions, raw generations) — kept for reference, never
+                  imported by code, safe to ignore for gameplay work
 prototypes/       earlier single-file HTML explorations, kept for reference
 ```
 

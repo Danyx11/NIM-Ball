@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Bubble module preview</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; }
+  #stage { display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+  <canvas id="stage" width="1200" height="905" style="width:1200px;height:905px"></canvas>
+
+<script>
+function stripWhiteBackground(img) {
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth || img.width; c.height = img.naturalHeight || img.height;
+  const cctx = c.getContext('2d');
+  cctx.drawImage(img, 0, 0, c.width, c.height);
+  const data = cctx.getImageData(0, 0, c.width, c.height);
+  const d = data.data;
+  const bg = [d[0], d[1], d[2]];
+  const lo = 6, hi = 46;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    const dist = Math.max(Math.abs(r - bg[0]), Math.abs(g - bg[1]), Math.abs(b - bg[2]));
+    if (dist <= lo) { d[i + 3] = 0; }
+    else if (dist < hi) { d[i + 3] = Math.round(255 * (dist - lo) / (hi - lo)); }
+  }
+  cctx.putImageData(data, 0, 0);
+  return c;
+}
+
+// measured from module-cyan-v3.png / module-orange-v3.png (716x716, real alpha): hex slot bbox
+const HEX = { cxFrac: 0.503, cyFrac: 0.516, halfWFrac: 0.261, halfHFrac: 0.241 };
+
+function hexPath(ctx, cx, cy, halfW, halfH) {
+  ctx.beginPath();
+  ctx.moveTo(cx + halfW, cy);
+  ctx.lineTo(cx + halfW * 0.5, cy - halfH);
+  ctx.lineTo(cx - halfW * 0.5, cy - halfH);
+  ctx.lineTo(cx - halfW, cy);
+  ctx.lineTo(cx - halfW * 0.5, cy + halfH);
+  ctx.lineTo(cx + halfW * 0.5, cy + halfH);
+  ctx.closePath();
+}
+
+// shrinks in halving steps (properly box-filtered) instead of one big jump,
+// which is what a single drawImage downscale does when shrinking a lot in
+// one go — that undersamples fine edges (the hex outline, LED highlights)
+// and is what made the module look degraded/muddy at bubble size.
+function downscaleToFit(src, targetW, targetH) {
+  let cur = src, cw = src.width, ch = src.height;
+  while (cw > targetW * 2 && ch > targetH * 2) {
+    const nw = Math.round(cw / 2), nh = Math.round(ch / 2);
+    const step = document.createElement('canvas');
+    step.width = nw; step.height = nh;
+    const sctx = step.getContext('2d');
+    sctx.imageSmoothingEnabled = true; sctx.imageSmoothingQuality = 'high';
+    sctx.drawImage(cur, 0, 0, nw, nh);
+    cur = step; cw = nw; ch = nh;
+  }
+  const out = document.createElement('canvas');
+  out.width = targetW; out.height = targetH;
+  const octx = out.getContext('2d');
+  octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
+  octx.drawImage(cur, 0, 0, targetW, targetH);
+  return out;
+}
+
+// bakes module + identicon into one transparent-cornered sprite, once, directly
+// at the final on-screen size (S) so there's a single high-quality downscale
+// from the 1254px source instead of stacking two lossy resizes.
+function bakeBubble(moduleImg, identiconImg, S) {
+  const canvas = document.createElement('canvas');
+  canvas.width = S; canvas.height = S;
+  const ctx = canvas.getContext('2d');
+
+  const cx = S * HEX.cxFrac, cy = S * HEX.cyFrac;
+  const halfW = S * HEX.halfWFrac, halfH = S * HEX.halfHFrac;
+
+  const sizedModule = downscaleToFit(moduleImg, S, S);
+  const punched = document.createElement('canvas');
+  punched.width = S; punched.height = S;
+  const pctx = punched.getContext('2d');
+  pctx.drawImage(sizedModule, 0, 0);
+  pctx.globalCompositeOperation = 'destination-out';
+  hexPath(pctx, cx, cy, halfW, halfH);
+  pctx.fill();
+
+  const stripped = stripWhiteBackground(identiconImg);
+  const fit = Math.max(halfW * 2, halfH * 2) * 1.05;
+  const scale = fit / Math.max(stripped.width, stripped.height);
+  const dw = Math.round(stripped.width * scale), dh = Math.round(stripped.height * scale);
+  const sizedIdenticon = downscaleToFit(stripped, dw, dh);
+
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.save();
+  hexPath(ctx, cx, cy, halfW, halfH);
+  ctx.clip();
+  ctx.drawImage(sizedIdenticon, cx - dw / 2, cy - dh / 2);
+  ctx.restore();
+
+  ctx.drawImage(punched, 0, 0);
+  return canvas;
+}
+
+function loadImg(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.src = src;
+  });
+}
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+
+// the canvas backing store was only 1200x905 device pixels, so on a Retina
+// display (devicePixelRatio 2-3x) the browser had to upscale every frame to
+// fill the physical screen — that's what read as "blurry", independent of
+// how carefully the bubble sprite itself was downscaled.
+const DPR = window.devicePixelRatio || 1;
+const CSS_W = 1200, CSS_H = 905;
+canvas.width = CSS_W * DPR;
+canvas.height = CSS_H * DPR;
+ctx.scale(DPR, DPR);
+
+(async () => {
+  const [arena, modA, modB, idA, idB] = await Promise.all([
+    loadImg('/arena/frame.webp'),
+    loadImg('/identicons/module-cyan-v3.png'),
+    loadImg('/identicons/module-orange-v3.png'),
+    loadImg('/identicons/team-a.png'),
+    loadImg('/identicons/team-b.png'),
+  ]);
+
+  // matches the current game's defined bubble size (GLOB_R * 2 = 76,
+  // src/game.js). Baked at DPR-multiplied resolution so the sprite has as
+  // many source pixels as the display can actually show.
+  const DISPLAY_SIZE = 76;
+  const bubbleA = bakeBubble(modA, idA, DISPLAY_SIZE * DPR);
+  const bubbleB = bakeBubble(modB, idB, DISPLAY_SIZE * DPR);
+
+  // matches the arena's own light direction (the NIM-BALL header panel casts
+  // its shadow down-and-slightly-right) but kept tight and barely peeking past
+  // the module's silhouette, like it's floating just above the grass
+  function drawGroundShadow(x, y, size) {
+    ctx.beginPath();
+    ctx.ellipse(x + size * 0.55, y + size * 0.58, size * 0.5, size * 0.46, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.filter = 'blur(3px)';
+    ctx.fill();
+    ctx.filter = 'none';
+  }
+
+  // same on-screen centers as before (370,490) / (830,490), just re-anchored
+  // to the smaller bubble's top-left corner
+  const posA = [370 - DISPLAY_SIZE / 2, 490 - DISPLAY_SIZE / 2];
+  const posB = [830 - DISPLAY_SIZE / 2, 490 - DISPLAY_SIZE / 2];
+
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(arena, 0, 0, CSS_W, CSS_H);
+  drawGroundShadow(...posA, DISPLAY_SIZE);
+  drawGroundShadow(...posB, DISPLAY_SIZE);
+  ctx.drawImage(bubbleA, ...posA, DISPLAY_SIZE, DISPLAY_SIZE);
+  ctx.drawImage(bubbleB, ...posB, DISPLAY_SIZE, DISPLAY_SIZE);
+})();
+</script>
+</body>
+</html>
