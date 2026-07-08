@@ -2,11 +2,15 @@
 // background, translucent bubble-style avatars, and arcade physics/goal
 // capture mechanics explored across the earlier prototypes.
 
-const IDENTICON_SRC = { A: '/identicons/team-a.png', B: '/identicons/team-b.png' };
-const MODULE_SRC = { A: '/identicons/module-cyan-v3.png', B: '/identicons/module-orange-v3.png' };
-const ARENA_FRAME_SRC = '/arena/frame.webp';
-const PLAY_CAP_SRC = '/arena/play-cap.png';
-const BALL_SRC = '/ball/ball.png';
+// Prefixed with BASE_URL (not a bare leading slash) so these public/ assets
+// still resolve when the app is served from a subpath, e.g. GitHub Pages at
+// https://danyx11.github.io/NIM-Ball/.
+const ASSET_BASE = import.meta.env.BASE_URL;
+const IDENTICON_SRC = { A: `${ASSET_BASE}identicons/team-a.png`, B: `${ASSET_BASE}identicons/team-b.png` };
+const MODULE_SRC = { A: `${ASSET_BASE}identicons/module-cyan-v3.png`, B: `${ASSET_BASE}identicons/module-orange-v3.png` };
+const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
+const PLAY_CAP_SRC = `${ASSET_BASE}arena/play-cap.png`;
+const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
 
 export function startGame() {
   const canvas = document.getElementById('stage');
