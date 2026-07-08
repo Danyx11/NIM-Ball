@@ -169,9 +169,10 @@ export function startGame() {
 
   // ---------- Config ----------
   // Field bounds match the illustrated arena (light-blue Nimiq accents),
-  // scaled from the reference art — the pitch bounds match where the grass
-  // actually sits in that artwork; the artwork itself (grass, lines, hex
-  // marking, goals) is used as-is.
+  // scaled from the reference art — the pitch bounds match where the ice
+  // actually sits in that artwork. The center line/hexagon/goal circles are
+  // baked into frame.webp, re-centered on this same CENTER_X/CY at the image
+  // level so the ball spawn always lands exactly on the hexagon's core.
   const FX0 = 169, FY0 = 234, FX1 = 1032, FY1 = 714;
   const GY0 = 380, GY1 = 548;                 // goal mouth y-range
   const CY = (FY0 + FY1) / 2;
@@ -180,18 +181,22 @@ export function startGame() {
   const GOAL_NET_DEPTH = 38;                  // how deep the goal box is (glob falls in past this)
 
   const SCALE = 1200 / 900;                   // physics scaled up vs the original 900-wide prototype
-  const GLOB_R = 38;                          // between the old size (33 * SCALE ≈ 44) and the Globulos-proportioned size (26)
-  const BALL_R = GLOB_R / 2 * 0.9;             // half a glob's diameter, shrunk 10% further (~17), rendered as the soccer-ball sprite
+  const GLOB_R = 38 * 0.9;                     // shrunk another 10% per feedback (was 38)
+  const BALL_R = GLOB_R / 2 * 0.9 * 0.9;       // half a glob's diameter, shrunk 10% twice more (~15.4), rendered as the puck sprite
   const GLOB_MASS = 2.4;
   const BALL_MASS = 0.55;
-  const FRICTION = 0.975;
-  const WALL_RESTITUTION = 0.92;              // bouncier walls
-  const BODY_RESTITUTION = 1.05;              // bouncier glob/ball impacts (amplified per feedback)
-  const BOUNCE_BOOST = 1.18;                  // extra kick on glob-glob impacts, arcade feel
+  // Pace/bounce constants calibrated against frame-tracked Globulos footage
+  // (foot 2 arena): launches glide about half the field width, impacts are
+  // plain billiard exchanges with no added energy — puck/curling feel.
+  const FRICTION = 0.9852;
+  const BALL_FRICTION = 0.9786;                // the puck bleeds speed a bit faster than the players (also true in Globulos)
+  const WALL_RESTITUTION = 0.85;
+  const BODY_RESTITUTION = 1.0;
+  const BOUNCE_BOOST = 1.0;                   // >1 re-adds the old arcade kick on impacts
   const MAX_DRAG = 130 * SCALE;                // ~173
-  const POWER_SCALE = 0.07;
-  const MAX_SPEED = 10 * SCALE;                // ~13.3
-  const STOP_THRESHOLD = 0.045;
+  const POWER_SCALE = 0.054;
+  const MAX_SPEED = 8;
+  const STOP_THRESHOLD = 0.08;
   const WIN_SCORE = 3;
 
   const PW = FX1 - FX0, PH = FY1 - FY0;
@@ -210,16 +215,16 @@ export function startGame() {
   function makeGlob(team, idx, pos) {
     return {
       id: team + idx, team, x: pos.x, y: pos.y, vx: 0, vy: 0, r: GLOB_R, mass: GLOB_MASS,
-      used: false, squish: 0, squishNX: 1, squishNY: 0, squishGain: 2.9, out: false,
-      falling: false, fallScale: 1,
+      used: false, squish: 0, squishNX: 1, squishNY: 0, squishGain: 1.05, out: false,
+      squishPhase: null, squishT: 0, squishPeak: 0,
+      falling: false, fallScale: 1, rot: 0, rotVel: 0,
     };
   }
   function resetPositions() {
     entities.A = startPositions.A.map((p, i) => makeGlob('A', i, p));
     entities.B = startPositions.B.map((p, i) => makeGlob('B', i, p));
     entities.ball = {
-      x: CENTER_X, y: CY, vx: 0, vy: 0, r: BALL_R, mass: BALL_MASS,
-      squish: 0, squishNX: 1, squishNY: 0, rot: 0, squishGain: 1.1, stretch: 0,
+      x: CENTER_X, y: CY, vx: 0, vy: 0, r: BALL_R, mass: BALL_MASS, rot: 0,
     };
   }
   resetPositions();
@@ -330,17 +335,31 @@ export function startGame() {
   }
 
   // ---------- Physics ----------
-  const BALL_STRETCH_RATE = 0.05, BALL_STRETCH_MAX = 0.28;
+  // Squash-and-stretch timing: think of it as compressing under load, then
+  // springing back — the "in" phase (squashing) takes a moment, like the
+  // material is absorbing the hit, while the "out" phase (return) is a quick
+  // springy release, not a slow float back to shape.
+  const SQUISH_IN_FRAMES = 10, SQUISH_OUT_FRAMES = 9;
+  // after the squash fully releases, a brief elastic overshoot — the shape
+  // puffs slightly past its resting size once, like a spring passing its
+  // rest point, before settling flat. Amplitude is a fraction of the squash
+  // peak so a harder hit overshoots a bit more, same as it squashes more.
+  const SQUISH_OVERSHOOT_FRAMES = 8, SQUISH_OVERSHOOT_FRAC = 0.22;
   function triggerSquish(e, nx, ny, strength) {
-    const amt = Math.min(0.78, strength * 0.06 * (e.squishGain || 1));
-    if (amt > e.squish) { e.squish = amt; e.squishNX = nx; e.squishNY = ny; }
-    // ball only: a one-shot stretch impulse along its direction of travel,
-    // seeded by impact strength and left to decay on its own (see physicsStep)
-    // rather than tracked live off current speed — so it snaps back to round
-    // shortly after a hit instead of staying deformed for the whole roll.
-    if (e.stretch !== undefined) {
-      const sAmt = Math.min(BALL_STRETCH_MAX, strength * BALL_STRETCH_RATE);
-      if (sAmt > e.stretch) e.stretch = sAmt;
+    // globs only: a contact spins them, torque coming from the tangential
+    // slip at the point of impact (a dead-center hit has none) — decays back
+    // out on its own in physicsStep, like real angular friction bleeding it off
+    if (e.rotVel !== undefined) {
+      const tx = -ny, ty = nx;
+      const vt = e.vx * tx + e.vy * ty;
+      e.rotVel += vt * 0.063;
+    }
+    if (e.squish === undefined) return; // ball: no contact deformation
+    // capped well below the old 0.78 — a subtler, softer bump per feedback
+    const amt = Math.min(0.126, strength * 0.06 * (e.squishGain || 1)); // whole effect scaled down 30% per feedback
+    if (amt > e.squish) {
+      e.squish = amt; e.squishNX = nx; e.squishNY = ny;
+      e.squishPeak = amt; e.squishPhase = 'in'; e.squishT = 0;
     }
   }
   function physicsStep() {
@@ -353,23 +372,47 @@ export function startGame() {
         continue;
       }
       e.x += e.vx; e.y += e.vy;
-      e.vx *= FRICTION; e.vy *= FRICTION;
+      const fr = e === entities.ball ? BALL_FRICTION : FRICTION;
+      e.vx *= fr; e.vy *= fr;
       const spd0 = Math.hypot(e.vx, e.vy);
       if (spd0 < STOP_THRESHOLD) { e.vx = 0; e.vy = 0; }
       else if (spd0 > MAX_SPEED) { const s = MAX_SPEED / spd0; e.vx *= s; e.vy *= s; }
-      e.squish *= 0.8; if (e.squish < 0.01) e.squish = 0;
-      if (e.stretch) { e.stretch *= 0.8; if (e.stretch < 0.01) e.stretch = 0; }
-      // ball only: a slow roll-spin, well under its real rolling speed so the
-      // (mostly symmetric) disc face doesn't blur/spin distractingly fast
-      if (e.rot !== undefined) e.rot += (e.vx * 0.008 + e.vy * 0.003);
+      if (e.squishPhase === 'in') {
+        e.squishT += 1 / SQUISH_IN_FRAMES;
+        const t = Math.min(1, e.squishT);
+        e.squish = e.squishPeak * (1 - (1 - t) * (1 - t)); // ease-out: decelerates into the squash
+        if (t >= 1) { e.squishPhase = 'out'; e.squishT = 0; }
+      } else if (e.squishPhase === 'out') {
+        e.squishT += 1 / SQUISH_OUT_FRAMES;
+        const t = Math.min(1, e.squishT);
+        e.squish = e.squishPeak * (1 - t) * (1 - t); // ease-out: snaps back fast, settles gently — no lingering near the peak
+        if (t >= 1) { e.squishPhase = 'settle'; e.squishT = 0; }
+      } else if (e.squishPhase === 'settle') {
+        e.squishT += 1 / SQUISH_OVERSHOOT_FRAMES;
+        const t = Math.min(1, e.squishT);
+        // negative squish reads as a slight puff/stretch past resting size
+        e.squish = -e.squishPeak * SQUISH_OVERSHOOT_FRAC * Math.sin(Math.PI * t);
+        if (t >= 1) { e.squish = 0; e.squishPeak = 0; e.squishPhase = null; }
+      }
+      if (e.rotVel !== undefined) {
+        // globs: rotation is mostly a contact reaction (see triggerSquish), with
+        // only a faint drift from rolling itself — otherwise near-static in flight,
+        // unlike the ball's continuous spin below
+        e.rot += e.rotVel + (e.vx * 0.0018 + e.vy * 0.00072);
+        e.rotVel *= 0.92;
+      } else if (e.rot !== undefined) {
+        // ball: continuous roll-spin, well under its real rolling speed so the
+        // (mostly symmetric) disc face doesn't blur/spin distractingly fast
+        e.rot += (e.vx * 0.008 + e.vy * 0.003);
+      }
     }
     for (const e of list) {
       if (e.out || e.falling) continue; // fallen (or falling) into the goal: frozen until next round
-      if (e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); }
+      if (e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, -1, spd); }
       if (e.y + e.r > FY1) { const spd = Math.abs(e.vy); e.y = FY1 - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); }
       const inGoalMouthY = Math.abs(e.y - CY) < GOAL_HALF_HEIGHT;
       if (!inGoalMouthY) {
-        if (e.x - e.r < FX0) { const spd = Math.abs(e.vx); e.x = FX0 + e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); }
+        if (e.x - e.r < FX0) { const spd = Math.abs(e.vx); e.x = FX0 + e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, -1, 0, spd); }
         if (e.x + e.r > FX1) { const spd = Math.abs(e.vx); e.x = FX1 - e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); }
       } else if (e !== entities.ball) {
         // a glob may now fall fully into the goal, instead of bouncing off the net;
@@ -409,8 +452,10 @@ export function startGame() {
     a.vx -= impX * invMassA; a.vy -= impY * invMassA;
     b2.vx += impX * invMassB; b2.vy += impY * invMassB;
     const impact = Math.abs(velAlongNormal);
-    triggerSquish(a, -nx, -ny, impact);
-    triggerSquish(b2, nx, ny, impact);
+    // squish normal points from each entity's own center toward the contact
+    // point (toward the other body), so the "far" side can be anchored in place
+    triggerSquish(a, nx, ny, impact);
+    triggerSquish(b2, -nx, -ny, impact);
   }
   function allSettled() { return allEntities().every(e => e.vx === 0 && e.vy === 0 && !e.falling); }
 
@@ -446,8 +491,9 @@ export function startGame() {
   }
 
   // ---------- Render: arena background is the user's original artwork, used as-is ----------
-  // The physics bounds (FX0..FY1, GY0/GY1) are invisible constraints only — no vector
-  // pitch is drawn on top; the grass, lines, hex marking and goals are all part of the art.
+  // The physics bounds (FX0..FY1, GY0/GY1) are invisible constraints only — the center
+  // line/hexagon/goal circles are baked into the art itself, re-centered on CENTER_X/CY
+  // at the image level (see the comment on FX0 above) so no runtime drawing is needed.
   function drawBackground() {
     ctx.clearRect(0, 0, W, H);
 
@@ -527,47 +573,82 @@ export function startGame() {
     ctx.restore();
   }
 
-  function withSquish(e, drawFn) {
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    if (e.squish > 0.001) {
-      const ang = Math.atan2(e.squishNY, e.squishNX);
-      ctx.rotate(ang); ctx.scale(1 - e.squish * 0.8, 1 + e.squish * 0.8); ctx.rotate(-ang);
-    }
-    ctx.translate(-e.x, -e.y);
+  // Splits the entity into two clipped halves along the line through its own
+  // center, perpendicular to the contact direction: the far half is redrawn
+  // completely as-is (zero modification), the near half is compressed toward
+  // that same center line. Because both halves pivot on the exact same line,
+  // they always meet without a seam — and the far half genuinely never moves,
+  // rather than just moving "less" than the near half.
+  function drawSquished(e, drawFn) {
+    if (!(Math.abs(e.squish) > 0.001)) { drawFn(); return; }
+    const ang = Math.atan2(e.squishNY, e.squishNX);
+    const sx = 1 - e.squish * 0.85; // pure compression along the contact axis, no perpendicular bulge
+    const R = e.r * 1.6; // generous half-plane size, comfortably covers the whole sprite/shadow
+
+    ctx.save(); // far half: untouched
+    ctx.translate(e.x, e.y); ctx.rotate(ang);
+    ctx.beginPath(); ctx.rect(-R, -R, R, R * 2); ctx.clip();
+    ctx.rotate(-ang); ctx.translate(-e.x, -e.y);
+    drawFn();
+    ctx.restore();
+
+    ctx.save(); // near half: compressed toward the shared center line
+    ctx.translate(e.x, e.y); ctx.rotate(ang);
+    ctx.beginPath(); ctx.rect(0, -R, R, R * 2); ctx.clip();
+    ctx.scale(sx, 1);
+    ctx.rotate(-ang); ctx.translate(-e.x, -e.y);
     drawFn();
     ctx.restore();
   }
-  // Ball-only stretch: elongates along its direction of travel, sized off the
-  // decaying e.stretch impulse (seeded once per hit in triggerSquish) rather
-  // than live speed, so it snaps back to round shortly after contact instead
-  // of staying deformed for as long as the ball keeps rolling fast.
-  function withStretch(e, drawFn) {
-    if (!e.stretch || e.stretch <= 0.001) { drawFn(); return; }
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    const ang = Math.atan2(e.vy, e.vx);
-    ctx.rotate(ang); ctx.scale(1 + e.stretch, 1 - e.stretch * 0.7); ctx.rotate(-ang);
-    ctx.translate(-e.x, -e.y);
-    drawFn();
-    ctx.restore();
-  }
+  function withSquish(e, drawFn) { drawSquished(e, drawFn); }
   // tight contact shadow shared by the bubbles and the ball — matched to the
   // arena's own light direction but barely spilling past the entity's own
   // footprint, like it's floating just above the grass rather than resting on it
-  function drawContactShadow(g) {
+  function drawContactShadow(g, boost = 1) {
     // blur scales with the entity's own radius rather than a fixed pixel amount —
     // a flat 3px blur reads as a subtle soft edge on a 38px glob, but on the much
     // smaller 17px ball it was smearing away most of the shadow's density
     const blur = Math.max(1.2, g.r * 0.08);
-    ctx.beginPath();
-    ctx.ellipse(g.x + g.r * 0.1, g.y + g.r * 0.16, g.r, g.r * 0.92, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    const cx = g.x + g.r * 0.1 * boost, cy = g.y + g.r * 0.16 * boost;
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(0.85, 0.6 * boost)})`;
     ctx.filter = `blur(${blur}px)`;
-    ctx.fill();
+    // pivoted on the shadow's OWN (light-offset) center rather than the glob's
+    // physics center, so the retraction is symmetric on the shadow's own shape
+    // instead of lopsided. The sprite is drawn on top and occludes most of the
+    // shadow near the glob's center, so this only becomes visible on whichever
+    // side the shadow actually pokes out past the glob — matching the bubble's
+    // own compression there — and stays invisible on the opposite side.
+    const shadowEntity = { x: cx, y: cy, r: g.r, squish: g.squish || 0, squishNX: g.squishNX, squishNY: g.squishNY };
+    drawSquished(shadowEntity, () => {
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, g.r * boost, g.r * 0.92 * boost, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
     ctx.filter = 'none';
   }
 
+  // soft glow beneath the bubbles of the team that's currently aiming — an
+  // "on deck" cue readable at a glance, pulsing gently so it doesn't read as static
+  // decoration. Tinted with each team's own accent color (matches the score digits).
+  const HALO_RGB = { A: '94,203,245', B: '255,201,77' };
+  function drawAimHalo(g) {
+    const t = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 2.4 + (g.team === 'A' ? 0 : Math.PI));
+    const rgb = HALO_RGB[g.team];
+    const R = g.r * 1.6;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const grad = ctx.createRadialGradient(g.x, g.y, g.r * 0.4, g.x, g.y, R);
+    grad.addColorStop(0, `rgba(${rgb},${(0.38 + 0.17 * pulse).toFixed(3)})`);
+    grad.addColorStop(0.6, `rgba(${rgb},${(0.16 + 0.08 * pulse).toFixed(3)})`);
+    grad.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.beginPath(); ctx.arc(g.x, g.y, R, 0, Math.PI * 2);
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.restore();
+  }
+  function isAimingTeamGlob(g) {
+    return ((phase === 'aimA' && g.team === 'A') || (phase === 'aimB' && g.team === 'B')) && !g.falling;
+  }
   function drawGlob(g) {
     const fs = (g.fallScale !== undefined) ? g.fallScale : 1;
     if (fs <= 0) return; // fully fallen: nothing left to draw
@@ -579,6 +660,7 @@ export function startGame() {
       ctx.scale(fs, fs);
       ctx.translate(-g.x, -g.y);
     }
+    if (isAimingTeamGlob(g)) drawAimHalo(g);
     drawContactShadow(g);
     withSquish(g, () => {
       const sprite = bubbleSprites[g.team];
@@ -587,7 +669,11 @@ export function startGame() {
         // ~1:1 (2x oversampled) with no further resampling of fine edges
         const d = g.r * 2;
         ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(sprite, g.x - g.r, g.y - g.r, d, d);
+        ctx.save();
+        ctx.translate(g.x, g.y);
+        ctx.rotate(g.rot || 0);
+        ctx.drawImage(sprite, -g.r, -g.r, d, d);
+        ctx.restore();
       } else {
         drawFallbackBubble(g);
       }
@@ -611,50 +697,48 @@ export function startGame() {
     ctx.restore();
   }
   function drawBall(b) {
-    drawContactShadow(b);
-    withStretch(b, () => withSquish(b, () => {
-      ctx.save();
-      ctx.translate(b.x, b.y); ctx.rotate(b.rot || 0);
+    drawContactShadow(b, 1.05);
+    ctx.save();
+    ctx.translate(b.x, b.y); ctx.rotate(b.rot || 0);
 
-      if (ballSprite) {
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(ballSprite, -b.r, -b.r, b.r * 2, b.r * 2);
-        ctx.restore();
-        // drawn after restoring the roll rotation, so the highlight stays put
-        // relative to the arena's light instead of spinning with the disc
-        drawBallHighlight(b);
-        return;
-      }
-
-      // vector fallback, only visible for the frames before the sprite loads
-      ctx.beginPath(); ctx.arc(0, 0, b.r + 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#12181a'; ctx.fill();
-
-      const grad = ctx.createRadialGradient(-b.r * 0.32, -b.r * 0.38, 2, 0, 0, b.r);
-      grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#e7ebec');
-      ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
-
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#12181a'; ctx.lineWidth = b.r * 0.09;
-      ctx.fillStyle = '#12181a';
-      const cR = b.r * 0.36;
-      drawPentagon(0, 0, cR, Math.PI / 10);
-      ctx.stroke();
-      for (let i = 0; i < 5; i++) {
-        const ang = -Math.PI / 2 + i * (Math.PI * 2 / 5);
-        const px = Math.cos(ang) * b.r * 0.68, py = Math.sin(ang) * b.r * 0.68;
-        drawPentagon(px, py, cR * 0.58, ang + Math.PI / 10);
-        ctx.stroke();
-      }
-
-      ctx.beginPath();
-      ctx.ellipse(-b.r * 0.38, -b.r * 0.42, b.r * 0.26, b.r * 0.15, -0.6, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.fill();
-
+    if (ballSprite) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(ballSprite, -b.r, -b.r, b.r * 2, b.r * 2);
       ctx.restore();
-    }));
+      // drawn after restoring the roll rotation, so the highlight stays put
+      // relative to the arena's light instead of spinning with the disc
+      drawBallHighlight(b);
+      return;
+    }
+
+    // vector fallback, only visible for the frames before the sprite loads
+    ctx.beginPath(); ctx.arc(0, 0, b.r + 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#12181a'; ctx.fill();
+
+    const grad = ctx.createRadialGradient(-b.r * 0.32, -b.r * 0.38, 2, 0, 0, b.r);
+    grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#e7ebec');
+    ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
+
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#12181a'; ctx.lineWidth = b.r * 0.09;
+    ctx.fillStyle = '#12181a';
+    const cR = b.r * 0.36;
+    drawPentagon(0, 0, cR, Math.PI / 10);
+    ctx.stroke();
+    for (let i = 0; i < 5; i++) {
+      const ang = -Math.PI / 2 + i * (Math.PI * 2 / 5);
+      const px = Math.cos(ang) * b.r * 0.68, py = Math.sin(ang) * b.r * 0.68;
+      drawPentagon(px, py, cR * 0.58, ang + Math.PI / 10);
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.ellipse(-b.r * 0.38, -b.r * 0.42, b.r * 0.26, b.r * 0.15, -0.6, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fill();
+
+    ctx.restore();
   }
   function drawPentagon(cx, cy, r, rot) {
     ctx.beginPath();
@@ -666,43 +750,89 @@ export function startGame() {
     ctx.closePath(); ctx.fill();
   }
 
-  function drawArrowShaft(fromX, fromY, toX, toY, width, alpha) {
-    alpha = alpha === undefined ? 1 : alpha;
-    const angle = Math.atan2(toY - fromY, toX - fromX);
-    const headLen = width * 3.2, headWide = width * 2.4;
-    const nx = -Math.sin(angle), ny = Math.cos(angle);
-    const bx = toX - Math.cos(angle) * headLen, by = toY - Math.sin(angle) * headLen;
-    const halfW = width / 2, halfHeadW = headWide / 2;
+  // how much longer the aim laser reaches than the raw pull distance (the old
+  // arrow's length) — gives the shot a bit more presence without simulating
+  // all the way out to where friction would actually stop the glob
+  const LASER_LENGTH_FACTOR = 1.8;
 
-    // Single silhouette path (shaft rectangle + head triangle), stroked once and
-    // filled on top — this is the only way to get a uniform-width outline on
-    // every edge (including the tip), instead of layering independently sized
-    // shapes and hoping their margins line up.
+  // predicts the shot's path from the glob's own position, bouncing off the arena
+  // walls the same way physicsStep does (the goal mouth stays open on the x-walls,
+  // same GOAL_HALF_HEIGHT test as the real collision code). Starting exactly at the
+  // glob — rather than past some unclipped lead-in segment — keeps every bounce
+  // point honest against FX0..FY1, including for globs sitting close to a wall.
+  // Bounces are computed at the rail itself (r=0 passed in below), not the glob's
+  // own center-of-mass offset, so the visible line meets the rail where the
+  // bubble's edge would actually touch it, not a whole radius short of it.
+  // FY1/FX1 sit ~15px short of the drawn rail in the current arena art (measured
+  // against public/arena/frame.webp — FY0/FX0 already land exactly on it), so this
+  // fudge is laser-only cosmetics; it doesn't touch the real physicsStep bounds.
+  const LASER_FAR_EDGE_FUDGE = 13;
+  const LASER_SIDE_EDGE_FUDGE = 8; // extra reach on both x-walls specifically
+  function computeBounceTrail(x, y, ux, uy, totalLen, r) {
+    const points = [{ x, y }];
+    let remaining = totalLen, cx = x, cy = y, bounces = 0;
+    while (remaining > 0.5 && bounces < 6) {
+      const candidates = [];
+      if (uy < 0) candidates.push({ t: (FY0 + r - cy) / uy, axis: 'y' });
+      if (uy > 0) candidates.push({ t: (FY1 + LASER_FAR_EDGE_FUDGE - r - cy) / uy, axis: 'y' });
+      if (ux < 0) {
+        const t = (FX0 - LASER_SIDE_EDGE_FUDGE + r - cx) / ux;
+        if (t > 0 && Math.abs(cy + uy * t - CY) >= GOAL_HALF_HEIGHT) candidates.push({ t, axis: 'x' });
+      }
+      if (ux > 0) {
+        const t = (FX1 + LASER_FAR_EDGE_FUDGE + LASER_SIDE_EDGE_FUDGE - r - cx) / ux;
+        if (t > 0 && Math.abs(cy + uy * t - CY) >= GOAL_HALF_HEIGHT) candidates.push({ t, axis: 'x' });
+      }
+      const hit = candidates.filter(c => c.t > 1e-6 && isFinite(c.t)).sort((a, b) => a.t - b.t)[0];
+      if (!hit || hit.t > remaining) {
+        cx += ux * remaining; cy += uy * remaining;
+        points.push({ x: cx, y: cy });
+        break;
+      }
+      cx += ux * hit.t; cy += uy * hit.t;
+      points.push({ x: cx, y: cy });
+      remaining -= hit.t;
+      if (hit.axis === 'x') ux = -ux; else uy = -uy;
+      bounces++;
+    }
+    return points;
+  }
+  function drawLaserTrail(points, team, totalLen) {
+    if (points.length < 2 || totalLen < 1) return;
+    const rgb = HALO_RGB[team];
     ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.beginPath();
-    ctx.moveTo(fromX + nx * halfW, fromY + ny * halfW);
-    ctx.lineTo(bx + nx * halfW, by + ny * halfW);
-    ctx.lineTo(bx + nx * halfHeadW, by + ny * halfHeadW);
-    ctx.lineTo(toX, toY);
-    ctx.lineTo(bx - nx * halfHeadW, by - ny * halfHeadW);
-    ctx.lineTo(bx - nx * halfW, by - ny * halfW);
-    ctx.lineTo(fromX - nx * halfW, fromY - ny * halfW);
-    ctx.closePath();
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = '#12181a';
-    ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    let cum = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i], p1 = points[i + 1];
+      const segLen = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+      const a0 = Math.max(0, 1 - cum / totalLen);
+      const a1 = Math.max(0, 1 - (cum + segLen) / totalLen);
+      const grad = ctx.createLinearGradient(p0.x, p0.y, p1.x, p1.y);
+      grad.addColorStop(0, `rgba(255,255,255,${(0.8 * a0).toFixed(3)})`);
+      grad.addColorStop(1, `rgba(${rgb},${(0.65 * a1).toFixed(3)})`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 2.4;
+      ctx.shadowColor = `rgba(${rgb},0.8)`;
+      ctx.shadowBlur = 7;
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+      ctx.stroke();
+      cum += segLen;
+    }
     ctx.restore();
   }
 
-  function drawAimArrow(g) {
+  function drawAimLaser(g) {
     const dx = g.pendingVx, dy = g.pendingVy;
     if (!dx && !dy) return;
     const scale = 1 / POWER_SCALE;
-    drawArrowShaft(g.x, g.y, g.x + dx * scale, g.y + dy * scale, 7, 0.95);
+    const pullLen = Math.hypot(dx * scale, dy * scale);
+    if (pullLen < 1) return;
+    const ux = (dx * scale) / pullLen, uy = (dy * scale) / pullLen;
+    const laserLen = pullLen * LASER_LENGTH_FACTOR;
+    drawLaserTrail(computeBounceTrail(g.x, g.y, ux, uy, laserLen, 0), g.team, laserLen);
   }
   function drawDragPreview() {
     if (!drag) return;
@@ -714,16 +844,18 @@ export function startGame() {
     ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
     ctx.beginPath(); ctx.moveTo(g.x, g.y); ctx.lineTo(drag.curX, drag.curY); ctx.stroke();
     ctx.setLineDash([]); ctx.restore();
-    const intensity = dist / MAX_DRAG;
-    if (dist > 6) drawArrowShaft(g.x, g.y, g.x + dx, g.y + dy, 6 + 3 * intensity, 1);
+    if (dist > 6) {
+      const laserLen = dist * LASER_LENGTH_FACTOR;
+      drawLaserTrail(computeBounceTrail(g.x, g.y, dx / dist, dy / dist, laserLen, 0), g.team, laserLen);
+    }
   }
 
   function render() {
     drawBackground();
-    // arrows drawn before the bubbles/identicons so they read as coming from
+    // laser drawn before the bubbles/identicons so it reads as coming from
     // underneath the glob instead of overlapping its face
-    if (phase === 'aimA') entities.A.forEach(g => { if (!g.out) drawAimArrow(g); });
-    if (phase === 'aimB') entities.B.forEach(g => { if (!g.out) drawAimArrow(g); });
+    if (phase === 'aimA') entities.A.forEach(g => { if (!g.out) drawAimLaser(g); });
+    if (phase === 'aimB') entities.B.forEach(g => { if (!g.out) drawAimLaser(g); });
     drawDragPreview();
     entities.A.forEach(g => { if (!g.out) drawGlob(g); });
     entities.B.forEach(g => { if (!g.out) drawGlob(g); });
@@ -751,4 +883,7 @@ export function startGame() {
     requestAnimationFrame(loop);
   }
   loop();
+
+  // dev-only handle for physics-tuning scripts (position/phase readback)
+  if (import.meta.env.DEV) window.__nb = { entities: () => entities, phase: () => phase, step: () => physicsStep() };
 }
