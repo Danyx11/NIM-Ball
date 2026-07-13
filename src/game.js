@@ -5,6 +5,8 @@
 // Prefixed with BASE_URL (not a bare leading slash) so these public/ assets
 // still resolve when the app is served from a subpath, e.g. GitHub Pages at
 // https://danyx11.github.io/NIM-Ball/.
+import { createAudio } from './audio.js';
+
 const ASSET_BASE = import.meta.env.BASE_URL;
 const IDENTICON_SRC = { A: `${ASSET_BASE}identicons/team-a.png`, B: `${ASSET_BASE}identicons/team-b.png` };
 const MODULE_SRC = { A: `${ASSET_BASE}identicons/module-cyan-v3.png`, B: `${ASSET_BASE}identicons/module-orange-v3.png` };
@@ -16,6 +18,13 @@ export function startGame() {
   const canvas = document.getElementById('stage');
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
+
+  // ---------- Audio ----------
+  // Decoding starts immediately (harmless before a user gesture); actual
+  // playback stays silent until unlock() runs from a real pointer/click, per
+  // browser autoplay rules. See src/audio.js for the clip list + folder.
+  const audio = createAudio();
+  audio.load();
 
   // ---------- Identicons ----------
   // Strips the near-pure-white background behind the identicon's hexagon,
@@ -177,7 +186,17 @@ export function startGame() {
   // actually sits in that artwork. The center line/hexagon/goal circles are
   // baked into frame.webp, re-centered on this same CENTER_X/CY at the image
   // level so the ball spawn always lands exactly on the hexagon's core.
-  const FX0 = 169, FY0 = 234, FX1 = 1032, FY1 = 714;
+  // re-measured directly against frame.webp (1200x905, 1:1 with canvas) — was
+  // FX0=169, FY0=234, FX1=1032, FY1=714; FY0 landed exactly on the ice edge
+  // already, the other three left a visible gap before the true rail
+  // (worst on FY1, ~11px short). CENTER_X/CY below shift by ~5-6px off the
+  // hexagon baked into the art as a result — small enough to be within the
+  // hexagon's own footprint, revisit if it reads as off-center.
+  // FY0/FY1/FX1 absorbed the laser's eye-tuned fudges (+3/+4/+4) and those
+  // fudges were then deleted below — laser and physics now share one source
+  // of truth. Was FX0=159, FY0=234, FX1=1042, FY1=725; revert to those if this
+  // reads worse than the split laser/physics bounds did.
+  const FX0 = 159, FY0 = 237, FX1 = 1046, FY1 = 729;
   const GY0 = 380, GY1 = 548;                 // goal mouth y-range
   const CY = (FY0 + FY1) / 2;
   const CENTER_X = (FX0 + FX1) / 2;           // pitch's true horizontal center — ball spawn and score readout share this axis
@@ -192,9 +211,9 @@ export function startGame() {
   // Pace/bounce constants calibrated against frame-tracked Globulos footage
   // (foot 2 arena): launches glide about half the field width, impacts are
   // plain billiard exchanges with no added energy — puck/curling feel.
-  const FRICTION = 0.9852;
-  const BALL_FRICTION = 0.9786;                // the puck bleeds speed a bit faster than the players (also true in Globulos)
-  const WALL_RESTITUTION = 0.85;
+  const FRICTION = 0.9868;                     // was 0.9852 — +12% glide distance, feel test
+  const BALL_FRICTION = 0.9809;                // was 0.9786 — +12% glide distance, feel test; puck still bleeds speed a bit faster than the players (also true in Globulos)
+  const WALL_RESTITUTION = 0.87;               // was 0.85 — livelier wall bounce, feel test (0.90 tried, too much)
   const BODY_RESTITUTION = 1.0;
   const BOUNCE_BOOST = 1.0;                   // >1 re-adds the old arcade kick on impacts
   const MAX_DRAG = 130 * SCALE;                // ~173
@@ -259,6 +278,7 @@ export function startGame() {
     return null;
   }
   function onPointerDown(evt) {
+    audio.unlock();
     const pos = getPointerPos(evt);
     if (isPlayButtonActive() && pointInPlayButton(pos)) {
       evt.preventDefault();
@@ -290,6 +310,7 @@ export function startGame() {
       g.pendingVx = dx * POWER_SCALE;
       g.pendingVy = dy * POWER_SCALE;
       g.used = true;
+      audio.play('shot', { volume: 0.4 + 0.6 * Math.min(1, dist / MAX_DRAG), rate: 0.95 + Math.random() * 0.1 });
     } else {
       g.used = false;
     }
@@ -313,8 +334,8 @@ export function startGame() {
 
   let controlsEnabled = false;
 
-  halfA.addEventListener('click', () => { readyA = true; halfA.classList.add('ready'); checkA.textContent = '✓'; maybeStart(); });
-  halfB.addEventListener('click', () => { readyB = true; halfB.classList.add('ready'); checkB.textContent = '✓'; maybeStart(); });
+  halfA.addEventListener('click', () => { audio.unlock(); readyA = true; halfA.classList.add('ready'); checkA.textContent = '✓'; maybeStart(); });
+  halfB.addEventListener('click', () => { audio.unlock(); readyB = true; halfB.classList.add('ready'); checkB.textContent = '✓'; maybeStart(); });
   function maybeStart() {
     if (readyA && readyB) {
       startOverlay.classList.add('hidden');
@@ -349,6 +370,7 @@ export function startGame() {
   // rest point, before settling flat. Amplitude is a fraction of the squash
   // peak so a harder hit overshoots a bit more, same as it squashes more.
   const SQUISH_OVERSHOOT_FRAMES = 8, SQUISH_OVERSHOOT_FRAC = 0.22;
+  const SQUISH_AMPLITUDE = 0.2;  // was 0 (0.7, 0.5, 1 before that) — near-imperceptible, testing a hint vs fully off
   function triggerSquish(e, nx, ny, strength) {
     // globs only: a contact spins them, torque coming from the tangential
     // slip at the point of impact (a dead-center hit has none) — decays back
@@ -356,15 +378,29 @@ export function startGame() {
     if (e.rotVel !== undefined) {
       const tx = -ny, ty = nx;
       const vt = e.vx * tx + e.vy * ty;
-      e.rotVel += vt * 0.063;
+      e.rotVel -= vt * 0.05; // was 0.04 (0.063 before the sign fix) — spin-up on contact felt too strong
     }
     if (e.squish === undefined) return; // ball: no contact deformation
     // capped well below the old 0.78 — a subtler, softer bump per feedback
-    const amt = Math.min(0.126, strength * 0.06 * (e.squishGain || 1)); // whole effect scaled down 30% per feedback
+    // SQUISH_AMPLITUDE applied after the cap, so it scales the effect even on
+    // hits strong enough to saturate it (squishGain alone can't, most real
+    // impacts already hit the cap before it gets a chance to act)
+    const amt = Math.min(0.126, strength * 0.06 * (e.squishGain || 1)) * SQUISH_AMPLITUDE;
     if (amt > e.squish) {
       e.squish = amt; e.squishNX = nx; e.squishNY = ny;
       e.squishPeak = amt; e.squishPhase = 'in'; e.squishT = 0;
     }
+  }
+  // volume/pitch scale with impact speed so a graze and a full-power slam
+  // don't sound the same; MAX_SPEED is the natural upper bound for spd/impact
+  const MIN_AUDIBLE_IMPACT = 0.06; // below this, jitter during settling would spam near-silent plays
+  function playWallHit(spd) {
+    if (spd < MIN_AUDIBLE_IMPACT) return;
+    audio.play('hitWall', { volume: Math.min(1, spd / MAX_SPEED) * 0.8, rate: 0.95 + Math.random() * 0.1 });
+  }
+  function playBodyHit(impact) {
+    if (impact < MIN_AUDIBLE_IMPACT) return;
+    audio.play('hitGlob', { volume: Math.min(1, impact / MAX_SPEED), rate: 0.95 + Math.random() * 0.1 });
   }
   function physicsStep() {
     const list = allEntities();
@@ -403,7 +439,7 @@ export function startGame() {
         // only a faint drift from rolling itself — otherwise near-static in flight,
         // unlike the ball's continuous spin below
         e.rot += e.rotVel + (e.vx * 0.0018 + e.vy * 0.00072);
-        e.rotVel *= 0.92;
+        e.rotVel *= 0.975; // was 0.96 (0.92 originally) — spin still dying a bit before the glob itself stops
       } else if (e.rot !== undefined) {
         // ball: continuous roll-spin, well under its real rolling speed so the
         // (mostly symmetric) disc face doesn't blur/spin distractingly fast
@@ -412,12 +448,12 @@ export function startGame() {
     }
     for (const e of list) {
       if (e.out || e.falling) continue; // fallen (or falling) into the goal: frozen until next round
-      if (e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, -1, spd); }
-      if (e.y + e.r > FY1) { const spd = Math.abs(e.vy); e.y = FY1 - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); }
+      if (e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, -1, spd); playWallHit(spd); }
+      if (e.y + e.r > FY1) { const spd = Math.abs(e.vy); e.y = FY1 - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); playWallHit(spd); }
       const inGoalMouthY = Math.abs(e.y - CY) < GOAL_HALF_HEIGHT;
       if (!inGoalMouthY) {
-        if (e.x - e.r < FX0) { const spd = Math.abs(e.vx); e.x = FX0 + e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, -1, 0, spd); }
-        if (e.x + e.r > FX1) { const spd = Math.abs(e.vx); e.x = FX1 - e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); }
+        if (e.x - e.r < FX0) { const spd = Math.abs(e.vx); e.x = FX0 + e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, -1, 0, spd); playWallHit(spd); }
+        if (e.x + e.r > FX1) { const spd = Math.abs(e.vx); e.x = FX1 - e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); playWallHit(spd); }
       } else if (e !== entities.ball) {
         // a glob may now fall fully into the goal, instead of bouncing off the net;
         // once it's gone deep enough, it starts shrinking away until the next round
@@ -441,11 +477,34 @@ export function startGame() {
     const dist = Math.hypot(dx, dy);
     const minDist = a.r + b2.r;
     if (dist === 0 || dist >= minDist) return;
-    const nx = dx / dist, ny = dy / dist;
+    const rvx = b2.vx - a.vx, rvy = b2.vy - a.vy;
+    // Position is only checked after this frame's move, so by the time this
+    // runs the pair can already overlap by a few px — dx,dy then points toward
+    // where the centers are NOW, not toward the true point of first contact.
+    // On a near head-on hit that barely matters, but on a grazing hit it can
+    // rotate the normal by several degrees. Fix: back-solve for the exact
+    // moment this frame the circles were first exactly minDist apart (treating
+    // this frame's relative velocity as constant, same idea as the laser's
+    // raySegmentHitsCircle), and compute the normal from that reconstructed
+    // position instead — the actual separation/impulse below still happens at
+    // the real (overlapping) positions, only the normal's direction is
+    // corrected. Ported from physics-lab/lab.js after verifying it there.
+    let nx = dx / dist, ny = dy / dist;
+    const A = rvx * rvx + rvy * rvy;
+    if (A > 1e-6) {
+      const pv = dx * rvx + dy * rvy;
+      const C = dist * dist - minDist * minDist; // < 0, we're overlapping
+      const D = pv * pv - A * C;
+      if (D >= 0) {
+        const t = Math.max(0, Math.min(1, (pv + Math.sqrt(D)) / A));
+        const cdx = dx - rvx * t, cdy = dy - rvy * t;
+        const cdist = Math.hypot(cdx, cdy);
+        if (cdist > 1e-6) { nx = cdx / cdist; ny = cdy / cdist; }
+      }
+    }
     const overlap = (minDist - dist) / 2;
     a.x -= nx * overlap; a.y -= ny * overlap;
     b2.x += nx * overlap; b2.y += ny * overlap;
-    const rvx = b2.vx - a.vx, rvy = b2.vy - a.vy;
     const velAlongNormal = rvx * nx + rvy * ny;
     if (velAlongNormal > 0) return;
     const invMassA = 1 / a.mass, invMassB = 1 / b2.mass;
@@ -460,14 +519,17 @@ export function startGame() {
     // point (toward the other body), so the "far" side can be anchored in place
     triggerSquish(a, nx, ny, impact);
     triggerSquish(b2, -nx, -ny, impact);
+    playBodyHit(impact);
   }
   function allSettled() { return allEntities().every(e => e.vx === 0 && e.vy === 0 && !e.falling); }
 
   // ---------- Round / goal flow ----------
-  function onGoal(scoringTeam) {
+  function onGoal(scoringTeam, isWipeout) {
+    audio.play(isWipeout ? 'wipeout' : 'goal');
     if (scoringTeam === 'A') scoreA++; else scoreB++;
     if (scoreA >= WIN_SCORE || scoreB >= WIN_SCORE) {
       phase = 'gameover';
+      audio.play('win');
       const winner = scoreA >= WIN_SCORE ? 'BLEUE' : 'ROUGE';
       const cls = scoreA >= WIN_SCORE ? 'a' : 'b';
       showOverlay(`
@@ -544,6 +606,7 @@ export function startGame() {
   }
   function pressPlayButton() {
     playPressAt = performance.now();
+    audio.play('button');
     onValidate();
   }
   function drawPlayButton() {
@@ -578,28 +641,31 @@ export function startGame() {
   }
 
   // Splits the entity into two clipped halves along the line through its own
-  // center, perpendicular to the contact direction: the far half is redrawn
-  // completely as-is (zero modification), the near half is compressed toward
-  // that same center line. Because both halves pivot on the exact same line,
-  // they always meet without a seam — and the far half genuinely never moves,
-  // rather than just moving "less" than the near half.
+  // center, perpendicular to the contact direction: the near half is compressed
+  // toward that same center line, the far half never moves along that axis.
+  // Both halves also get the same perpendicular bulge (sy), so the deformation
+  // reads as displaced mass (squash-and-stretch, area roughly conserved via
+  // sy = 1/sx) rather than one side just deflating — applying sy to both halves
+  // keeps the shared center line seamless, since only sx differs between them.
   function drawSquished(e, drawFn) {
     if (!(Math.abs(e.squish) > 0.001)) { drawFn(); return; }
     const ang = Math.atan2(e.squishNY, e.squishNX);
-    const sx = 1 - e.squish * 0.85; // pure compression along the contact axis, no perpendicular bulge
+    const sx = 1 - e.squish * 0.85; // compression along the contact axis
+    const sy = 1 / sx;              // perpendicular bulge, area-conserving
     const R = e.r * 1.6; // generous half-plane size, comfortably covers the whole sprite/shadow
 
-    ctx.save(); // far half: untouched
+    ctx.save(); // far half: bulges with the near half, but never compresses
     ctx.translate(e.x, e.y); ctx.rotate(ang);
     ctx.beginPath(); ctx.rect(-R, -R, R, R * 2); ctx.clip();
+    ctx.scale(1, sy);
     ctx.rotate(-ang); ctx.translate(-e.x, -e.y);
     drawFn();
     ctx.restore();
 
-    ctx.save(); // near half: compressed toward the shared center line
+    ctx.save(); // near half: compressed toward the shared center line, same bulge
     ctx.translate(e.x, e.y); ctx.rotate(ang);
     ctx.beginPath(); ctx.rect(0, -R, R, R * 2); ctx.clip();
-    ctx.scale(sx, 1);
+    ctx.scale(sx, sy);
     ctx.rotate(-ang); ctx.translate(-e.x, -e.y);
     drawFn();
     ctx.restore();
@@ -757,49 +823,97 @@ export function startGame() {
   // how much longer the aim laser reaches than the raw pull distance (the old
   // arrow's length) — gives the shot a bit more presence without simulating
   // all the way out to where friction would actually stop the glob
-  const LASER_LENGTH_FACTOR = 1.8;
+  const LASER_LENGTH_FACTOR = 1.98;
 
   // predicts the shot's path from the glob's own position, bouncing off the arena
   // walls the same way physicsStep does (the goal mouth stays open on the x-walls,
   // same GOAL_HALF_HEIGHT test as the real collision code). Starting exactly at the
   // glob — rather than past some unclipped lead-in segment — keeps every bounce
   // point honest against FX0..FY1, including for globs sitting close to a wall.
-  // Bounces are computed at the rail itself (r=0 passed in below), not the glob's
-  // own center-of-mass offset, so the visible line meets the rail where the
-  // bubble's edge would actually touch it, not a whole radius short of it.
-  // FY1/FX1 sit ~15px short of the drawn rail in the current arena art (measured
-  // against public/arena/frame.webp — FY0/FX0 already land exactly on it), so this
-  // fudge is laser-only cosmetics; it doesn't touch the real physicsStep bounds.
-  const LASER_FAR_EDGE_FUDGE = 13;
-  const LASER_SIDE_EDGE_FUDGE = 8; // extra reach on both x-walls specifically
-  function computeBounceTrail(x, y, ux, uy, totalLen, r) {
+  // Bounces are computed with the glob's real radius (GLOB_R passed in below),
+  // matching physicsStep's own FY0+r/FX1-r contact test — r=0 used to make the
+  // line kiss the rail, but for any non-perpendicular approach the true contact
+  // point (closest point on the circle to the wall, i.e. straight off the
+  // center) lands at a different x than a zero-radius ray does, so the
+  // predicted bounce angle didn't match the real one.
+  // The true (r-correct) point still drives the reflection math below — only
+  // the point pushed for drawing is snapped onto the wall line itself, so the
+  // line keeps kissing the rail without feeding a cosmetic position back into
+  // the angle calculation.
+  // smallest t in (0, maxT] where a point traveling from (ox,oy) along unit
+  // direction (ux,uy) first comes within `rad` of (cx,cy) — used to detect a
+  // bubble's laser reaching the ball (rad = glob radius + ball radius, so the
+  // moving point represents the glob's own center). Returns 0 if already
+  // inside (glob starting right on top of the ball), null if it never gets close.
+  function raySegmentHitsCircle(ox, oy, ux, uy, maxT, cx, cy, rad) {
+    const fx = ox - cx, fy = oy - cy;
+    const b = fx * ux + fy * uy;
+    const c = fx * fx + fy * fy - rad * rad;
+    if (c <= 0) return 0;
+    const disc = b * b - c;
+    if (disc < 0) return null;
+    const t = -b - Math.sqrt(disc);
+    return (t >= 0 && t <= maxT) ? t : null;
+  }
+  // target (optional): { x, y, r } — if the trail's path would reach this
+  // circle before it would next bounce off a wall (or run out of length), the
+  // trail stops right there instead of passing through it. Used to make a
+  // bubble's laser stop at the ball instead of ignoring it.
+  function computeBounceTrail(x, y, ux, uy, totalLen, r, target) {
     const points = [{ x, y }];
     let remaining = totalLen, cx = x, cy = y, bounces = 0;
     while (remaining > 0.5 && bounces < 6) {
       const candidates = [];
-      if (uy < 0) candidates.push({ t: (FY0 + r - cy) / uy, axis: 'y' });
-      if (uy > 0) candidates.push({ t: (FY1 + LASER_FAR_EDGE_FUDGE - r - cy) / uy, axis: 'y' });
+      if (uy < 0) candidates.push({ t: (FY0 + r - cy) / uy, axis: 'y', wall: FY0 });
+      if (uy > 0) candidates.push({ t: (FY1 - r - cy) / uy, axis: 'y', wall: FY1 });
       if (ux < 0) {
-        const t = (FX0 - LASER_SIDE_EDGE_FUDGE + r - cx) / ux;
-        if (t > 0 && Math.abs(cy + uy * t - CY) >= GOAL_HALF_HEIGHT) candidates.push({ t, axis: 'x' });
+        const t = (FX0 + r - cx) / ux;
+        if (t > 0 && Math.abs(cy + uy * t - CY) >= GOAL_HALF_HEIGHT) candidates.push({ t, axis: 'x', wall: FX0 });
       }
       if (ux > 0) {
-        const t = (FX1 + LASER_FAR_EDGE_FUDGE + LASER_SIDE_EDGE_FUDGE - r - cx) / ux;
-        if (t > 0 && Math.abs(cy + uy * t - CY) >= GOAL_HALF_HEIGHT) candidates.push({ t, axis: 'x' });
+        const t = (FX1 - r - cx) / ux;
+        if (t > 0 && Math.abs(cy + uy * t - CY) >= GOAL_HALF_HEIGHT) candidates.push({ t, axis: 'x', wall: FX1 });
       }
       const hit = candidates.filter(c => c.t > 1e-6 && isFinite(c.t)).sort((a, b) => a.t - b.t)[0];
+      if (target) {
+        const segMax = Math.min(remaining, hit ? hit.t : remaining);
+        const combinedR = r + target.r;
+        const tHit = raySegmentHitsCircle(cx, cy, ux, uy, segMax, target.x, target.y, combinedR);
+        if (tHit !== null) {
+          // gx,gy: the glob's own center at the instant its edge first touches the
+          // target — drives the collision normal (nx,ny), same role as the r-correct
+          // wall contact point below. The point actually drawn/returned is snapped
+          // onto the target's surface itself (like wall bounces snap onto the wall
+          // line) so the trail visually reaches the ball instead of stopping a full
+          // glob-radius short of it.
+          const gx = cx + ux * tHit, gy = cy + uy * tHit;
+          const nx = (target.x - gx) / combinedR, ny = (target.y - gy) / combinedR;
+          const hx = target.x - nx * target.r, hy = target.y - ny * target.r;
+          points.push({ x: hx, y: hy });
+          return { points, hitTarget: true, contactX: hx, contactY: hy, nx, ny, ux, uy, remaining: remaining - tHit };
+        }
+      }
       if (!hit || hit.t > remaining) {
         cx += ux * remaining; cy += uy * remaining;
         points.push({ x: cx, y: cy });
         break;
       }
       cx += ux * hit.t; cy += uy * hit.t;
-      points.push({ x: cx, y: cy });
+      points.push(hit.axis === 'y' ? { x: cx, y: hit.wall } : { x: hit.wall, y: cy });
       remaining -= hit.t;
-      if (hit.axis === 'x') ux = -ux; else uy = -uy;
+      // real wallCollide only damps the wall-normal velocity component by
+      // WALL_RESTITUTION (tangential is untouched) — a plain sign flip here
+      // predicts a perfectly elastic mirror bounce instead, which on steep
+      // incidence angles is off by a few degrees from the real post-bounce
+      // direction. Confirmed empirically: that few-degree miss then rotates the
+      // predicted contact point on an off-center target hit much further (~14°
+      // in one measured case) since a small approach-angle error shifts a lot
+      // on a grazing circle intersection. Fixed first in physics-lab/lab.js.
+      if (hit.axis === 'x') ux = -ux * WALL_RESTITUTION; else uy = -uy * WALL_RESTITUTION;
+      { const norm = Math.hypot(ux, uy); ux /= norm; uy /= norm; }
       bounces++;
     }
-    return points;
+    return { points, hitTarget: false };
   }
   function drawLaserTrail(points, team, totalLen) {
     if (points.length < 2 || totalLen < 1) return;
@@ -828,15 +942,106 @@ export function startGame() {
     ctx.restore();
   }
 
+  // lightsaber red: a hot white core right at the ball, bleeding out to a
+  // solid, saturated red toward the tip — plain alpha blending, not 'lighter'
+  // (the additive mode the bubbles' own lasers use pushes every channel
+  // toward 255 against this bright icy background, which washes red out to
+  // white — source-over is the only way it reads as red instead of pink-white).
+  const BALL_LASER_RED = [235, 24, 24];
+  function drawBallLaserTrail(points, totalLen) {
+    if (points.length < 2 || totalLen < 1) return;
+    ctx.save();
+    ctx.lineCap = 'round';
+    let cum = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i], p1 = points[i + 1];
+      const segLen = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+      const a0 = Math.max(0, 1 - cum / totalLen);
+      const a1 = Math.max(0, 1 - (cum + segLen) / totalLen);
+      const grad = ctx.createLinearGradient(p0.x, p0.y, p1.x, p1.y);
+      grad.addColorStop(0, `rgba(255,255,255,${(0.95 * a0).toFixed(3)})`);
+      grad.addColorStop(1, `rgba(${BALL_LASER_RED.join(',')},${(0.9 * a1).toFixed(3)})`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 3.2;
+      ctx.shadowColor = `rgba(${BALL_LASER_RED.join(',')},0.85)`;
+      ctx.shadowBlur = 9;
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+      ctx.stroke();
+      cum += segLen;
+    }
+    ctx.restore();
+  }
+
+  // Bounce points can jump a whole wall away for a tiny change in aim (grazing
+  // angles, near a corner, crossing the goal-mouth edge), which reads as an
+  // abrupt teleport when recomputed fresh every frame. Smoothing the aim
+  // direction/length that FEED computeBounceTrail — rather than the resulting
+  // points, whose count can change between frames — makes the trail visibly
+  // ease toward its new shape instead of snapping. State lives on the glob
+  // itself so it persists frame to frame and across the live-drag -> committed
+  // aim handoff.
+  const LASER_SMOOTHING = 0.1;
+  function smoothLaserAim(g, targetUx, targetUy, targetLen) {
+    if (g._laserUx === undefined) {
+      g._laserUx = targetUx; g._laserUy = targetUy; g._laserLen = targetLen;
+    } else {
+      g._laserUx += (targetUx - g._laserUx) * LASER_SMOOTHING;
+      g._laserUy += (targetUy - g._laserUy) * LASER_SMOOTHING;
+      g._laserLen += (targetLen - g._laserLen) * LASER_SMOOTHING;
+    }
+    const norm = Math.hypot(g._laserUx, g._laserUy) || 1;
+    return { ux: g._laserUx / norm, uy: g._laserUy / norm, len: g._laserLen };
+  }
+
+  // when a bubble's projected laser would reach the ball before running out of
+  // reach (or bouncing off a wall first), its energy is treated as absorbed by
+  // the ball rather than passing through it: the bubble's own trail stops right
+  // at the point of contact, and a second, tricolor trail continues on from the
+  // ball along the direction/speed it would actually leave with. If the laser
+  // never reaches the ball, no energy is transmitted and no ball laser is drawn.
+  function renderGlobLaser(g, s) {
+    const ball = entities.ball;
+    const trail = computeBounceTrail(g.x, g.y, s.ux, s.uy, s.len, GLOB_R, { x: ball.x, y: ball.y, r: BALL_R });
+    drawLaserTrail(trail.points, g.team, s.len);
+    if (trail.hitTarget) drawBallHitLaser(trail, s.len);
+  }
+  // predicts the ball's post-impact velocity with the same impulse math as
+  // resolveCollision. Speed is derived from the bubble's current pull/shot
+  // length (bubbleLen), not g.pendingVx — pendingVx is only populated once the
+  // drag is released, but this needs to react live during the drag too, so the
+  // ball's laser appears the instant the bubble's laser is aimed at it rather
+  // than only after the pointer comes up. The ball's own reach (trail.remaining)
+  // is whatever laser power the bubble had left over at the point of contact —
+  // a graze near the end of the bubble's reach barely nudges the ball's preview,
+  // while a fresh hit carries on nearly as far as the bubble's laser would have.
+  function drawBallHitLaser(trail, bubbleLen) {
+    const ball = entities.ball;
+    const speed = (bubbleLen / LASER_LENGTH_FACTOR) * POWER_SCALE;
+    const gvx = trail.ux * speed, gvy = trail.uy * speed;
+    const rvx = ball.vx - gvx, rvy = ball.vy - gvy;
+    const velAlongNormal = rvx * trail.nx + rvy * trail.ny;
+    if (velAlongNormal > 0) return; // laser only grazes past, no real impact
+    let j = -(1 + BODY_RESTITUTION) * velAlongNormal;
+    j /= (1 / GLOB_MASS + 1 / BALL_MASS);
+    j *= BOUNCE_BOOST;
+    const bvx = ball.vx + (j * trail.nx) / BALL_MASS, bvy = ball.vy + (j * trail.ny) / BALL_MASS;
+    const bSpeed = Math.hypot(bvx, bvy);
+    const bLen = trail.remaining;
+    if (bSpeed < 0.01 || bLen < 1) return;
+    const bs = smoothLaserAim(ball, bvx / bSpeed, bvy / bSpeed, bLen);
+    drawBallLaserTrail(computeBounceTrail(ball.x, ball.y, bs.ux, bs.uy, bs.len, BALL_R).points, bs.len);
+  }
   function drawAimLaser(g) {
     const dx = g.pendingVx, dy = g.pendingVy;
-    if (!dx && !dy) return;
+    if (!dx && !dy) { g._laserUx = g._laserUy = g._laserLen = undefined; return; }
     const scale = 1 / POWER_SCALE;
     const pullLen = Math.hypot(dx * scale, dy * scale);
     if (pullLen < 1) return;
-    const ux = (dx * scale) / pullLen, uy = (dy * scale) / pullLen;
-    const laserLen = pullLen * LASER_LENGTH_FACTOR;
-    drawLaserTrail(computeBounceTrail(g.x, g.y, ux, uy, laserLen, 0), g.team, laserLen);
+    const targetUx = (dx * scale) / pullLen, targetUy = (dy * scale) / pullLen;
+    const targetLen = pullLen * LASER_LENGTH_FACTOR;
+    const s = smoothLaserAim(g, targetUx, targetUy, targetLen);
+    renderGlobLaser(g, s);
   }
   function drawDragPreview() {
     if (!drag) return;
@@ -849,8 +1054,9 @@ export function startGame() {
     ctx.beginPath(); ctx.moveTo(g.x, g.y); ctx.lineTo(drag.curX, drag.curY); ctx.stroke();
     ctx.setLineDash([]); ctx.restore();
     if (dist > 6) {
-      const laserLen = dist * LASER_LENGTH_FACTOR;
-      drawLaserTrail(computeBounceTrail(g.x, g.y, dx / dist, dy / dist, laserLen, 0), g.team, laserLen);
+      const targetLen = dist * LASER_LENGTH_FACTOR;
+      const s = smoothLaserAim(g, dx / dist, dy / dist, targetLen);
+      renderGlobLaser(g, s);
     }
   }
 
@@ -873,7 +1079,7 @@ export function startGame() {
       const result = physicsStep();
       if (result === 'goalA' || result === 'goalB' || result === 'wipeoutA' || result === 'wipeoutB') {
         phase = 'goal';
-        onGoal(result.endsWith('A') ? 'A' : 'B');
+        onGoal(result.endsWith('A') ? 'A' : 'B', result.startsWith('wipeout'));
       } else if (allSettled()) {
         settleFrames++;
         if (settleFrames > 6) {
