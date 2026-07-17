@@ -14,6 +14,7 @@ design-lab art changes, like a build script for an asset.
 import math
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
+from scipy.ndimage import distance_transform_edt
 
 ASSETS = "design/arena"
 OUT = "public/arena/frame.webp"
@@ -97,20 +98,32 @@ poutresH = PH / (HOLE_FRAC_BOTTOM - HOLE_FRAC_TOP)
 poutresLeft = FX0 - HOLE_FRAC_LEFT * poutresW
 poutresTop = FY0 - HOLE_FRAC_TOP * poutresH
 
-# ---------- 4. Wood "liant" tail shadow, per renderTail() in main.js ----------
-TAIL_THRESHOLD, TAIL_PEAK, TAIL_MAX_REACH, TAIL_TAPER = 47, 0.85, 35, 8
+# ---------- 4. Wood "liant" frost blend, feathering the ice into the wood edge ----------
+# poutres-fitted.png/poutres-dist.png (the original hand-authored pair for this band)
+# predate the goal-mouth notches being cut into poutres-wood-align.png's hole — they're
+# a plain rounded rectangle and no longer match the wood ring's actual current shape,
+# which produced an invisible/misplaced band once the goal openings were added. Instead,
+# the "reach" (distance in px from the wood edge, in the same 1740x1010 source space) is
+# recomputed live from poutres-wood-align.png's own alpha channel via a Euclidean distance
+# transform, so the band always follows the wood's real current silhouette — notches
+# included — no matter how that shape changes later. Empirically re-derived from the
+# original pair (sampled at a straight, non-notched wall segment) before they went stale:
+# reach ≈ TAIL_THRESHOLD - dist held almost exactly, i.e. reach IS the raw pixel distance
+# to the wood edge, so the old dist/threshold indirection collapses to using it directly.
+TAIL_PEAK, TAIL_MAX_REACH, TAIL_TAPER = 0.85, 35, 8
 TAIL_ALPHA, TAIL_DECAY = 1.0, 8.0  # locked-state.md defaults
+TAIL_RGB = (190, 210, 228)  # sampled from poutres-fitted.png's near-edge frost band
 
-tail_rgb_img = Image.open(f"{ASSETS}/poutres-fitted.png").convert("RGB")
-tail_dist_img = Image.open(f"{ASSETS}/poutres-dist.png").convert("L")
-tail_rgb = np.array(tail_rgb_img, dtype=np.float64)
-dist = np.array(tail_dist_img, dtype=np.float64) * (150 / 255)
-reach = TAIL_THRESHOLD - dist
-a = np.where(dist <= TAIL_THRESHOLD, TAIL_PEAK * np.exp(-reach / TAIL_DECAY), 0.0)
+wood_alpha_full = np.array(load("poutres-wood-align.png"))[:, :, 3]
+hole_mask = wood_alpha_full <= 128
+reach = distance_transform_edt(hole_mask)
+a = TAIL_PEAK * np.exp(-reach / TAIL_DECAY)
 cap = np.clip((TAIL_MAX_REACH - reach) / TAIL_TAPER, 0, 1)
 a = a * cap
 alpha = np.clip(a * 255 * TAIL_ALPHA, 0, 255).astype(np.uint8)
-tail_img = Image.fromarray(np.dstack([tail_rgb.astype(np.uint8), alpha]), "RGBA")
+tail_rgb_full = np.zeros((*alpha.shape, 3), dtype=np.uint8)
+tail_rgb_full[:] = TAIL_RGB
+tail_img = Image.fromarray(np.dstack([tail_rgb_full, alpha]), "RGBA")
 tail_resized = tail_img.resize((round(poutresW), round(poutresH)), Image.LANCZOS)
 canvas.alpha_composite(tail_resized, (round(poutresLeft), round(poutresTop)))
 
