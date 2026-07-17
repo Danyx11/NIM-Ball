@@ -25,12 +25,14 @@ html, body {
 
 #app { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; }
 
-/* Bounded by BOTH viewport width and height (not just width) so the board
-   shrinks to fit on short/wide viewports too, leaving visible margin all
-   around for the constellation background — canvas keeps its native
-   1200:905 aspect ratio (see the W/H comment in game.js) via this same
-   ratio baked into the width formula, height:auto below just follows it. */
-#stage-wrap { position: relative; width: min(92vw, 92vh * 1200 / 905, 1100px); }
+/* Width-only sizing, ported 1:1 from design-lab's #ui-physics-bounds
+   (`width: 51vw; max-width: 834px` on the 887x492 physics box) — converted to
+   this element's own 1200x905 canvas space by the constant 1200/887 ratio, so
+   the board matches the size validated in the lab instead of also being
+   capped by viewport height (that cap fixed short/wide desktop windows but
+   under-sized the board everywhere else — the real target, phones in
+   portrait, has height to spare and matches the lab's own assumption). */
+#stage-wrap { position: relative; width: min(69vw, 1128px); }
 canvas {
   display: block; width: 100%; height: auto; touch-action: none;
 }

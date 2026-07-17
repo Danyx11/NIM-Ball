@@ -29,7 +29,23 @@ def load(name):
 canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 
 # ---------- 1. Ice ----------
-ice = load("glace-pure-v3.png").resize((PW, PH), Image.LANCZOS)
+# glace-pure-v3.png has real alpha with its OWN rounded corners — pasting it
+# flush at exactly the physics-box size leaves a partially-transparent sliver
+# at the box's sharp corners (a bigger rounded corner is still a rounded
+# corner, it never fills a sharp one). Ported from design-lab's #ui-terrain-crop
+# fix: oversize the ice 108% so it bleeds past the box on all sides, over a
+# flat fallback fill (sampled from the ice's own center tone) that stands in
+# for that last corner sliver — invisible everywhere the real ice covers it.
+ICE_OVERSIZE = 1.08
+ice_src = load("glace-pure-v3.png")
+_ice_sample = np.array(ice_src.convert("RGB"))
+_h, _w = _ice_sample.shape[:2]
+FALLBACK_COLOR = tuple(int(c) for c in _ice_sample[_h // 2 - 20:_h // 2 + 20, _w // 2 - 20:_w // 2 + 20].reshape(-1, 3).mean(axis=0))
+
+ice = Image.new("RGBA", (PW, PH), FALLBACK_COLOR + (255,))
+ow, oh = round(PW * ICE_OVERSIZE), round(PH * ICE_OVERSIZE)
+ice_oversized = ice_src.resize((ow, oh), Image.LANCZOS)
+ice.alpha_composite(ice_oversized, (-(ow - PW) // 2, -(oh - PH) // 2))
 
 # ---------- 2. Field lines (halfway line, hexagons, goal creases), textured
 #    with the ice's own high-pass grain, per drawFieldLines() in main.js ----------
