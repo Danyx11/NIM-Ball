@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev"],
       "port": 5173,
       "autoPort": true
+    },
+    {
+      "name": "nim-ball-design-lab",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "design-lab", "--port", "5174"],
+      "port": 5174,
+      "autoPort": true
     }
   ]
 }

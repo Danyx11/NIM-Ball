@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/mulish": "^5.2.8",
+    "@nimiq/identicons": "^1.6.2",
     "@nimiq/mini-app-sdk": "^0.1.0"
   },
   "devDependencies": {

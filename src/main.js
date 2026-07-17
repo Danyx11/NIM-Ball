@@ -1,4 +1,6 @@
 import './style.css';
+// Nimiq's brand typeface (nimiq-style design system) — used for the score digits.
+import '@fontsource/mulish/800.css';
 import { startGame } from './game.js';
 import { connectNimiq } from './nimiq.js';
 

@@ -6,10 +6,17 @@
 // still resolve when the app is served from a subpath, e.g. GitHub Pages at
 // https://danyx11.github.io/NIM-Ball/.
 import { createAudio } from './audio.js';
+import { getIdenticonCanvas } from './identicons.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
-const IDENTICON_SRC = { A: `${ASSET_BASE}identicons/team-a.png`, B: `${ASSET_BASE}identicons/team-b.png` };
-const MODULE_SRC = { A: `${ASSET_BASE}identicons/module-cyan-v3.png`, B: `${ASSET_BASE}identicons/module-orange-v3.png` };
+// Placeholder demo addresses (real per-player wallet addresses aren't wired
+// up yet — see src/nimiq.js). Swap these once that flow exists; the identicon
+// pipeline below doesn't care where the address string comes from.
+const IDENTICON_ADDRESS = {
+  A: 'NQ16 2SSN 82TL SMQS KXT3 Q01V CMAL NU6F 1LJG',
+  B: 'NQ19 AXEU PPQ9 5610 YF48 VLTJ QR6Y 0HS1 UH89',
+};
+const MODULE_SRC = { A: `${ASSET_BASE}identicons/module-navy-v4-light.png`, B: `${ASSET_BASE}identicons/module-gold-v4-light.png` };
 const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
 const PLAY_CAP_SRC = `${ASSET_BASE}arena/play-cap.png`;
 const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
@@ -17,7 +24,17 @@ const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
 export function startGame() {
   const canvas = document.getElementById('stage');
   const ctx = canvas.getContext('2d');
+  // Logical coordinate system used throughout this file (physics bounds,
+  // getPointerPos, all drawing) stays 1200x905 regardless of screen density.
+  // The canvas's actual backing buffer is upsized to devicePixelRatio (capped
+  // at 2 — Pixi/Phaser's standard tradeoff, since the per-frame shadow blur in
+  // drawContactShadow scales with pixel count) and ctx.scale()'d once so every
+  // existing drawImage/fillRect/arc call keeps working unmodified.
   const W = canvas.width, H = canvas.height;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
 
   // ---------- Audio ----------
   // Decoding starts immediately (harmless before a user gesture); actual
@@ -27,33 +44,9 @@ export function startGame() {
   audio.load();
 
   // ---------- Identicons ----------
-  // Strips the near-pure-white background behind the identicon's hexagon,
-  // so the translucent bubble color shows through instead of a white square.
-  // The background tone is sampled from the image's own corner (it's an
-  // off-white grey, not pure white) and pixels fade out by their color
-  // distance to it. Un-mixing the background tint out of the edge pixels'
-  // color (dividing by a small alpha) blew up into a brighter white/grey
-  // ring than the hard cutoff it replaced, so this only fades alpha and
-  // leaves the anti-aliased color alone — at low alpha its exact color
-  // barely shows once blended with the bubble underneath.
-  function stripWhiteBackground(img) {
-    const c = document.createElement('canvas');
-    c.width = img.naturalWidth || img.width; c.height = img.naturalHeight || img.height;
-    const cctx = c.getContext('2d');
-    cctx.drawImage(img, 0, 0, c.width, c.height);
-    const data = cctx.getImageData(0, 0, c.width, c.height);
-    const d = data.data;
-    const bg = [d[0], d[1], d[2]];
-    const lo = 6, hi = 46;
-    for (let i = 0; i < d.length; i += 4) {
-      const r = d[i], g = d[i + 1], b = d[i + 2];
-      const dist = Math.max(Math.abs(r - bg[0]), Math.abs(g - bg[1]), Math.abs(b - bg[2]));
-      if (dist <= lo) { d[i + 3] = 0; }
-      else if (dist < hi) { d[i + 3] = Math.round(255 * (dist - lo) / (hi - lo)); }
-    }
-    cctx.putImageData(data, 0, 0);
-    return c;
-  }
+  // Official identicons (src/identicons.js, @nimiq/identicons) render straight
+  // to a canvas with no matte behind them, so unlike the old static PNGs they
+  // need no background-stripping step before going into downscaleToFit.
   // Shrinks in halving steps (each a properly box-filtered average) rather than
   // one big jump, which is what drawImage's own bilinear scaler does when asked
   // to shrink an image a lot in one go — that undersamples the diagonal hex
@@ -79,9 +72,9 @@ export function startGame() {
     octx.drawImage(cur, 0, 0, targetW, targetH);
     return out;
   }
-  // hex slot on the module art (module-cyan-v3.png / module-orange-v3.png, 716x716,
+  // hex slot on the module art (module-navy-v4.png / module-gold-v4.png, 1024x1024,
   // real alpha), measured as a fraction of the module's own square canvas
-  const HEX = { cxFrac: 0.503, cyFrac: 0.516, halfWFrac: 0.261, halfHFrac: 0.241 };
+  const HEX = { cxFrac: 0.499, cyFrac: 0.498, halfWFrac: 0.235, halfHFrac: 0.205 };
   function hexPath(hctx, cx, cy, halfW, halfH) {
     hctx.beginPath();
     hctx.moveTo(cx + halfW, cy);
@@ -93,16 +86,15 @@ export function startGame() {
     hctx.closePath();
   }
 
-  const identiconStripped = {};
+  const identiconSources = {};
   const moduleImages = {};
   const bubbleSprites = {};
-  // bakes the module ring (hex hole punched through it) + identicon into one
-  // sprite per team, once both images are in — avoids doing this per-glob per-frame
-  function tryBakeBubble(team) {
-    const mod = moduleImages[team], id = identiconStripped[team];
-    if (!mod || !id) return;
-    // baked at 2x the on-screen diameter, same oversample convention as ballSprite
-    const S = Math.round(GLOB_R * 2 * 2);
+  const scoreBubbleSprites = {};
+  // bakes the module ring (hex hole punched through it) + identicon into one sprite,
+  // at the given on-screen diameter (2x-oversampled, same convention as ballSprite) —
+  // shared by the in-pitch glob sprite and the small score-panel icon
+  function bakeBubble(mod, id, diameterPx) {
+    const S = Math.round(diameterPx * 2);
     const cx = S * HEX.cxFrac, cy = S * HEX.cyFrac;
     const halfW = S * HEX.halfWFrac, halfH = S * HEX.halfHFrac;
 
@@ -130,28 +122,31 @@ export function startGame() {
     bctx.drawImage(sizedIdenticon, cx - dw / 2, cy - dh / 2);
     bctx.restore();
     bctx.drawImage(punched, 0, 0);
-
-    bubbleSprites[team] = bubble;
+    return bubble;
+  }
+  function tryBakeBubble(team) {
+    const mod = moduleImages[team], id = identiconSources[team];
+    if (!mod || !id) return;
+    bubbleSprites[team] = bakeBubble(mod, id, GLOB_R * 2);
+    scoreBubbleSprites[team] = bakeBubble(mod, id, SCORE_ICON_D);
   }
   for (const team of ['A', 'B']) {
-    const img = new Image();
-    img.onload = () => {
-      let stripped = stripWhiteBackground(img);
+    getIdenticonCanvas(IDENTICON_ADDRESS[team]).then((canvas) => {
+      let source = canvas;
       // team B starts on the right side of the pitch, so mirror it to face the
       // ball at kickoff instead of away from it
       if (team === 'B') {
         const flipped = document.createElement('canvas');
-        flipped.width = stripped.width; flipped.height = stripped.height;
+        flipped.width = source.width; flipped.height = source.height;
         const fctx = flipped.getContext('2d');
         fctx.translate(flipped.width, 0);
         fctx.scale(-1, 1);
-        fctx.drawImage(stripped, 0, 0);
-        stripped = flipped;
+        fctx.drawImage(source, 0, 0);
+        source = flipped;
       }
-      identiconStripped[team] = stripped;
+      identiconSources[team] = source;
       tryBakeBubble(team);
-    };
-    img.src = IDENTICON_SRC[team];
+    });
 
     const modImg = new Image();
     modImg.onload = () => { moduleImages[team] = modImg; tryBakeBubble(team); };
@@ -196,8 +191,18 @@ export function startGame() {
   // fudges were then deleted below — laser and physics now share one source
   // of truth. Was FX0=159, FY0=234, FX1=1042, FY1=725; revert to those if this
   // reads worse than the split laser/physics bounds did.
-  const FX0 = 159, FY0 = 237, FX1 = 1046, FY1 = 729;
-  const GY0 = 380, GY1 = 548;                 // goal mouth y-range
+  // FY0/FY1/GY0/GY1 recentered vertically — the field/goal were art-matched
+  // (see history above) but that left them measurably off-center in the
+  // 1200x905 canvas: top/bottom margins were 237/176px (61px apart) and the
+  // goal sat 143px above / 181px below the field's own midpoint (38px apart).
+  // The upcoming arena redesign targets these physics bounds directly rather
+  // than the other way around, so centered now: FX0/FX1 untouched (already
+  // near-symmetric, 159/154px), FY0/FY1 keep the same field height (492px)
+  // but split the canvas margin evenly (206/207px), and GY0/GY1 keep the same
+  // goal height (168px) centered on the new field midpoint. Was FX0=159,
+  // FY0=237, FX1=1046, FY1=729, GY0=380, GY1=548.
+  const FX0 = 159, FY0 = 206, FX1 = 1046, FY1 = 698;
+  const GY0 = 368, GY1 = 536;                 // goal mouth y-range
   const CY = (FY0 + FY1) / 2;
   const CENTER_X = (FX0 + FX1) / 2;           // pitch's true horizontal center — ball spawn and score readout share this axis
   const GOAL_HALF_HEIGHT = (GY1 - GY0) / 2;
@@ -231,6 +236,11 @@ export function startGame() {
   let scoreA = 0, scoreB = 0;
   let round = 1;
   let phase = 'start';
+  // Visual-only 30s turn timer for the score panel LED bar — resets whenever aiming
+  // starts for either team, has no effect on the phase state machine (see turnTimerProgress).
+  const TURN_TIMER_MS = 30000;
+  let turnTimerStart = 0;
+  let turnTimerPhase = null;
   let entities = { A: [], B: [], ball: null };
   let drag = null;
   let readyA = false, readyB = false;
@@ -341,6 +351,7 @@ export function startGame() {
       startOverlay.classList.add('hidden');
       controlsEnabled = true;
       phase = 'aimA';
+      // ambience disabled for now — audio.playAmbience() to re-enable
     }
   }
 
@@ -575,17 +586,75 @@ export function startGame() {
 
   // Score lives inside the "NIM-BALL" panel — this version of the artwork ships with the
   // "-" already baked in and no digits at all, so there's nothing to patch/inpaint; we just
-  // draw the two digits directly into the empty slot flanking the original dash.
-  // Screen interior (measured from the art): x:[323,437], y:[157,188]; dash center: (380,173.5).
-  const SCORE_SLOT_CX_A = 349, SCORE_SLOT_CX_B = 411, SCORE_SLOT_CY = 177;
+  // draw the digits, team icons and turn-timer bar directly into the empty slot flanking
+  // the original dash. Screen interior (measured from the art): x:[323,437], y:[157,188];
+  // dash center: (380,173.5). Digits moved in from the dash and team icons tucked into the
+  // corners to fit everything inside that same 114x31 slot — see design discussion.
+  const SCORE_SLOT_CY = 177;
+  const SCORE_DIGIT_CX_A = 359, SCORE_DIGIT_CX_B = 401;
+  const SCORE_ICON_D = 20;
+  const SCORE_ICON_CX_A = 337, SCORE_ICON_CX_B = 423;
+  // Font per Nimiq's brand guidelines (nimiq-style design system): Mulish, self-hosted
+  // via @fontsource/mulish (imported in main.js) rather than the never-actually-loaded
+  // 'Baloo 2' this used to reference (it was silently falling back to Arial).
+  const SCORE_FONT = `800 30px 'Mulish', Arial, sans-serif`;
   function drawScorePanel() {
     ctx.save();
-    ctx.font = `800 38px 'Baloo 2', Arial, sans-serif`;
+    ctx.font = SCORE_FONT;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = '#5ecbf5';
-    ctx.fillText(String(scoreA), SCORE_SLOT_CX_A, SCORE_SLOT_CY);
+    ctx.fillText(String(scoreA), SCORE_DIGIT_CX_A, SCORE_SLOT_CY);
     ctx.fillStyle = '#ffc94d';
-    ctx.fillText(String(scoreB), SCORE_SLOT_CX_B, SCORE_SLOT_CY);
+    ctx.fillText(String(scoreB), SCORE_DIGIT_CX_B, SCORE_SLOT_CY);
+    ctx.restore();
+
+    drawScoreIcon('A', SCORE_ICON_CX_A);
+    drawScoreIcon('B', SCORE_ICON_CX_B);
+    drawTurnTimerBar();
+  }
+
+  function drawScoreIcon(team, cx) {
+    const sprite = scoreBubbleSprites[team];
+    if (!sprite) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(sprite, cx - SCORE_ICON_D / 2, SCORE_SLOT_CY - SCORE_ICON_D / 2, SCORE_ICON_D, SCORE_ICON_D);
+    ctx.restore();
+  }
+
+  // 0..1 while a team is actively aiming, null the rest of the time (hides the bar).
+  function turnTimerProgress() {
+    if (phase !== 'aimA' && phase !== 'aimB') return null;
+    return Math.min(1, (performance.now() - turnTimerStart) / TURN_TIMER_MS);
+  }
+
+  // Thin LED/laser strip along the top of the score screen: fills left-to-right over 30s,
+  // tinted to whichever team is currently aiming (same palette as their aim halo/digits).
+  const TIMER_BAR_X0 = 327, TIMER_BAR_X1 = 433, TIMER_BAR_Y = 161, TIMER_BAR_H = 3;
+  function drawTurnTimerBar() {
+    const t = turnTimerProgress();
+    if (t === null) return;
+    const rgb = HALO_RGB[phase === 'aimB' ? 'B' : 'A'];
+    const barW = TIMER_BAR_X1 - TIMER_BAR_X0;
+    const filled = barW * t;
+
+    ctx.save();
+    // dim track
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(TIMER_BAR_X0, TIMER_BAR_Y, barW, TIMER_BAR_H);
+
+    if (filled > 0.5) {
+      // glowing filled portion, like a laser/LED strip charging up
+      ctx.shadowColor = `rgba(${rgb},0.9)`;
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = `rgb(${rgb})`;
+      ctx.fillRect(TIMER_BAR_X0, TIMER_BAR_Y, filled, TIMER_BAR_H);
+
+      // bright leading edge, like a scanning laser head
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(TIMER_BAR_X0 + filled - 1.5, TIMER_BAR_Y - 0.5, 3, TIMER_BAR_H + 1);
+    }
     ctx.restore();
   }
 
@@ -1075,6 +1144,10 @@ export function startGame() {
   // ---------- Main loop ----------
   let settleFrames = 0;
   function loop() {
+    if (phase !== turnTimerPhase) {
+      if (phase === 'aimA' || phase === 'aimB') turnTimerStart = performance.now();
+      turnTimerPhase = phase;
+    }
     if (phase === 'sim') {
       const result = physicsStep();
       if (result === 'goalA' || result === 'goalB' || result === 'wipeoutA' || result === 'wipeoutB') {
