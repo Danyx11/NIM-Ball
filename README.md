@@ -65,8 +65,8 @@ Outputs to `dist/`.
 `public/arena/frame.webp` is generated from source layers in `design/arena/`, not hand-painted as one flat image:
 
 ```bash
-pip install pillow numpy
+pip install pillow
 python3 scripts/bake_arena.py
 ```
 
-Only needed after touching the ice/wood/goal-post/scoreboard source art in `design/arena/` — not part of the regular npm build.
+Only needed after re-exporting the `design/arena/xcf-*.png` layers (see the script's docstring) — not part of the regular npm build.
