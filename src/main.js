@@ -3,7 +3,9 @@ import './style.css';
 import '@fontsource/mulish/800.css';
 import { startGame } from './game.js';
 import { connectNimiq } from './nimiq.js';
+import { initBackground } from './background.js';
 
+initBackground();
 startGame();
 
 // Best-effort: only succeeds when the app is opened inside Nimiq Pay.

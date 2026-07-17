@@ -16,7 +16,7 @@ const IDENTICON_ADDRESS = {
   A: 'NQ16 2SSN 82TL SMQS KXT3 Q01V CMAL NU6F 1LJG',
   B: 'NQ19 AXEU PPQ9 5610 YF48 VLTJ QR6Y 0HS1 UH89',
 };
-const MODULE_SRC = { A: `${ASSET_BASE}identicons/module-navy-v4-light.png`, B: `${ASSET_BASE}identicons/module-gold-v4-light.png` };
+const MODULE_SRC = { A: `${ASSET_BASE}identicons/bubble-v4-navy.webp`, B: `${ASSET_BASE}identicons/bubble-v4-gold.webp` };
 const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
 const PLAY_CAP_SRC = `${ASSET_BASE}arena/play-cap.png`;
 const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
@@ -72,9 +72,12 @@ export function startGame() {
     octx.drawImage(cur, 0, 0, targetW, targetH);
     return out;
   }
-  // hex slot on the module art (module-navy-v4.png / module-gold-v4.png, 1024x1024,
-  // real alpha), measured as a fraction of the module's own square canvas
-  const HEX = { cxFrac: 0.499, cyFrac: 0.498, halfWFrac: 0.235, halfHFrac: 0.205 };
+  // Hex "floor" on the bubble art (bubble-v4-navy/gold.webp, 1024x1024) — unlike
+  // the old module-ring art, this hex is a solid embossed shape baked into the
+  // art itself (no punched-out alpha window), measured by scanning the source
+  // PNG for where the color plateaus flat between the beveled walls (see
+  // design-lab/main.js's HEX_MODULE, same measurement, ported 1:1).
+  const HEX = { cxFrac: 0.502, cyFrac: 0.495, halfWFrac: 0.142, halfHFrac: 0.142 };
   function hexPath(hctx, cx, cy, halfW, halfH) {
     hctx.beginPath();
     hctx.moveTo(cx + halfW, cy);
@@ -90,22 +93,22 @@ export function startGame() {
   const moduleImages = {};
   const bubbleSprites = {};
   const scoreBubbleSprites = {};
-  // bakes the module ring (hex hole punched through it) + identicon into one sprite,
-  // at the given on-screen diameter (2x-oversampled, same convention as ballSprite) —
-  // shared by the in-pitch glob sprite and the small score-panel icon
+  // Bakes the bubble art + identicon into one sprite, at the given on-screen
+  // diameter (2x-oversampled, same convention as ballSprite) — shared by the
+  // in-pitch glob sprite and the small score-panel icon. Unlike the old
+  // module-ring art, bubble-v4-navy/gold.webp's hex floor is solid (no punch-
+  // out needed) — the identicon is drawn ON TOP, clipped to that hex, then a
+  // cool-tint blend is applied so the glossy CG render sits inside the flatter,
+  // desaturated ice scene instead of reading as a pasted-on sticker (ported
+  // from design-lab/main.js's "intégration" slider, locked at 0.21 — see
+  // design/design-lab-locked-state.md).
+  const BUBBLE_BLEND = 0.21;
   function bakeBubble(mod, id, diameterPx) {
     const S = Math.round(diameterPx * 2);
     const cx = S * HEX.cxFrac, cy = S * HEX.cyFrac;
     const halfW = S * HEX.halfWFrac, halfH = S * HEX.halfHFrac;
 
     const sizedModule = downscaleToFit(mod, S, S);
-    const punched = document.createElement('canvas');
-    punched.width = S; punched.height = S;
-    const pctx = punched.getContext('2d');
-    pctx.drawImage(sizedModule, 0, 0);
-    pctx.globalCompositeOperation = 'destination-out';
-    hexPath(pctx, cx, cy, halfW, halfH);
-    pctx.fill();
 
     const fit = Math.max(halfW * 2, halfH * 2) * 1.05;
     const scale = fit / Math.max(id.width, id.height);
@@ -116,13 +119,31 @@ export function startGame() {
     bubble.width = S; bubble.height = S;
     const bctx = bubble.getContext('2d');
     bctx.imageSmoothingEnabled = true; bctx.imageSmoothingQuality = 'high';
+    bctx.drawImage(sizedModule, 0, 0);
     bctx.save();
     hexPath(bctx, cx, cy, halfW, halfH);
     bctx.clip();
     bctx.drawImage(sizedIdenticon, cx - dw / 2, cy - dh / 2);
     bctx.restore();
-    bctx.drawImage(punched, 0, 0);
-    return bubble;
+
+    const t = BUBBLE_BLEND;
+    const tinted = document.createElement('canvas');
+    tinted.width = S; tinted.height = S;
+    const tctx = tinted.getContext('2d');
+    tctx.filter = `saturate(${1 - 0.3 * t}) contrast(${1 - 0.12 * t}) brightness(${1 - 0.06 * t})`;
+    tctx.drawImage(bubble, 0, 0);
+    tctx.filter = 'none';
+    tctx.globalCompositeOperation = 'soft-light';
+    tctx.globalAlpha = t * 0.45;
+    tctx.fillStyle = '#1e3a5f';
+    tctx.fillRect(0, 0, S, S);
+    // re-mask to the bubble's own silhouette — soft-light + globalAlpha would
+    // otherwise tint the fully-transparent corners visible too (their alpha
+    // goes from 0 to globalAlpha under normal source-over compositing).
+    tctx.globalAlpha = 1;
+    tctx.globalCompositeOperation = 'destination-in';
+    tctx.drawImage(bubble, 0, 0);
+    return tinted;
   }
   function tryBakeBubble(team) {
     const mod = moduleImages[team], id = identiconSources[team];
@@ -171,7 +192,11 @@ export function startGame() {
   // pressed/animated independently of the static background it was extracted from.
   // Cropped tight to just the orange capsule (alpha-masked) — the panel/frame around it
   // stays in arena/frame.webp and must never move when the cap is pressed.
-  const PLAY_CAP_X0 = 761, PLAY_CAP_Y0 = 130, PLAY_CAP_X1 = 888, PLAY_CAP_Y1 = 187;
+  // Repositioned for the V1.2 arena redesign: the old socket sat right of the
+  // score panel at the same height; the new wood scoreboard plaque is wider
+  // and centered (x:416-789, see SCORE_SLOT_CY below), so the cap now sits
+  // further right, still on the solid wood band above the ice (y:75-206).
+  const PLAY_CAP_X0 = 850, PLAY_CAP_Y0 = 105, PLAY_CAP_X1 = 977, PLAY_CAP_Y1 = 162;
   const playCapImage = new Image();
   playCapImage.src = PLAY_CAP_SRC;
 
@@ -584,24 +609,25 @@ export function startGame() {
     drawPlayButton();
   }
 
-  // Score lives inside the "NIM-BALL" panel — this version of the artwork ships with the
-  // "-" already baked in and no digits at all, so there's nothing to patch/inpaint; we just
-  // draw the digits, team icons and turn-timer bar directly into the empty slot flanking
-  // the original dash. Screen interior (measured from the art): x:[323,437], y:[157,188];
-  // dash center: (380,173.5). Digits moved in from the dash and team icons tucked into the
-  // corners to fit everything inside that same 114x31 slot — see design discussion.
-  const SCORE_SLOT_CY = 177;
-  const SCORE_DIGIT_CX_A = 359, SCORE_DIGIT_CX_B = 401;
-  const SCORE_ICON_D = 20;
-  const SCORE_ICON_CX_A = 337, SCORE_ICON_CX_B = 423;
+  // Score lives on the wood scoreboard plaque baked into arena/frame.webp (see
+  // scripts/bake_arena.py — plaque rect: x:[416,789], y:[73,194], center
+  // (602.5,133), same CENTER_X the pitch itself uses). Unlike the old V1
+  // panel art, this plaque ships blank (no baked dash) — digits, dash, team
+  // icons and the turn-timer bar are all drawn fresh into that empty rect.
+  const SCORE_SLOT_CY = 133;
+  const SCORE_DIGIT_CX_A = CENTER_X - 70, SCORE_DIGIT_CX_B = CENTER_X + 70;
+  const SCORE_ICON_D = 46;
+  const SCORE_ICON_CX_A = CENTER_X - 150, SCORE_ICON_CX_B = CENTER_X + 150;
   // Font per Nimiq's brand guidelines (nimiq-style design system): Mulish, self-hosted
   // via @fontsource/mulish (imported in main.js) rather than the never-actually-loaded
   // 'Baloo 2' this used to reference (it was silently falling back to Arial).
-  const SCORE_FONT = `800 30px 'Mulish', Arial, sans-serif`;
+  const SCORE_FONT = `800 60px 'Mulish', Arial, sans-serif`;
   function drawScorePanel() {
     ctx.save();
     ctx.font = SCORE_FONT;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(90,70,45,0.85)';
+    ctx.fillText('-', CENTER_X, SCORE_SLOT_CY);
     ctx.fillStyle = '#5ecbf5';
     ctx.fillText(String(scoreA), SCORE_DIGIT_CX_A, SCORE_SLOT_CY);
     ctx.fillStyle = '#ffc94d';
@@ -630,7 +656,7 @@ export function startGame() {
 
   // Thin LED/laser strip along the top of the score screen: fills left-to-right over 30s,
   // tinted to whichever team is currently aiming (same palette as their aim halo/digits).
-  const TIMER_BAR_X0 = 327, TIMER_BAR_X1 = 433, TIMER_BAR_Y = 161, TIMER_BAR_H = 3;
+  const TIMER_BAR_X0 = CENTER_X - 150, TIMER_BAR_X1 = CENTER_X + 150, TIMER_BAR_Y = 96, TIMER_BAR_H = 3;
   function drawTurnTimerBar() {
     const t = turnTimerProgress();
     if (t === null) return;

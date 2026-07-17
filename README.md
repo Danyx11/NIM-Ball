@@ -6,18 +6,30 @@ Mini app soccer game for Nimiq — teams shoot orb-shaped pieces at each other's
 
 ```
 index.html        Vite entry (game markup)
+scripts/
+  bake_arena.py   Python/Pillow script that builds public/arena/frame.webp from
+                  design/arena/ source layers
 src/
-  main.js         bootstraps the game + Nimiq Mini App SDK connection
+  main.js         bootstraps the animated background + game + Nimiq Mini App SDK connection
+  background.js   wires the animated constellation background + logo to their assets
   game.js         canvas game: physics, rendering, input, turn flow
+  audio.js        WebAudio SFX + background ambience loop manager
+  identicons.js   thin wrapper around @nimiq/identicons
   nimiq.js        thin wrapper around @nimiq/mini-app-sdk
-  style.css       game styles
+  style.css       game styles + the animated background
 public/           only assets actually loaded by the game (kept lean — this ships)
-  identicons/     team avatar images, rendered on each glob
-  arena/          illustrated arena background + PLAY button sprite
+  identicons/     team bubble avatar art, rendered on each glob
+  arena/          illustrated arena background (generated, see scripts/bake_arena.py)
+                  + PLAY button sprite
+  bg/             animated constellation background + logo
   ball/           ball sprite
+  sfx/            sound effects + background ambience
 design/           source art not wired into the game (drafts, superseded
                   versions, raw generations) — kept for reference, never
                   imported by code, safe to ignore for gameplay work
+design-lab/       local-only sandbox (gitignored) for testing visual layers before
+                  they're baked/ported into design/ + public/ + src/
+physics-lab/      local-only sandbox (gitignored) for prototyping physics tuning
 prototypes/       earlier single-file HTML explorations, kept for reference
 ```
 
@@ -47,3 +59,14 @@ npm run build
 ```
 
 Outputs to `dist/`.
+
+## Regenerating the arena background
+
+`public/arena/frame.webp` is generated from source layers in `design/arena/`, not hand-painted as one flat image:
+
+```bash
+pip install pillow numpy
+python3 scripts/bake_arena.py
+```
+
+Only needed after touching the ice/wood/goal-post/scoreboard source art in `design/arena/` — not part of the regular npm build.

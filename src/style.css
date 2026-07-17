@@ -16,20 +16,23 @@
 
 html, body {
   margin: 0; padding: 0; height: 100%;
-  background: radial-gradient(circle at 50% -10%, var(--bg-mid), var(--bg-deep) 65%);
+  background: #060d1a;
   color: var(--ink);
   overflow: hidden;
   touch-action: none;
   user-select: none;
 }
 
-#app { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; }
+#app { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; }
 
-#stage-wrap { position: relative; width: 100%; max-width: 1100px; }
+/* Bounded by BOTH viewport width and height (not just width) so the board
+   shrinks to fit on short/wide viewports too, leaving visible margin all
+   around for the constellation background — canvas keeps its native
+   1200:905 aspect ratio (see the W/H comment in game.js) via this same
+   ratio baked into the width formula, height:auto below just follows it. */
+#stage-wrap { position: relative; width: min(92vw, 92vh * 1200 / 905, 1100px); }
 canvas {
-  display: block; width: 100%; height: auto; border-radius: 18px;
-  box-shadow: 0 20px 50px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.06);
-  background: #142451; touch-action: none;
+  display: block; width: 100%; height: auto; touch-action: none;
 }
 
 button { font-family: inherit; font-weight: 700; font-size: 14px; border: none; border-radius: 999px; padding: 10px 20px; cursor: pointer; transition: transform .08s ease; }
@@ -48,7 +51,11 @@ button:disabled { opacity: 0.35; cursor: default; }
 .team-pill.a { background: rgba(63,169,245,0.15); color: var(--teamA); }
 .team-pill.b { background: rgba(255,77,94,0.15); color: var(--teamB); }
 
-#startOverlay { position: absolute; inset: 0; border-radius: 18px; display: flex; flex-direction: row; overflow: hidden; }
+/* Inset to the physics/ice rect only (FX0/FY0/FX1/FY1 in game.js — as % of the
+   1200x905 canvas: 13.25%/22.76%/12.83%/22.87%), not the full board — the wood
+   frame, scoreboard plaque and PLAY cap baked around the ice in arena/frame.webp
+   should read as neutral chrome, not get washed in team color before kickoff. */
+#startOverlay { position: absolute; inset: 22.76% 12.83% 22.87% 13.25%; border-radius: 28px; display: flex; flex-direction: row; overflow: hidden; }
 #startOverlay.hidden { display: none; }
 .half { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: background .25s ease; text-align: center; padding: 16px; }
 .half.a { background: rgba(31,111,168,0.55); }
@@ -57,3 +64,140 @@ button:disabled { opacity: 0.35; cursor: default; }
 .half .tag { font-weight: 800; font-size: 18px; letter-spacing: 0.5px; }
 .half .sub { font-size: 12px; color: rgba(255,255,255,0.85); max-width: 150px; }
 .half .check { font-size: 30px; }
+
+/* ---- Animated constellation background, ported from design-lab (see
+   design-lab/design_handoff_scintillement_constellation/README.md) ---- */
+
+  /* #bg-stage is the decorative background layer only — sized to exactly match the
+     fond image's "contain" fit rectangle (via the min() aspect-ratio trick), scaled
+     150% so it fills more of the screen (cropped equally on all sides). */
+  #bg-stage {
+    position: fixed;
+    z-index: 0;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(137.5vw, 137.5vh * 2400 / 1810);
+    height: min(137.5vh, 137.5vw * 1810 / 2400);
+    background: #060716;
+  }
+
+  /* logo/menu are UI chrome, not part of the background art — kept as siblings of
+     #bg-stage (not children) and pinned via position:fixed directly to the real
+     viewport edges, so they stay put regardless of how the fond above is scaled. */
+  #bg-logo {
+    position: fixed;
+    z-index: 2;
+    top: 3%;
+    left: 12%;
+    width: 200px;
+    height: auto;
+  }
+
+  /* Constellation background animation, ported 1:1 from
+     design-lab/design_handoff_scintillement_constellation/ — positions/timings
+     are measured against this exact fond (fond constel nimiq V4.png), see that
+     folder's README for the per-class breakdown (glow-dot/pulse-dot/dim-dot/hex-dim). */
+  /* 4 mirrored fond variants (V4/V4.2/V4.3/V4.4) stacked and slow-crossfaded: each
+     holds still for 20s, then crossfades into the next over 20s (160s total loop,
+     perpetual) so the background alternates rest/transition instead of always drifting.
+     Each .fond-layer bundles its own background image with its OWN constellation
+     overlay (own set of node coordinates, mirrored to match), since the art
+     itself isn't self-symmetric — a shared overlay across variants would drift
+     out of alignment mid-fade. See design-lab/design_handoff_scintillement_constellation/
+     for the base (V4) coordinates; V4.2/V4.3/V4.4 are exact vertical/180/horizontal
+     mirrors, so their coordinates are the same values run through the mirror formula
+     (top->100-top, left->100-left, with a width*aspect correction for classes anchored
+     by their top-left corner rather than centered) rather than re-measured by hand.
+  */
+  #bg-fond-stack { position: absolute; inset: 0; }
+  .fond-layer { position: absolute; inset: 0; background-size: cover; background-position: center; }
+  #fond-v4  { animation: fondCycle0 160s linear infinite; }
+  #fond-v42 { animation: fondCycle1 160s linear infinite; }
+  #fond-v43 { animation: fondCycle2 160s linear infinite; }
+  #fond-v44 { animation: fondCycle3 160s linear infinite; }
+  @keyframes fondCycle0 { 0%{opacity:1;} 12.5%{opacity:1;} 25%{opacity:0;} 87.5%{opacity:0;} 100%{opacity:1;} }
+  @keyframes fondCycle1 { 0%{opacity:0;} 12.5%{opacity:0;} 25%{opacity:1;} 37.5%{opacity:1;} 50%{opacity:0;} 100%{opacity:0;} }
+  @keyframes fondCycle2 { 0%{opacity:0;} 37.5%{opacity:0;} 50%{opacity:1;} 62.5%{opacity:1;} 75%{opacity:0;} 100%{opacity:0;} }
+  @keyframes fondCycle3 { 0%{opacity:0;} 62.5%{opacity:0;} 75%{opacity:1;} 87.5%{opacity:1;} 100%{opacity:0;} }
+
+  .constellation-overlay { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.12; transform: translate(-50%,-50%) scale(0.85); }
+    50% { opacity: 0.9; transform: translate(-50%,-50%) scale(1.2); }
+  }
+  @keyframes hexfade { 0%,100%{opacity:0;} 38%{opacity:0;} 50%{opacity:0.88;} 62%{opacity:0;} }
+  @keyframes dimpulse { 0%,100%{opacity:0;} 45%{opacity:0;} 50%{opacity:0.65;} 55%{opacity:0;} }
+  @keyframes travel1 { 0%{left:24.76%;top:23.84%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:22.90%;top:29.79%;opacity:0;} 100%{left:22.90%;top:29.79%;opacity:0;} }
+  @keyframes travel2 { 0%{left:25.04%;top:34.12%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:24.93%;top:39.77%;opacity:0;} 100%{left:24.93%;top:39.77%;opacity:0;} }
+  @keyframes travel3 { 0%{left:22.34%;top:45.89%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:17.41%;top:50.58%;opacity:0;} 100%{left:17.41%;top:50.58%;opacity:0;} }
+  @keyframes travel4 { 0%{left:14.82%;top:62.18%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:21.50%;top:64.22%;opacity:0;} 100%{left:21.50%;top:64.22%;opacity:0;} }
+  @keyframes travel5 { 0%{left:82.56%;top:33.25%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:81.67%;top:41.56%;opacity:0;} 100%{left:81.67%;top:41.56%;opacity:0;} }
+  @keyframes travel6 { 0%{left:73.78%;top:43.65%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:71.82%;top:49.50%;opacity:0;} 100%{left:71.82%;top:49.50%;opacity:0;} }
+  @keyframes travel7 { 0%{left:82.39%;top:52.36%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:85.55%;top:54.81%;opacity:0;} 100%{left:85.55%;top:54.81%;opacity:0;} }
+  @keyframes travel8 { 0%{left:70.58%;top:70.83%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:73.83%;top:74.62%;opacity:0;} 100%{left:73.83%;top:74.62%;opacity:0;} }
+  @keyframes travel9 { 0%{left:19.18%;top:69.17%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.60%;top:75.76%;opacity:0;} 100%{left:20.60%;top:75.76%;opacity:0;} }
+  @keyframes travel10 { 0%{left:20.60%;top:75.76%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:21.53%;top:78.07%;opacity:0;} 100%{left:21.53%;top:78.07%;opacity:0;} }
+  @keyframes travel11 { 0%{left:21.53%;top:78.07%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.63%;top:80.13%;opacity:0;} 100%{left:20.63%;top:80.13%;opacity:0;} }
+  @keyframes travel12 { 0%{left:66.54%;top:72.82%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:70.58%;top:70.83%;opacity:0;} 100%{left:70.58%;top:70.83%;opacity:0;} }
+  @keyframes travel13 { 0%{left:78.50%;top:33.33%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:81.67%;top:41.56%;opacity:0;} 100%{left:81.67%;top:41.56%;opacity:0;} }
+  @keyframes travel14 { 0%{left:69.71%;top:53.65%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:68.48%;top:56.41%;opacity:0;} 100%{left:68.48%;top:56.41%;opacity:0;} }
+  @keyframes travel15 { 0%{left:20.65%;top:59.45%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:17.41%;top:50.58%;opacity:0;} 100%{left:17.41%;top:50.58%;opacity:0;} }
+  @keyframes travel16 { 0%{left:76.29%;top:60.61%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.77%;top:60.66%;opacity:0;} 100%{left:79.77%;top:60.66%;opacity:0;} }
+  @keyframes travel1_v42 { 0%{left:24.76%;top:76.16%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:22.90%;top:70.21%;opacity:0;} 100%{left:22.90%;top:70.21%;opacity:0;} }
+  @keyframes travel2_v42 { 0%{left:25.04%;top:65.88%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:24.93%;top:60.23%;opacity:0;} 100%{left:24.93%;top:60.23%;opacity:0;} }
+  @keyframes travel3_v42 { 0%{left:22.34%;top:54.11%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:17.41%;top:49.42%;opacity:0;} 100%{left:17.41%;top:49.42%;opacity:0;} }
+  @keyframes travel4_v42 { 0%{left:14.82%;top:37.82%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:21.50%;top:35.78%;opacity:0;} 100%{left:21.50%;top:35.78%;opacity:0;} }
+  @keyframes travel5_v42 { 0%{left:82.56%;top:66.75%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:81.67%;top:58.44%;opacity:0;} 100%{left:81.67%;top:58.44%;opacity:0;} }
+  @keyframes travel6_v42 { 0%{left:73.78%;top:56.35%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:71.82%;top:50.50%;opacity:0;} 100%{left:71.82%;top:50.50%;opacity:0;} }
+  @keyframes travel7_v42 { 0%{left:82.39%;top:47.64%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:85.55%;top:45.19%;opacity:0;} 100%{left:85.55%;top:45.19%;opacity:0;} }
+  @keyframes travel8_v42 { 0%{left:70.58%;top:29.17%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:73.83%;top:25.38%;opacity:0;} 100%{left:73.83%;top:25.38%;opacity:0;} }
+  @keyframes travel9_v42 { 0%{left:19.18%;top:30.83%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.60%;top:24.24%;opacity:0;} 100%{left:20.60%;top:24.24%;opacity:0;} }
+  @keyframes travel10_v42 { 0%{left:20.60%;top:24.24%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:21.53%;top:21.93%;opacity:0;} 100%{left:21.53%;top:21.93%;opacity:0;} }
+  @keyframes travel11_v42 { 0%{left:21.53%;top:21.93%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.63%;top:19.87%;opacity:0;} 100%{left:20.63%;top:19.87%;opacity:0;} }
+  @keyframes travel12_v42 { 0%{left:66.54%;top:27.18%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:70.58%;top:29.17%;opacity:0;} 100%{left:70.58%;top:29.17%;opacity:0;} }
+  @keyframes travel13_v42 { 0%{left:78.50%;top:66.67%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:81.67%;top:58.44%;opacity:0;} 100%{left:81.67%;top:58.44%;opacity:0;} }
+  @keyframes travel14_v42 { 0%{left:69.71%;top:46.35%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:68.48%;top:43.59%;opacity:0;} 100%{left:68.48%;top:43.59%;opacity:0;} }
+  @keyframes travel15_v42 { 0%{left:20.65%;top:40.55%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:17.41%;top:49.42%;opacity:0;} 100%{left:17.41%;top:49.42%;opacity:0;} }
+  @keyframes travel16_v42 { 0%{left:76.29%;top:39.39%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.77%;top:39.34%;opacity:0;} 100%{left:79.77%;top:39.34%;opacity:0;} }
+
+  @keyframes travel1_v43 { 0%{left:75.24%;top:76.16%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:77.10%;top:70.21%;opacity:0;} 100%{left:77.10%;top:70.21%;opacity:0;} }
+  @keyframes travel2_v43 { 0%{left:74.96%;top:65.88%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:75.07%;top:60.23%;opacity:0;} 100%{left:75.07%;top:60.23%;opacity:0;} }
+  @keyframes travel3_v43 { 0%{left:77.66%;top:54.11%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:82.59%;top:49.42%;opacity:0;} 100%{left:82.59%;top:49.42%;opacity:0;} }
+  @keyframes travel4_v43 { 0%{left:85.18%;top:37.82%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:78.50%;top:35.78%;opacity:0;} 100%{left:78.50%;top:35.78%;opacity:0;} }
+  @keyframes travel5_v43 { 0%{left:17.44%;top:66.75%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:18.33%;top:58.44%;opacity:0;} 100%{left:18.33%;top:58.44%;opacity:0;} }
+  @keyframes travel6_v43 { 0%{left:26.22%;top:56.35%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:28.18%;top:50.50%;opacity:0;} 100%{left:28.18%;top:50.50%;opacity:0;} }
+  @keyframes travel7_v43 { 0%{left:17.61%;top:47.64%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:14.45%;top:45.19%;opacity:0;} 100%{left:14.45%;top:45.19%;opacity:0;} }
+  @keyframes travel8_v43 { 0%{left:29.42%;top:29.17%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:26.17%;top:25.38%;opacity:0;} 100%{left:26.17%;top:25.38%;opacity:0;} }
+  @keyframes travel9_v43 { 0%{left:80.82%;top:30.83%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.40%;top:24.24%;opacity:0;} 100%{left:79.40%;top:24.24%;opacity:0;} }
+  @keyframes travel10_v43 { 0%{left:79.40%;top:24.24%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:78.47%;top:21.93%;opacity:0;} 100%{left:78.47%;top:21.93%;opacity:0;} }
+  @keyframes travel11_v43 { 0%{left:78.47%;top:21.93%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.37%;top:19.87%;opacity:0;} 100%{left:79.37%;top:19.87%;opacity:0;} }
+  @keyframes travel12_v43 { 0%{left:33.46%;top:27.18%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:29.42%;top:29.17%;opacity:0;} 100%{left:29.42%;top:29.17%;opacity:0;} }
+  @keyframes travel13_v43 { 0%{left:21.50%;top:66.67%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:18.33%;top:58.44%;opacity:0;} 100%{left:18.33%;top:58.44%;opacity:0;} }
+  @keyframes travel14_v43 { 0%{left:30.29%;top:46.35%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:31.52%;top:43.59%;opacity:0;} 100%{left:31.52%;top:43.59%;opacity:0;} }
+  @keyframes travel15_v43 { 0%{left:79.35%;top:40.55%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:82.59%;top:49.42%;opacity:0;} 100%{left:82.59%;top:49.42%;opacity:0;} }
+  @keyframes travel16_v43 { 0%{left:23.71%;top:39.39%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.23%;top:39.34%;opacity:0;} 100%{left:20.23%;top:39.34%;opacity:0;} }
+
+  @keyframes travel1_v44 { 0%{left:75.24%;top:23.84%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:77.10%;top:29.79%;opacity:0;} 100%{left:77.10%;top:29.79%;opacity:0;} }
+  @keyframes travel2_v44 { 0%{left:74.96%;top:34.12%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:75.07%;top:39.77%;opacity:0;} 100%{left:75.07%;top:39.77%;opacity:0;} }
+  @keyframes travel3_v44 { 0%{left:77.66%;top:45.89%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:82.59%;top:50.58%;opacity:0;} 100%{left:82.59%;top:50.58%;opacity:0;} }
+  @keyframes travel4_v44 { 0%{left:85.18%;top:62.18%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:78.50%;top:64.22%;opacity:0;} 100%{left:78.50%;top:64.22%;opacity:0;} }
+  @keyframes travel5_v44 { 0%{left:17.44%;top:33.25%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:18.33%;top:41.56%;opacity:0;} 100%{left:18.33%;top:41.56%;opacity:0;} }
+  @keyframes travel6_v44 { 0%{left:26.22%;top:43.65%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:28.18%;top:49.50%;opacity:0;} 100%{left:28.18%;top:49.50%;opacity:0;} }
+  @keyframes travel7_v44 { 0%{left:17.61%;top:52.36%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:14.45%;top:54.81%;opacity:0;} 100%{left:14.45%;top:54.81%;opacity:0;} }
+  @keyframes travel8_v44 { 0%{left:29.42%;top:70.83%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:26.17%;top:74.62%;opacity:0;} 100%{left:26.17%;top:74.62%;opacity:0;} }
+  @keyframes travel9_v44 { 0%{left:80.82%;top:69.17%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.40%;top:75.76%;opacity:0;} 100%{left:79.40%;top:75.76%;opacity:0;} }
+  @keyframes travel10_v44 { 0%{left:79.40%;top:75.76%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:78.47%;top:78.07%;opacity:0;} 100%{left:78.47%;top:78.07%;opacity:0;} }
+  @keyframes travel11_v44 { 0%{left:78.47%;top:78.07%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.37%;top:80.13%;opacity:0;} 100%{left:79.37%;top:80.13%;opacity:0;} }
+  @keyframes travel12_v44 { 0%{left:33.46%;top:72.82%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:29.42%;top:70.83%;opacity:0;} 100%{left:29.42%;top:70.83%;opacity:0;} }
+  @keyframes travel13_v44 { 0%{left:21.50%;top:33.33%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:18.33%;top:41.56%;opacity:0;} 100%{left:18.33%;top:41.56%;opacity:0;} }
+  @keyframes travel14_v44 { 0%{left:30.29%;top:53.65%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:31.52%;top:56.41%;opacity:0;} 100%{left:31.52%;top:56.41%;opacity:0;} }
+  @keyframes travel15_v44 { 0%{left:79.35%;top:59.45%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:82.59%;top:50.58%;opacity:0;} 100%{left:82.59%;top:50.58%;opacity:0;} }
+  @keyframes travel16_v44 { 0%{left:23.71%;top:60.61%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.23%;top:60.66%;opacity:0;} 100%{left:20.23%;top:60.66%;opacity:0;} }
+  @media (prefers-reduced-motion: reduce) {
+    .constellation-overlay .glow-dot, .constellation-overlay .pulse-dot,
+    .constellation-overlay .dim-dot, .constellation-overlay .hex-dim { animation: none !important; opacity: 0 !important; }
+    .fond-layer { animation: none !important; }
+    #fond-v4 { opacity: 1 !important; }
+    #fond-v42, #fond-v43, #fond-v44 { opacity: 0 !important; }
+  }
