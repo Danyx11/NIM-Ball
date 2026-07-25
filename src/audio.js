@@ -5,9 +5,9 @@
 // shared <audio> element would.
 const ASSET_BASE = import.meta.env.BASE_URL;
 const SFX_SRC = {
-  hitWall: `${ASSET_BASE}sfx/hit-wall.wav`,   // glob/ball bouncing off a rail
-  hitGlob: `${ASSET_BASE}sfx/hit-glob.wav`,   // glob-glob or glob-ball collision
-  shot: `${ASSET_BASE}sfx/shot.wav`,          // drag released, a glob launches
+  hitWall: `${ASSET_BASE}sfx/hit-wall.wav`,   // stone/ball bouncing off a rail
+  hitStone: `${ASSET_BASE}sfx/hit-stone.wav`,   // stone-stone or stone-ball collision
+  shot: `${ASSET_BASE}sfx/shot.wav`,          // drag released, a stone launches
   goal: `${ASSET_BASE}sfx/goal.wav`,          // ball crosses into the goal mouth
   wipeout: `${ASSET_BASE}sfx/wipeout.wav`,    // a whole team has fallen in
   button: `${ASSET_BASE}sfx/button.wav`,      // PLAY cap pressed

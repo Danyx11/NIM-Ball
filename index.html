@@ -6,6 +6,9 @@
 <title>NIM Ball</title>
 </head>
 <body>
+  <img id="bg-logo" alt="logo">
+  <div id="game-card">
+  <div id="scene">
   <div id="bg-stage">
     <div id="bg-fond-stack">
     <div class="fond-layer" id="fond-v4">
@@ -538,13 +541,27 @@
     </div>
     </div>
   </div>
-  <img id="bg-logo" alt="logo">
+  <img id="bg-nature" alt="">
 
 <div id="app">
   <div id="stage-wrap">
     <canvas id="stage" width="1200" height="905"></canvas>
     <div id="overlay" class="hidden"><div id="ovContent"></div></div>
-    <div id="startOverlay">
+    <div id="modeOverlay" class="team-select">
+      <div class="half a" id="modeLocal">
+        <div class="tag">JOUER EN LOCAL</div>
+        <div class="sub">Les deux joueurs sur le même écran</div>
+      </div>
+      <div class="half b" id="modeLan">
+        <div class="tag">DUEL LAN</div>
+        <div class="sub">Chacun sur sa machine, même wifi</div>
+      </div>
+      <div class="half c" id="modeSolo">
+        <div class="tag">SOLO VS IA</div>
+        <div class="sub">Entraîne-toi contre l'ordinateur</div>
+      </div>
+    </div>
+    <div id="startOverlay" class="team-select hidden">
       <div class="half a" id="halfA">
         <div class="check" id="checkA">○</div>
         <div class="tag">ÉQUIPE BLEUE</div>
@@ -558,6 +575,14 @@
     </div>
   </div>
 </div>
+  <div id="fg-stage">
+    <div id="fg-nuit"></div>
+    <div id="fg-ombres-mask">
+      <img id="fg-ombres" alt="">
+    </div>
+  </div>
+  </div>
+  </div>
 
 <script type="module" src="./src/main.js"></script>
 </body>

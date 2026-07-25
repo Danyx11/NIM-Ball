@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "duel": "node server/duel-server.js",
+    "lan-server": "node server/lan-server.js"
   },
   "dependencies": {
     "@fontsource/mulish": "^5.2.8",
     "@nimiq/identicons": "^1.6.2",
-    "@nimiq/mini-app-sdk": "^0.1.0"
+    "@nimiq/mini-app-sdk": "^0.1.0",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "vite": "^8.1.0"

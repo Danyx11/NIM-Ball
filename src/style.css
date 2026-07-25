@@ -16,23 +16,92 @@
 
 html, body {
   margin: 0; padding: 0; height: 100%;
-  background: #060d1a;
+  background:
+    radial-gradient(1100px 700px at 15% -10%, rgba(232,169,79,0.08), transparent 60%),
+    #0b0d12;
   color: var(--ink);
   overflow: hidden;
   touch-action: none;
   user-select: none;
 }
 
-#app { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; }
+/* Everything the player interacts with (constellation, forest, board, night
+   overlay) lives inside this one bordered card floating on the dark page
+   background — validated in an Artifact mockup before porting here. #bg-logo
+   is the one piece of "Nimiq chrome" deliberately kept OUTSIDE the card, in
+   the dark margin, instead of overlapping the scene like before. */
+:root {
+  /* Shared with #bg-logo below so the logo can center itself in the margin
+     between the viewport edge and the card's actual left edge, whatever
+     that edge ends up being at a given viewport size. */
+  --card-w: min(82vw, 1300px, calc(90vh * 2400 / 1450));
+}
 
-/* Width-only sizing, ported 1:1 from design-lab's #ui-physics-bounds
-   (`width: 51vw; max-width: 834px` on the 887x492 physics box) — converted to
-   this element's own 1200x905 canvas space by the constant 1200/887 ratio, so
-   the board matches the size validated in the lab instead of also being
-   capped by viewport height (that cap fixed short/wide desktop windows but
-   under-sized the board everywhere else — the real target, phones in
-   portrait, has height to spare and matches the lab's own assumption). */
-#stage-wrap { position: relative; width: min(69vw, 1128px); }
+#bg-logo {
+  position: fixed;
+  z-index: 2;
+  top: 16px;
+  /* Centered in the margin strip left of the card: that margin spans from
+     the viewport edge (0) to the card's left edge ((100vw - card-w)/2), so
+     the logo's own center sits at a quarter of (100vw - card-w). */
+  left: calc((100vw - var(--card-w)) / 4 - 85px);
+  width: 170px;
+  height: auto;
+}
+
+#game-card {
+  position: fixed;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: var(--card-w);
+  aspect-ratio: 2400 / 1450;
+  border: 1px solid #232838;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #060716;
+  box-shadow: 0 30px 80px -30px rgba(0,0,0,0.6);
+}
+
+/* Zooms the whole scene (constellation + forest + board) in together,
+   uniformly, so the board reads bigger inside the card without the
+   starfield behind it staying at a fixed, un-zoomed scale — a first attempt
+   that grew only the board looked "zoomed" in a way that didn't match the
+   background at all. */
+#scene {
+  position: absolute;
+  inset: 0;
+  /* 1.4 clipped the board's own bottom edge against the card (the
+     translateY(6.52%) art-correction on #stage-wrap shifts the board off
+     .scene's true center, so scaling amplifies that downward offset —
+     at 1.4 the board's bottom ran ~7px past the card's fixed-size box).
+     1.32 keeps a small safety margin at the bottom while still reading
+     bigger than the original 1.25. */
+  transform: scale(1);
+  transform-origin: center;
+}
+
+#app { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; }
+
+/* Board width as a fraction of the CARD (validated in the mockup at 74%),
+   not the viewport — #game-card's own min(70vw,1100px) already handles the
+   viewport-responsive sizing. translateY(6.52%) recenters the ice+plank art
+   actually visible inside arena/frame.webp: that file's own canvas has a lot
+   of empty transparent margin below the wood frame and almost none above the
+   scoreboard plank (measured by scanning its alpha channel — visible content
+   spans rows 74-713 of 905), so centering the raw 1200x905 box off-centers
+   the art that's actually drawn. Applied on top of the flex centering above,
+   not instead of it. */
+/* 74% (the mockup-validated figure) plus the enlarged #game-card from this
+   session no longer fit together: translateY(6.52%) shifts the board down
+   by more than the vertical slack #game-card's fixed 2400/1450 aspect ratio
+   leaves around a 74%-wide, 1200/905-aspect board, so the board's own
+   bottom edge (wood frame + PLAY cap) was being clipped by the card's
+   overflow:hidden — the real "seam" being reported. 70% restores a safe
+   margin on both edges; still bigger in absolute px than the board was
+   before this session's #game-card enlargement. */
+#stage-wrap { position: relative; width: 70%; transform: translateY(6.52%); }
 canvas {
   display: block; width: 100%; height: auto; touch-action: none;
 }
@@ -57,43 +126,39 @@ button:disabled { opacity: 0.35; cursor: default; }
    1200x905 canvas: 13.25%/22.76%/12.83%/22.87%), not the full board — the wood
    frame, scoreboard plaque and PLAY cap baked around the ice in arena/frame.webp
    should read as neutral chrome, not get washed in team color before kickoff. */
-#startOverlay { position: absolute; inset: 22.76% 12.83% 22.87% 13.25%; border-radius: 28px; display: flex; flex-direction: row; overflow: hidden; }
-#startOverlay.hidden { display: none; }
+/* Shared by #startOverlay (local pass-and-play ready-tap) and #modeOverlay
+   (local vs LAN mode picker, shown first) — same two-column layout/palette. */
+.team-select { position: absolute; inset: 22.76% 12.83% 22.87% 13.25%; border-radius: 28px; display: flex; flex-direction: row; overflow: hidden; }
+.team-select.hidden { display: none; }
 .half { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: background .25s ease; text-align: center; padding: 16px; }
 .half.a { background: rgba(31,111,168,0.55); }
 .half.b { background: rgba(168,50,71,0.55); }
+.half.c { background: rgba(110,80,168,0.55); }
 .half.ready { background: rgba(20,40,30,0.55); }
 .half .tag { font-weight: 800; font-size: 18px; letter-spacing: 0.5px; }
 .half .sub { font-size: 12px; color: rgba(255,255,255,0.85); max-width: 150px; }
 .half .check { font-size: 30px; }
 
+#overlay input[type="text"] {
+  font-family: inherit; font-size: 15px; color: var(--ink); background: var(--bg-mid);
+  border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; padding: 12px 14px;
+  width: 260px; max-width: 100%; text-align: center;
+}
+#overlay input[type="text"]::placeholder { color: var(--ink-dim); }
+.lan-error { color: var(--teamB) !important; }
+
 /* ---- Animated constellation background, ported from design-lab (see
    design-lab/design_handoff_scintillement_constellation/README.md) ---- */
 
-  /* #bg-stage is the decorative background layer only — sized to exactly match the
-     fond image's "contain" fit rectangle (via the min() aspect-ratio trick), scaled
-     150% so it fills more of the screen (cropped equally on all sides). */
+  /* #bg-stage now just fills the card's own scene (100%, via inset:0) instead
+     of being independently sized/centered against the viewport — the card
+     (#game-card) is what handles the viewport-responsive sizing now, and
+     .fond-layer's own background-size:cover fills whatever box this ends up
+     being, same as before. */
   #bg-stage {
-    position: fixed;
-    z-index: 0;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: min(137.5vw, 137.5vh * 2400 / 1810);
-    height: min(137.5vh, 137.5vw * 1810 / 2400);
+    position: absolute;
+    inset: 0;
     background: #060716;
-  }
-
-  /* logo/menu are UI chrome, not part of the background art — kept as siblings of
-     #bg-stage (not children) and pinned via position:fixed directly to the real
-     viewport edges, so they stay put regardless of how the fond above is scaled. */
-  #bg-logo {
-    position: fixed;
-    z-index: 2;
-    top: 3%;
-    left: 12%;
-    width: 200px;
-    height: auto;
   }
 
   /* Constellation background animation, ported 1:1 from
@@ -196,10 +261,121 @@ button:disabled { opacity: 0.35; cursor: default; }
   @keyframes travel14_v44 { 0%{left:30.29%;top:53.65%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:31.52%;top:56.41%;opacity:0;} 100%{left:31.52%;top:56.41%;opacity:0;} }
   @keyframes travel15_v44 { 0%{left:79.35%;top:59.45%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:82.59%;top:50.58%;opacity:0;} 100%{left:82.59%;top:50.58%;opacity:0;} }
   @keyframes travel16_v44 { 0%{left:23.71%;top:60.61%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.23%;top:60.66%;opacity:0;} 100%{left:20.23%;top:60.66%;opacity:0;} }
+  /* travelN keyframes animate left/top (layout-triggering) on 64 elements —
+     measured as the single most expensive piece of the whole background (see
+     perf audit), far above the opacity/transform-only twinkle/dimpulse/hexfade
+     animations on the other 356 dots. Neutralized for perf: opacity:0 matches
+     these dots' own resting state (invisible ~87% of their own cycle anyway),
+     so this reads as "no shooting stars" rather than "some dots stuck
+     visible". Kept reversible — drop this rule to restore the effect. */
+  .pulse-dot { animation: none !important; opacity: 0 !important; }
+
+  /* twinkle (glow-dot, 248 elements) only ever animates opacity/transform
+     (compositor-only, no layout) — measured as "free" in the perf audit —
+     but neutralized anyway on request to simplify testing. The centering
+     transform normally comes from the twinkle keyframe itself (no base
+     .glow-dot rule sets it), so it has to be restated here or all 248 stars
+     shift by half their own size once the animation stops applying it.
+     0.5 opacity / scale(1) is the keyframe's own midpoint, so stars stay
+     visible at roughly their average brightness instead of vanishing. */
+  .glow-dot { animation: none !important; opacity: 0.5 !important; transform: translate(-50%, -50%) scale(1) !important; }
+
   @media (prefers-reduced-motion: reduce) {
     .constellation-overlay .glow-dot, .constellation-overlay .pulse-dot,
     .constellation-overlay .dim-dot, .constellation-overlay .hex-dim { animation: none !important; opacity: 0 !important; }
     .fond-layer { animation: none !important; }
     #fond-v4 { opacity: 1 !important; }
     #fond-v42, #fond-v43, #fond-v44 { opacity: 0 !important; }
+  }
+
+/* ---- Pinède night forest layers, ported from design-lab's
+   "nimball-designlab fond pinede.xcf" experiment, then re-validated against
+   an Artifact mockup of the bordered #game-card before landing here ----
+   #bg-nature and #fg-stage are SIBLINGS of #app inside .scene (not nested in
+   #stage-wrap) — sized as a percentage of .scene itself, same as the
+   mockup's .nature/.nuit were siblings of .board inside .scene, not nested
+   inside it. Nesting them inside #stage-wrap instead would size them off
+   the BOARD's own 74%-of-scene box (108% of 74%, not 108% of the full
+   scene) and land somewhere noticeably smaller than what was validated. */
+
+  /* 130% (was 108%, validated at .scene scale 1.25): object-fit:contain fits
+     nature-pinede.webp by height, so its own top/bottom picture edges sit
+     right at this box's top/bottom — at 108% those edges landed just
+     inside the card's fixed bounds instead of bleeding past them, showing
+     up as a visible seam where the picture stops and the card's plain
+     background starts. 130% pushes both edges safely outside the card at
+     any .scene scale we're likely to use. */
+  #bg-nature {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) translateY(6.52%);
+    width: 130%;
+    height: 130%;
+    object-fit: contain;
+    pointer-events: none;
+  }
+
+  #fg-stage {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) translateY(6.52%);
+    width: 130%;
+    height: 130%;
+    pointer-events: none;
+  }
+
+  /* #fg-nuit and #fg-ombres-mask (+ its #fg-ombres child) are the only two
+     full-scene layers using mix-blend-mode/mask-image — the specific CSS
+     features that force the browser to isolate and recompose a region
+     instead of just stacking images, and the prime suspect behind "large
+     window = slow, small window = fine" (see perf audit: compositing cost
+     scales with actual on-screen pixel area for these, unlike plain
+     opacity-animated images). display:none (not opacity:0) so the browser
+     drops them from painting entirely rather than keeping them as an
+     invisible-but-still-composited blend layer. #bg-nature (plain image,
+     no blend/mask) stays on. Reversible — drop this rule to restore both. */
+  #fg-nuit, #fg-ombres-mask { display: none !important; }
+
+  /* Night tint: a flat multiply color (sampled from the xcf's "nuit" layer,
+     which turned out to be a solid fill, not a texture) rather than an image
+     asset. 20% read as too strong once seen against the actual card/zoom —
+     dialed back to 10% in the mockup and confirmed there before porting. */
+  #fg-nuit {
+    position: absolute;
+    inset: 0;
+    background: rgb(16, 32, 59);
+    mix-blend-mode: multiply;
+    opacity: 0.10;
+  }
+
+  /* Tree-shadow silhouette. The mask has to live on a non-rotating WRAPPER
+     around the image, not on the image itself — a mask-image applied
+     directly to a rotating element rotates WITH it (same transform), which
+     would spin the ellipse "window" along with the shadow instead of
+     keeping it fixed. Percentages here (position/size of #fg-ombres,
+     radii/center of the mask) are the exact proportions validated in the
+     design-lab test against its 2560x1600 stage, so they carry over to
+     #fg-stage's own box at any size.
+     Rotation animation removed for perf: mix-blend-mode + mask-image on a
+     continuously-animating element forces the browser to recompute the
+     masked blend every frame instead of caching it, and the 500s/turn spin
+     was visually imperceptible anyway — see perf audit, kept in reserve to
+     revisit if this layer survives the visual redesign. */
+  #fg-ombres-mask {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    -webkit-mask-image: radial-gradient(ellipse 53.125% 51.25% at 50% 50%, black 55%, transparent 95%);
+    mask-image: radial-gradient(ellipse 53.125% 51.25% at 50% 50%, black 55%, transparent 95%);
+  }
+  #fg-ombres {
+    position: absolute;
+    left: 11.21%;
+    top: -0.75%;
+    width: 82.77%;
+    height: 106.31%;
+    mix-blend-mode: multiply;
+    opacity: 0.35;
   }
