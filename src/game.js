@@ -6,7 +6,7 @@
 // still resolve when the app is served from a subpath, e.g. GitHub Pages at
 // https://danyx11.github.io/NIM-Ball/.
 import { createAudio } from './audio.js';
-import { getIdenticonCanvas } from './identicons.js';
+import { getIdenticonCanvas, getIdenticonPngDataUrl } from './identicons.js';
 import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
 import { isBasicLaser } from './settings.js';
 
@@ -285,14 +285,22 @@ export function startGame(opts = {}) {
   // in-polygon test). Purely cosmetic/tunable numbers, adjust freely by feel —
   // was a pitch-relative formula (fifth, then two-fifths of the shorter pitch
   // dimension), now a flat px value per feedback.
-  const SWEEP_R = 150;
-  const SWEEP_FRICTION_BONUS = 1; // was 0.3, then 0.5, 0.6, 0.7, 0.8 — 100%: zero friction inside the patch (frictionless glide until it exits), tune by feel
+  const SWEEP_R = 130;
+  // Above 1 the friction multiplier itself exceeds 1 (withSweepBoost's
+  // (1-SWEEP_FRICTION_BONUS) factor goes negative), so this isn't "less
+  // friction" anymore but active acceleration: anything inside ramps up to
+  // MAX_SPEED and holds there (the existing clamp in physicsStep/
+  // stepGhostBodies still applies) instead of just decaying slower.
+  const SWEEP_FRICTION_BONUS = 1.1; // was ...0.8, 1, then 1.2 — 110%: accelerates rather than just gliding, tune by feel
 
   // Baked once (a soft white/ice radial falloff, 2x-oversampled like
   // ballSprite above) rather than recomputing a gradient every frame — a
   // brightening wash meant to read as thinner/glassier ice, not a flat
-  // sticker, so it's drawn with 'lighten' (see drawSweepZone) instead of
-  // plain alpha compositing.
+  // sticker. Drawn with 'soft-light' (see drawSweepZone), not 'lighten' —
+  // 'lighten' just maxes toward the source color, so a high-alpha center
+  // washed out the ice art's own scratch/grain texture underneath it;
+  // 'soft-light' modulates off the existing pixel instead of overriding it,
+  // keeping the grain/grooves visible through the patch.
   const sweepSprite = document.createElement('canvas');
   (function bakeSweepSprite() {
     const S = Math.round(SWEEP_R * 4);
@@ -300,11 +308,17 @@ export function startGame(opts = {}) {
     const sctx = sweepSprite.getContext('2d');
     const cx = S / 2, cy = S / 2, r = S / 2;
     const grad = sctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-    grad.addColorStop(0, 'rgba(255,255,255,0.92)');
-    grad.addColorStop(0.7, 'rgba(255,255,255,0.58)');
+    grad.addColorStop(0, 'rgba(255,255,255,0.97)');
+    grad.addColorStop(0.7, 'rgba(255,255,255,0.72)');
     grad.addColorStop(1, 'rgba(255,255,255,0)');
     sctx.fillStyle = grad;
     sctx.beginPath(); sctx.arc(cx, cy, r, 0, Math.PI * 2); sctx.fill();
+    // Thin rim so the patch's own boundary reads clearly even where the
+    // fill above is faint — inset slightly from the sprite's own edge so the
+    // stroke isn't itself clipped/aliased against the canvas boundary.
+    sctx.strokeStyle = 'rgba(255,255,255,0.75)';
+    sctx.lineWidth = Math.max(1, S * 0.006);
+    sctx.beginPath(); sctx.arc(cx, cy, r * 0.94, 0, Math.PI * 2); sctx.stroke();
   })();
   // Clipped to the ice rect so a patch placed near an edge has its overflow
   // cropped away instead of spilling onto the wood frame art — cosmetic only,
@@ -316,7 +330,7 @@ export function startGame(opts = {}) {
     ctx.beginPath();
     ctx.rect(FX0, FY0, FX1 - FX0, FY1 - FY0);
     ctx.clip();
-    ctx.globalCompositeOperation = 'lighten';
+    ctx.globalCompositeOperation = 'soft-light';
     const d = sw.r * 2;
     ctx.drawImage(sweepSprite, sw.x - sw.r, sw.y - sw.r, d, d);
     ctx.restore();
@@ -696,6 +710,41 @@ export function startGame(opts = {}) {
     const u = Math.max(-1, Math.min(1, depth / r));
     return 0.5 + (u * Math.sqrt(1 - u * u) + Math.asin(u)) / Math.PI;
   }
+  // Left/right walls (wallX = FX0 or FX1) are only solid above GY0 and below
+  // GY1 — the goal mouth in between is open netting. Treated as two wall
+  // SEGMENTS rather than one infinite line + a hard center-y switch: closestY
+  // clamps to whichever segment is nearer, degenerating to a flat perpendicular
+  // wall hit when e.y is already outside the mouth, and to the segment's own
+  // endpoint (the goal post tip) when e.y falls inside the mouth range but the
+  // circle still overlaps that tip. This replaces an earlier version that
+  // picked the wall-vs-open-mouth branch purely from whether the center-y was
+  // inside GOAL_HALF_HEIGHT — a circle grazing a post at an angle could have
+  // its center dip into the "open mouth" branch (no collision at all, free to
+  // penetrate past wallX) for a frame or two, then snap back into the flat-wall
+  // branch once e.y drifted back out, correcting a now-large overlap in one
+  // frame — reading as a teleport-then-bounce instead of a clean corner
+  // deflection. Returns true (and applies the bounce) if the circle is
+  // actually touching wall-or-post; false if it's clear (e.g. deep in the open
+  // mouth, where the goal-fall check below takes over instead).
+  function collideGoalSide(e, wallX) {
+    let closestY;
+    if (e.y <= GY0) closestY = e.y;
+    else if (e.y >= GY1) closestY = e.y;
+    else closestY = (e.y - GY0 <= GY1 - e.y) ? GY0 : GY1;
+    const dx = e.x - wallX, dy = e.y - closestY;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0 || dist >= e.r) return false;
+    const nx = dx / dist, ny = dy / dist;
+    const vDotN = e.vx * nx + e.vy * ny;
+    const spd = Math.abs(vDotN);
+    const overlap = e.r - dist;
+    e.x += nx * overlap; e.y += ny * overlap;
+    e.vx -= (1 + WALL_RESTITUTION) * vDotN * nx;
+    e.vy -= (1 + WALL_RESTITUTION) * vDotN * ny;
+    triggerSquish(e, nx, ny, spd);
+    playWallHit(spd);
+    return true;
+  }
   // Less per-tick speed loss inside a currently-committed sweep patch (see
   // the `sweep` state comment) — scales the friction DEFICIT rather than fr
   // itself, since fr sits so close to 1 already that scaling it directly
@@ -754,16 +803,19 @@ export function startGame(opts = {}) {
       if (e.out || e.falling) continue; // fallen (or falling) into the goal: frozen until next round
       if (e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, -1, spd); playWallHit(spd); }
       if (e.y + e.r > FY1) { const spd = Math.abs(e.vy); e.y = FY1 - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); playWallHit(spd); }
-      const inGoalMouthY = Math.abs(e.y - CY) < GOAL_HALF_HEIGHT;
-      if (!inGoalMouthY) {
-        if (e.x - e.r < FX0) { const spd = Math.abs(e.vx); e.x = FX0 + e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, -1, 0, spd); playWallHit(spd); }
-        if (e.x + e.r > FX1) { const spd = Math.abs(e.vx); e.x = FX1 - e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); playWallHit(spd); }
-      } else {
-        // in the goal mouth: lost once enough of the circle has crossed the goal's
-        // physical boundary (FX0/FX1) instead of bouncing off the net. A stone just
-        // shrinks away until next round; the ball crossing its own (lower)
-        // BALL_GOAL_FRACTION threshold is what actually counts the goal — and gets
-        // the identical shrink-away treatment instead of vanishing outright.
+      // See collideGoalSide above: posts are the corners of the two wall
+      // segments flanking the open mouth, so a stone grazing one bounces off
+      // the post tip cleanly instead of the mouth/wall branches fighting over
+      // it frame to frame.
+      let blockedByPost = false;
+      if (e.x - e.r < FX0) blockedByPost = collideGoalSide(e, FX0) || blockedByPost;
+      if (e.x + e.r > FX1) blockedByPost = collideGoalSide(e, FX1) || blockedByPost;
+      if (!blockedByPost && Math.abs(e.y - CY) < GOAL_HALF_HEIGHT) {
+        // in the goal mouth and clear of both posts: lost once enough of the circle
+        // has crossed the goal's physical boundary (FX0/FX1) instead of bouncing off
+        // the net. A stone just shrinks away until next round; the ball crossing its
+        // own (lower) BALL_GOAL_FRACTION threshold is what actually counts the goal —
+        // and gets the identical shrink-away treatment instead of vanishing outright.
         const depthPast = Math.max(FX0 - e.x, e.x - FX1);
         const lossFraction = e === entities.ball ? BALL_GOAL_FRACTION : STONE_LOSS_FRACTION;
         if (circleFractionPast(depthPast, e.r) >= lossFraction) {
@@ -911,32 +963,124 @@ export function startGame(opts = {}) {
   const GOAL_PAUSE_MS = 3000;
   function onGoal(scoringTeam, isWipeout) {
     audio.play(isWipeout ? 'wipeout' : 'goal');
-    if (scoringTeam === 'A') scoreA++; else scoreB++;
-    const isMatchWin = scoreA >= WIN_SCORE || scoreB >= WIN_SCORE;
-    if (!isMatchWin) round++;
     // Same GOAL_PAUSE_MS pause whether the round continues or the match just
     // ended — even a winning goal/wipeout is instantly resolved as a state
     // flip, but the shot's impact is still playing out (ball still sliding
     // into the net, other stones bouncing/squishing) and phase stays 'goal'
     // through this wait so physicsStep keeps running (see loop()) and lets
-    // that finish before we cut to either the next round or the victory screen.
-    setTimeout(isMatchWin ? showVictory : beginRoundReset, GOAL_PAUSE_MS);
+    // that finish before we cut to either the next round or the result panel.
+    // The score itself is bumped only once that wait is over too — scoreA/B
+    // feed the scoreboard digits every frame regardless of phase, so
+    // incrementing them here immediately would flash the new score on the
+    // board a full GOAL_PAUSE_MS before the result panel shows it.
+    setTimeout(() => {
+      if (scoringTeam === 'A') scoreA++; else scoreB++;
+      const isMatchWin = scoreA >= WIN_SCORE || scoreB >= WIN_SCORE;
+      if (isMatchWin) {
+        showVictory();
+      } else {
+        round++;
+        // Both fire at once and run independently: beginRoundReset() keeps its
+        // existing timing/animation untouched, the panel just sits on top of it
+        // (mostly hiding it, same #overlay backdrop as any other dialog here).
+        // The next aim phase (and its turn timer) only starts once the slide
+        // animation AND the panel dismiss have both happened — see
+        // maybeAdvanceRound(), called from both updateRoundReset() and the
+        // panel's click handler below, whichever finishes last.
+        beginRoundReset();
+        showGoalPanel(scoringTeam);
+      }
+    }, GOAL_PAUSE_MS);
+  }
+
+  // ---------- Result panel (goal / match win) ----------
+  // Same shared #overlay component as the exit-confirm dialog and every other
+  // dialog in this file — a big identicon (raw, not the on-board hex bubble,
+  // so it reads clearly at this size) with the team's address underneath, a
+  // colored badge next to it ("+1" mid-match, "GAGNÉ"/"PERDU" on the deciding
+  // goal), and the updated score in each team's own color below that.
+  const RESULT_IDENTICON_SIZE = 512; // shares getIdenticonCanvas's per-address cache with the bubble-baking pipeline
+  function resultPanelHtml(team, badgeCls, badgeLabel, extraHtml) {
+    return `
+      <div class="goal-identicon-wrap">
+        <img class="goal-identicon" id="goalIdenticonImg" alt="">
+        <span class="goal-badge ${badgeCls}">${badgeLabel}</span>
+      </div>
+      <div class="goal-address">${IDENTICON_ADDRESS[team]}</div>
+      <div class="goal-score">
+        <span class="goal-score-a">${scoreA}</span><span class="goal-score-sep">–</span><span class="goal-score-b">${scoreB}</span>
+      </div>
+      ${extraHtml || ''}
+    `;
+  }
+  function fillResultIdenticon(team) {
+    getIdenticonPngDataUrl(IDENTICON_ADDRESS[team], RESULT_IDENTICON_SIZE).then((url) => {
+      const img = document.getElementById('goalIdenticonImg');
+      if (img) img.src = url; // guard: overlay may already have moved on by the time this resolves
+    });
+  }
+
+  let roundResetAnimDone = false;
+  let goalPanelDismissed = false;
+  function maybeAdvanceRound() {
+    if (roundResetAnimDone && goalPanelDismissed) beginAimPhase();
+  }
+  function showGoalPanel(scoringTeam) {
+    const cls = scoringTeam === 'A' ? 'a' : 'b';
+    showOverlay(resultPanelHtml(scoringTeam, cls, '+1'));
+    fillResultIdenticon(scoringTeam);
+    // Click-anywhere dismiss (no buttons here) — closing early doesn't rush
+    // beginAimPhase(): maybeAdvanceRound() still waits on the slide animation
+    // if that hasn't finished yet.
+    overlay.addEventListener('click', () => {
+      hideOverlay();
+      goalPanelDismissed = true;
+      maybeAdvanceRound();
+    }, { once: true });
   }
   function showVictory() {
     phase = 'gameover';
     audio.play('win');
-    const winner = scoreA >= WIN_SCORE ? 'BLEUE' : 'ROUGE';
-    const cls = scoreA >= WIN_SCORE ? 'a' : 'b';
-    showOverlay(`
-      <span class="team-pill ${cls}">ÉQUIPE ${winner}</span>
-      <h2>Victoire !</h2>
-      <p>Score final ${scoreA} – ${scoreB}</p>
-      <button class="bigbtn" id="playAgainBtn">Rejouer</button>
-    `);
-    document.getElementById('playAgainBtn').onclick = () => {
+    const winningTeam = scoreA >= WIN_SCORE ? 'A' : 'B';
+    // LAN: each client only ever sees its own result (gagné/perdu), never both
+    // sides at once. Local pass-and-play has no "own team" to speak of (both
+    // players share the screen) — kept dev-only, see CLAUDE.md — so it just
+    // always features the winner, same as before this panel existed.
+    const featuredTeam = net ? myTeam : winningTeam;
+    const featuredWon = featuredTeam === winningTeam;
+    const cls = featuredTeam === 'A' ? 'a' : 'b';
+    const label = featuredWon ? 'GAGNÉ' : 'PERDU';
+    showOverlay(resultPanelHtml(featuredTeam, cls, label, `
+      <div class="goal-actions">
+        <button class="bigbtn" id="goalReplayBtn">Rejouer</button>
+        <button class="bigbtn" id="goalShareBtn">Partager</button>
+        <button class="bigbtn" id="goalMenuBtn">Menu</button>
+      </div>
+    `));
+    fillResultIdenticon(featuredTeam);
+    document.getElementById('goalReplayBtn').onclick = () => {
       scoreA = 0; scoreB = 0; round = 1;
       sweep.A.used = false; sweep.B.used = false;
       resetPositions(); beginAimPhase(); hideOverlay();
+    };
+    document.getElementById('goalMenuBtn').onclick = () => location.reload();
+    document.getElementById('goalShareBtn').onclick = async () => {
+      // Content/mechanism kept intentionally simple for now (native share
+      // sheet, clipboard fallback) — to be reworked once there's more to
+      // share than just the final score.
+      const resultText = `J'ai ${featuredWon ? 'gagné' : 'perdu'} sur Nim-Curl ! Score final : ${scoreA}–${scoreB}`;
+      const shareBtn = document.getElementById('goalShareBtn');
+      if (navigator.share) {
+        try { await navigator.share({ title: 'Nim-Curl', text: resultText, url: location.href }); }
+        catch { /* user cancelled the native share sheet — nothing to do */ }
+      } else if (navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(`${resultText} ${location.href}`);
+          const original = shareBtn.textContent;
+          shareBtn.textContent = 'Copié !';
+          setTimeout(() => { shareBtn.textContent = original; }, 1500);
+        } catch { /* e.g. document lost focus right as this fired — nothing to do */ }
+      }
     };
   }
 
@@ -950,6 +1094,10 @@ export function startGame(opts = {}) {
   const ROUND_RESET_REVIVE_MS = 1000;
   let roundResetStart = 0;
   function beginRoundReset() {
+    // Gates the eventual beginAimPhase() call in updateRoundReset() — see
+    // maybeAdvanceRound()/showGoalPanel(), fired alongside this same call.
+    roundResetAnimDone = false;
+    goalPanelDismissed = false;
     // A real round boundary (goal/wipeout) — each team's single sweep
     // placement for the round to come is available again.
     sweep.A.used = false; sweep.B.used = false;
@@ -981,8 +1129,27 @@ export function startGame(opts = {}) {
     b.vx = 0; b.vy = 0;
     roundResetStart = performance.now();
     phase = 'roundReset';
+    // Safety net: updateRoundReset() only ever runs from inside loop()'s own
+    // requestAnimationFrame, which a backgrounded/hidden tab can starve of
+    // frames for the whole animation (rAF pauses, but setTimeout doesn't) —
+    // without this, a stone/ball that fell in stays stuck invisible at
+    // fallScale 0 forever, since nothing else ever finalizes it. This forces
+    // one last call after the animation's nominal duration has really
+    // elapsed; updateRoundReset() itself is a no-op once already finished
+    // (see the guard at its top), so this is safe to fire even when rAF
+    // handled everything normally.
+    setTimeout(() => { if (phase === 'roundReset') updateRoundReset(); }, ROUND_RESET_MOVE_MS + 150);
   }
   function updateRoundReset() {
+    // phase deliberately stays 'roundReset' until the goal panel is
+    // dismissed (see maybeAdvanceRound/showGoalPanel), which is often many
+    // frames after the slide/grow animation itself already finished — but
+    // loop() keeps calling this every one of those frames regardless. Once
+    // finalized, _resetFromX/_resetToX etc. are cleared to undefined, so
+    // re-running the interpolation below would corrupt every stone's (and
+    // the ball's) position. Bail out immediately once done; only the next
+    // beginRoundReset() call clears this flag again.
+    if (roundResetAnimDone) return;
     const elapsed = performance.now() - roundResetStart;
     const moveT = easeInOutQuad(Math.min(1, elapsed / ROUND_RESET_MOVE_MS));
     const reviveT = easeInOutQuad(Math.min(1, elapsed / ROUND_RESET_REVIVE_MS));
@@ -1005,7 +1172,11 @@ export function startGame(opts = {}) {
       }
       b.x = CENTER_X; b.y = CY; b.fallScale = 1;
       b._resetFromX = b._resetFromY = b._resetGrow = undefined;
-      beginAimPhase();
+      // Doesn't call beginAimPhase() directly — the goal panel shown alongside
+      // beginRoundReset() (see onGoal) may still be up, and the next aim
+      // phase/turn timer should only start once that's been dismissed too.
+      roundResetAnimDone = true;
+      maybeAdvanceRound();
     }
   }
 
@@ -1797,6 +1968,27 @@ export function startGame(opts = {}) {
     startNewLeg(a); startNewLeg(b2);
     return true;
   }
+  // Ghost-body counterpart to physicsStep's collideGoalSide (see the comment
+  // there for why posts need their own corner check instead of a hard
+  // center-y switch) — same math, but returns the drawn contact point instead
+  // of playing squish/audio, since this runs every frame just to predict the
+  // laser line, not to resolve a real impact.
+  function ghostCollideGoalSide(b, wallX) {
+    let closestY;
+    if (b.y <= GY0) closestY = b.y;
+    else if (b.y >= GY1) closestY = b.y;
+    else closestY = (b.y - GY0 <= GY1 - b.y) ? GY0 : GY1;
+    const dx = b.x - wallX, dy = b.y - closestY;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0 || dist >= b.r) return null;
+    const nx = dx / dist, ny = dy / dist;
+    const vDotN = b.vx * nx + b.vy * ny;
+    const overlap = b.r - dist;
+    b.x += nx * overlap; b.y += ny * overlap;
+    b.vx -= (1 + WALL_RESTITUTION) * vDotN * nx;
+    b.vy -= (1 + WALL_RESTITUTION) * vDotN * ny;
+    return { x: b.x - nx * b.r, y: b.y - ny * b.r };
+  }
   // Combined-radius proximity to any blocker — used only as a signal to
   // defer an ally-pair resolution (see stepGhostBodies), not as the actual
   // blocker stop condition (that uses bl.r alone, see below).
@@ -1816,7 +2008,22 @@ export function startGame(opts = {}) {
       b.x += b.vx; b.y += b.vy;
       b.traveled += moveDist;
       let fr = b.kind === 'ball' ? BALL_FRICTION : FRICTION;
-      if (boostZone && Math.hypot(b.x - boostZone.x, b.y - boostZone.y) <= boostZone.r) fr = withSweepBoost(fr);
+      if (boostZone && Math.hypot(b.x - boostZone.x, b.y - boostZone.y) <= boostZone.r) {
+        fr = withSweepBoost(fr);
+        // The stopping condition below is budget-capped, not purely
+        // friction-decay-driven (a straight, unobstructed shot almost always
+        // hits `traveled >= budget` long before its speed would naturally
+        // decay under STOP_THRESHOLD) — so just slowing the decay here
+        // barely moves where the laser stops. Topping up THIS leg's budget
+        // by the same fraction the boost trims off the real friction
+        // deficit (see withSweepBoost) makes the predicted reach visibly
+        // stretch through the patch instead of only showing up later via a
+        // faster post-collision leg. No effect whenever no zone is active,
+        // or for any body whose path never enters one (boostZone is only
+        // ever the aiming team's own not-yet-committed patch — see
+        // runAimCascade) — doesn't touch anything's tuned reach otherwise.
+        b.budget += moveDist * SWEEP_FRICTION_BONUS;
+      }
       b.vx *= fr; b.vy *= fr;
       const spd = Math.hypot(b.vx, b.vy);
       if (spd < STOP_THRESHOLD || b.traveled >= b.budget) {
@@ -1828,15 +2035,14 @@ export function startGame(opts = {}) {
       let hitWall = null; // {axis, wall} — cosmetic snap for the drawn point, see below
       if (b.y - b.r < FY0) { b.y = FY0 + b.r; b.vy = -b.vy * WALL_RESTITUTION; hitWall = { axis: 'y', wall: FY0 }; }
       if (b.y + b.r > FY1) { b.y = FY1 - b.r; b.vy = -b.vy * WALL_RESTITUTION; hitWall = { axis: 'y', wall: FY1 }; }
-      const inGoalMouthY = Math.abs(b.y - CY) < GOAL_HALF_HEIGHT;
-      if (!inGoalMouthY) {
-        if (b.x - b.r < FX0) { b.x = FX0 + b.r; b.vx = -b.vx * WALL_RESTITUTION; hitWall = { axis: 'x', wall: FX0 }; }
-        if (b.x + b.r > FX1) { b.x = FX1 - b.r; b.vx = -b.vx * WALL_RESTITUTION; hitWall = { axis: 'x', wall: FX1 }; }
-      } else {
-        // reaching well into the goal mouth is a terminal state for this
-        // prediction (mirrors physicsStep's falling-into-the-goal check,
-        // same loss-fraction threshold) — simplified to a hard stop rather
-        // than replicating the shrink animation, which has nothing to
+      let blockedByPost = false;
+      if (b.x - b.r < FX0) { const pt = ghostCollideGoalSide(b, FX0); if (pt) { hitWall = pt; blockedByPost = true; } }
+      if (b.x + b.r > FX1) { const pt = ghostCollideGoalSide(b, FX1); if (pt) { hitWall = pt; blockedByPost = true; } }
+      if (!blockedByPost && Math.abs(b.y - CY) < GOAL_HALF_HEIGHT) {
+        // reaching well into the goal mouth (clear of both posts) is a terminal
+        // state for this prediction (mirrors physicsStep's falling-into-the-goal
+        // check, same loss-fraction threshold) — simplified to a hard stop
+        // rather than replicating the shrink animation, which has nothing to
         // predict.
         const depthPast = Math.max(FX0 - b.x, b.x - FX1);
         const lossFraction = b.kind === 'ball' ? BALL_GOAL_FRACTION : STONE_LOSS_FRACTION;
@@ -1847,11 +2053,14 @@ export function startGame(opts = {}) {
         }
       }
       if (hitWall) {
-        // cosmetic only: the DRAWN point kisses the rail exactly. b.x/b.y
+        // cosmetic only: the DRAWN point kisses the rail/post exactly. b.x/b.y
         // themselves stay at the r-correct contact position set above —
         // snapping them onto the rail line would shift the tracked center
         // by a whole radius, corrupting every following tick's checks.
-        currentLeg(b).points.push(hitWall.axis === 'y' ? { x: b.x, y: hitWall.wall } : { x: hitWall.wall, y: b.y });
+        // hitWall.axis means a flat FY0/FY1 hit above ({axis,wall} form); a
+        // post/x-wall hit already comes back as the resolved {x,y} point from
+        // ghostCollideGoalSide.
+        currentLeg(b).points.push(hitWall.axis ? (hitWall.axis === 'y' ? { x: b.x, y: hitWall.wall } : { x: hitWall.wall, y: b.y }) : hitWall);
       }
     }
     for (const b of bodies) {
@@ -2216,5 +2425,5 @@ export function startGame(opts = {}) {
   loop();
 
   // dev-only handle for physics-tuning scripts (position/phase readback)
-  if (import.meta.env.DEV) window.__nb = { entities: () => entities, phase: () => phase, step: () => physicsStep(), render: () => render(), sweep: () => sweep, aimingTeam: () => aimingTeam(), controlsEnabled: () => controlsEnabled };
+  if (import.meta.env.DEV) window.__nb = { entities: () => entities, phase: () => phase, step: () => physicsStep(), render: () => render(), sweep: () => sweep, aimingTeam: () => aimingTeam(), controlsEnabled: () => controlsEnabled, runAimCascade: (team) => runAimCascade(team) };
 }
