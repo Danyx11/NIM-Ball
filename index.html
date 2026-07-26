@@ -547,22 +547,29 @@
   <div id="stage-wrap">
     <canvas id="stage" width="1200" height="905"></canvas>
     <div id="toolbar" class="hidden">
-      <button class="tbtn" id="tbtn-play" type="button" aria-label="Play">
-        <img class="tbtn-base" id="tbtn-play-img" alt=""><img class="tbtn-cap" id="tbtn-play-cap" alt="">
-      </button>
-      <button class="tbtn" id="tbtn-power" type="button" aria-label="Power">
-        <img class="tbtn-base" id="tbtn-power-img" alt=""><img class="tbtn-cap" id="tbtn-power-cap" alt="">
-      </button>
-      <button class="tbtn" id="tbtn-sweep" type="button" aria-label="Balai">
-        <img class="tbtn-base" id="tbtn-sweep-img" alt=""><img class="tbtn-cap" id="tbtn-sweep-cap" alt="">
-        <div class="tbtn-used-cross" id="tbtn-sweep-cross"></div>
-      </button>
-      <button class="tbtn" id="tbtn-sound" type="button" aria-label="Son">
-        <img class="tbtn-base" id="tbtn-sound-img" alt=""><img class="tbtn-cap" id="tbtn-sound-cap" alt="">
-      </button>
-      <button class="tbtn" id="tbtn-exit" type="button" aria-label="Quitter">
-        <img class="tbtn-base" id="tbtn-exit-img" alt=""><img class="tbtn-cap" id="tbtn-exit-cap" alt="">
-      </button>
+      <div class="tbtn-row">
+        <button class="tbtn" id="tbtn-sound" type="button" aria-label="Son">
+          <img class="tbtn-base" id="tbtn-sound-img" alt=""><img class="tbtn-cap" id="tbtn-sound-cap" alt="">
+        </button>
+        <button class="tbtn" id="tbtn-exit" type="button" aria-label="Quitter">
+          <img class="tbtn-base" id="tbtn-exit-img" alt=""><img class="tbtn-cap" id="tbtn-exit-cap" alt="">
+        </button>
+        <button class="tbtn" id="tbtn-chat" type="button" aria-label="Chat">
+          <img class="tbtn-base" id="tbtn-chat-img" alt=""><img class="tbtn-cap" id="tbtn-chat-cap" alt="">
+        </button>
+      </div>
+      <div class="tbtn-row">
+        <button class="tbtn" id="tbtn-play" type="button" aria-label="Play">
+          <img class="tbtn-base" id="tbtn-play-img" alt=""><img class="tbtn-cap" id="tbtn-play-cap" alt="">
+        </button>
+        <button class="tbtn" id="tbtn-sweep" type="button" aria-label="Balai">
+          <img class="tbtn-base" id="tbtn-sweep-img" alt=""><img class="tbtn-cap" id="tbtn-sweep-cap" alt="">
+          <div class="tbtn-used-cross" id="tbtn-sweep-cross"></div>
+        </button>
+        <button class="tbtn" id="tbtn-power" type="button" aria-label="Power">
+          <img class="tbtn-base" id="tbtn-power-img" alt=""><img class="tbtn-cap" id="tbtn-power-cap" alt="">
+        </button>
+      </div>
     </div>
     <div id="overlay" class="hidden"><div id="ovContent"></div></div>
     <div id="modeOverlay" class="team-select">
@@ -587,7 +594,7 @@
       </div>
       <div class="half b" id="halfB">
         <div class="check" id="checkB">○</div>
-        <div class="tag">ÉQUIPE ROUGE</div>
+        <div class="tag">ÉQUIPE JAUNE</div>
         <div class="sub">Touche ici quand tu es prêt</div>
       </div>
     </div>

@@ -11,8 +11,9 @@ const ASSET_BASE = import.meta.env.BASE_URL;
 
 initBackground();
 
-// ---- Toolbar: 5 buttons pulled from design-lab's "boutons" layer (+ a 5th,
-// hand-supplied "exit" icon), sat above the board (see style.css #toolbar).
+// ---- Toolbar: 6 buttons pulled from design-lab's "boutons" layer (+
+// hand-supplied "exit" and "chat" icons), sat above the board in two rows of
+// 3 (see style.css #toolbar/.tbtn-row and index.html for the row split).
 // "play" replaced the old canvas PLAY cap and is wired to the real launch
 // action inside game.js's startGame(); "power" toggles game.js's aim-laser
 // mode (full predictive cascade vs a basic direction/energy line, see
@@ -21,10 +22,11 @@ initBackground();
 // the perfect fit for the curling-style "balai" slippery-patch feature) is
 // wired inside game.js's startGame() alongside "play", since it needs live
 // access to phase/entities state; "exit" shows a quit-confirm dialog in the
-// shared #overlay (below) — "sound" is still a placeholder, so this just
-// plays the click SFX/animation and logs a stub for it.
-const TOOLBAR_BUTTONS = ['sound', 'power', 'sweep', 'play', 'exit'];
-const TOOLBAR_STUB_BUTTONS = ['sound'];
+// shared #overlay (below) — "sound" and "chat" (reserved for an eventual
+// in-match chat window) are still placeholders, so this just plays the click
+// SFX/animation and logs a stub for them.
+const TOOLBAR_BUTTONS = ['sound', 'power', 'sweep', 'play', 'exit', 'chat'];
+const TOOLBAR_STUB_BUTTONS = ['sound', 'chat'];
 const toolbarClickSfx = new Audio(`${ASSET_BASE}sfx/button.wav`);
 TOOLBAR_BUTTONS.forEach((id) => {
   document.getElementById(`tbtn-${id}-img`).src = `${ASSET_BASE}ui/btn-${id}.png`;
@@ -164,7 +166,7 @@ async function joinLan(raw, joinBtn) {
 }
 
 function showWaitingScreen(net) {
-  const teamLabel = net.myTeam === 'A' ? 'ÉQUIPE BLEUE' : 'ÉQUIPE ROUGE';
+  const teamLabel = net.myTeam === 'A' ? 'ÉQUIPE BLEUE' : 'ÉQUIPE JAUNE';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
   showLobby(`
     <span class="team-pill ${cls}">${teamLabel}</span>

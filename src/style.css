@@ -5,8 +5,11 @@
   --ink-dim: #9fb8bc;
   --teamA: #3fa9f5;
   --teamA-dark: #1f6fa8;
-  --teamB: #ff4d5e;
-  --teamB-dark: #c81e3a;
+  /* Nimiq yellow/gold, not red — matches the canvas scoreboard/halo/LED
+     colors already used for team B (game.js: '#ffc94d', HALO_RGB.B). */
+  --teamB: #ffc94d;
+  --teamB-dark: #b8862e;
+  --error: #ff4d5e;
   --accent: #ffd166;
   --panel: #143844;
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -110,20 +113,24 @@ button { font-family: inherit; font-weight: 700; font-size: 14px; border: none; 
 button:active { transform: scale(0.95); }
 button:disabled { opacity: 0.35; cursor: default; }
 
-/* Toolbar: 4 buttons pulled from design-lab's "boutons" layer (fond pinede
-   mockup), sat above the board rather than baked into arena/frame.webp — rough
-   placeholder placement/functions, to be refined once the underlying features
-   (sound toggle, ?, clear, ?) are actually implemented. */
-/* top:7% sits its bottom edge just above the scoreboard plaque baked into
-   arena/frame.webp (plaque top row 73/905 = 8.07%, see the SCORE_SLOT_CY
+/* Toolbar: 6 buttons pulled from design-lab's "boutons"/hand-supplied art, sat
+   above the board rather than baked into arena/frame.webp — rough placeholder
+   placement/functions, to be refined once the underlying features are all
+   actually implemented. Two rows of 3 (see .tbtn-row) — bottom row keeps the
+   original first 3 (play/sweep/power), so "sweep" (the middle one) lands
+   centered on the board's own median line; sound/exit/chat sit above it. */
+/* top:7% sits the block's bottom edge just above the scoreboard plaque baked
+   into arena/frame.webp (plaque top row 73/905 = 8.07%, see the SCORE_SLOT_CY
    comment in game.js) and the turn-timer bar drawn just inside it
    (TIMER_BAR_Y=96), without overlapping either. left:0/right:0 (rather than
    left:50%+translateX(-50%)) gives #toolbar itself a definite width (100% of
-   #stage-wrap) so .tbtn's own percentage width below has something definite
-   to resolve against — with width:auto here, that percentage was resolving
-   against a stray shrink-to-fit box instead, leaving the 4 buttons packed at
-   its left edge rather than centered. justify-content centers the row inside
-   this now full-width bar, landing it on the same axis as CENTER_X. */
+   #stage-wrap) so .tbtn-row/.tbtn's own percentage widths below have
+   something definite to resolve against — with width:auto here, percentages
+   resolve against a stray shrink-to-fit box instead, leaving buttons packed
+   at the left edge rather than centered. gap between the two rows is a vw
+   unit, not %, since #toolbar's own height is intrinsic/auto (a % row-gap
+   would need a definite height to resolve against, same class of bug as the
+   width one above, just silently resolving to 0 instead of breaking outright). */
 #toolbar {
   position: absolute;
   left: 0;
@@ -131,9 +138,16 @@ button:disabled { opacity: 0.35; cursor: default; }
   top: 7%;
   transform: translateY(-100%);
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6vw;
+  z-index: 5;
+}
+.tbtn-row {
+  display: flex;
   justify-content: center;
   gap: 3%;
-  z-index: 5;
+  width: 100%;
 }
 /* Toolbar reads as part of the arena graphics, not app chrome — stays hidden
    through the local/LAN/solo mode-select screen and is only revealed once
@@ -198,7 +212,27 @@ button:disabled { opacity: 0.35; cursor: default; }
 .bigbtn { background: var(--accent); color: #3a2900; padding: 14px 30px; font-size: 16px; border-radius: 14px; }
 .team-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; border-radius: 999px; font-weight: 800; font-size: 18px; }
 .team-pill.a { background: rgba(63,169,245,0.15); color: var(--teamA); }
-.team-pill.b { background: rgba(255,77,94,0.15); color: var(--teamB); }
+.team-pill.b { background: rgba(255,201,77,0.15); color: var(--teamB); }
+
+/* Goal / match-win result panel (see showGoalPanel/showVictory in game.js) —
+   shares #overlay, just its own inner content. */
+/* Wrapper is inline-block so #overlay's text-align:center centers the
+   identicon itself; the badge rides along as a corner accent instead of
+   sitting beside it and pulling the identicon off-center. */
+.goal-identicon-wrap { position: relative; display: inline-block; }
+.goal-identicon { display: block; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.06); }
+.goal-badge {
+  position: absolute; top: -8px; right: -18px; font-weight: 800; font-size: 26px;
+  background: rgba(6,16,20,0.85); padding: 2px 10px; border-radius: 999px;
+}
+.goal-badge.a { color: var(--teamA); }
+.goal-badge.b { color: var(--teamB); }
+.goal-address { font-size: 12px; color: var(--ink-dim); word-break: break-all; max-width: 320px; }
+.goal-score { font-size: 22px; font-weight: 800; }
+.goal-score-a { color: var(--teamA); }
+.goal-score-b { color: var(--teamB); }
+.goal-score-sep { color: var(--ink-dim); padding: 0 8px; }
+.goal-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
 
 /* Inset to the physics/ice rect only (FX0/FY0/FX1/FY1 in game.js — as % of the
    1200x905 canvas: 13.25%/22.76%/12.83%/22.87%), not the full board — the wood
@@ -212,6 +246,9 @@ button:disabled { opacity: 0.35; cursor: default; }
 .half.a { background: rgba(31,111,168,0.55); }
 .half.b { background: rgba(168,50,71,0.55); }
 .half.c { background: rgba(110,80,168,0.55); }
+/* #startOverlay's "half b" is team B specifically (Nimiq yellow, not the
+   shared/generic red above — see #modeOverlay's "Duel LAN" card, unchanged). */
+#startOverlay .half.b { background: rgba(173,133,20,0.55); }
 .half.ready { background: rgba(20,40,30,0.55); }
 .half .tag { font-weight: 800; font-size: 18px; letter-spacing: 0.5px; }
 .half .sub { font-size: 12px; color: rgba(255,255,255,0.85); max-width: 150px; }
@@ -223,7 +260,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   width: 260px; max-width: 100%; text-align: center;
 }
 #overlay input[type="text"]::placeholder { color: var(--ink-dim); }
-.lan-error { color: var(--teamB) !important; }
+.lan-error { color: var(--error) !important; }
 
 /* ---- Animated constellation background, ported from design-lab (see
    design-lab/design_handoff_scintillement_constellation/README.md) ---- */
