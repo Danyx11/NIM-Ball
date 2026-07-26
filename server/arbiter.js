@@ -17,6 +17,7 @@ export const ARBITER_PATH = '/duel-ws';
 export function createArbiter(wssOptions) {
   let players = { A: null, B: null };
   let shots = { A: null, B: null };
+  let sweeps = { A: null, B: null };
 
   function send(ws, msg) {
     if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
@@ -26,6 +27,7 @@ export function createArbiter(wssOptions) {
   }
   function resetRound() {
     shots = { A: null, B: null };
+    sweeps = { A: null, B: null };
   }
 
   const wss = new WebSocketServer({ ...wssOptions, path: ARBITER_PATH });
@@ -50,8 +52,9 @@ export function createArbiter(wssOptions) {
       try { msg = JSON.parse(raw); } catch { return; }
       if (msg.type === 'shots' && (team === 'A' || team === 'B')) {
         shots[team] = msg.stones;
+        sweeps[team] = msg.sweep || null;
         if (shots.A && shots.B) {
-          const payload = { type: 'launch', shotsA: shots.A, shotsB: shots.B };
+          const payload = { type: 'launch', shotsA: shots.A, shotsB: shots.B, sweepA: sweeps.A, sweepB: sweeps.B };
           send(players.A, payload);
           send(players.B, payload);
           resetRound();

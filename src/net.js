@@ -32,8 +32,8 @@ export function connectLan(base) {
 
     const net = {
       myTeam: null,
-      sendShots(stones) {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'shots', stones }));
+      sendShots(stones, sweep = null) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'shots', stones, sweep }));
       },
       onLaunch(cb) { launchCb = cb; },
       onOpponentJoined(cb) { opponentJoinedCb = cb; },
@@ -65,7 +65,7 @@ export function connectLan(base) {
       } else if (msg.type === 'opponentLeft') {
         if (disconnectCb) disconnectCb();
       } else if (msg.type === 'launch') {
-        if (launchCb) launchCb({ shotsA: msg.shotsA, shotsB: msg.shotsB });
+        if (launchCb) launchCb({ shotsA: msg.shotsA, shotsB: msg.shotsB, sweepA: msg.sweepA, sweepB: msg.sweepB });
       }
     });
   });

@@ -44,10 +44,22 @@ const CLEARANCE_RANGE = 4;
 // stone lands between the threat and the net rather than on top of the ball.
 const BLOCK_POINT_FRACTION = 0.35;
 
+// "Ghost ball" billiards aim: to send `ball` toward `target`, a striking body
+// must arrive at the point on the ball's surface facing away from that
+// target — i.e. the ball's own center, pushed back along the target->ball
+// line by the sum of both radii. Aiming a stone at THIS point (rather than at
+// the ball's center, and especially rather than at the goal itself) is what
+// actually lines a shot up to send the ball where intended.
+function ghostBallContactPoint(ball, target, combinedRadius) {
+  const dx = ball.x - target.x, dy = ball.y - target.y;
+  const d = Math.hypot(dx, dy) || 1;
+  return { x: ball.x + (dx / d) * combinedRadius, y: ball.y + (dy / d) * combinedRadius };
+}
+
 // aiStones/opponentStones: [{ id, x, y }] (settled positions only — no
 // velocity, since a fresh round only ever begins once everything has fully
 // stopped). ball: { x, y }. bounds: { FX0, FX1, FY0, FY1, GY0, GY1, CY,
-// GOAL_HALF_HEIGHT, MAX_DRAG, POWER_SCALE, STONE_R }.
+// GOAL_HALF_HEIGHT, MAX_DRAG, POWER_SCALE, STONE_R, BALL_R }.
 // Returns { [stoneId]: { vx, vy } } — one shot per AI stone, always.
 export function computeAiShots({ aiTeam, aiStones, opponentStones, ball, bounds, config }) {
   const cfg = { ...DEFAULT_AI_CONFIG, ...config };
@@ -69,21 +81,23 @@ export function computeAiShots({ aiTeam, aiStones, opponentStones, ball, bounds,
   for (const g of aiStones) {
     shots[g.id] = g.id === defenderId
       ? pickDefensiveShot(g, ball, ownGoal, cfg, bounds)
-      : pickOffensiveShot(g, opponentGoal, cfg, bounds);
+      : pickOffensiveShot(g, ball, opponentGoal, cfg, bounds);
   }
   return shots;
 }
 
-// Default intention: aim roughly at the opponent's goal mouth (a random
-// point inside it, not always dead center) with noise on both angle and
-// power — a deliberately simple "basic training AI" heuristic, not a
-// billiards solver that aims through the ball.
-function pickOffensiveShot(stone, opponentGoal, cfg, bounds) {
+// Default intention: aim through the ball (ghost-ball contact point, see
+// above) so the shot actually sends it toward a random point inside the
+// opponent's goal mouth, rather than sending the stone itself toward the
+// goal and hoping it grazes the ball along the way.
+function pickOffensiveShot(stone, ball, opponentGoal, cfg, bounds) {
   const targetY = clamp(
     bounds.CY + (Math.random() * 2 - 1) * bounds.GOAL_HALF_HEIGHT * 0.7,
     bounds.GY0, bounds.GY1
   );
-  const dir = aimedDirection(stone, { x: opponentGoal.x, y: targetY }, cfg.aimNoise);
+  const goalTarget = { x: opponentGoal.x, y: targetY };
+  const contactPoint = ghostBallContactPoint(ball, goalTarget, bounds.STONE_R + bounds.BALL_R);
+  const dir = aimedDirection(stone, contactPoint, cfg.aimNoise);
   return shotFromDirection(dir, randomPower(cfg.powerRange), bounds);
 }
 

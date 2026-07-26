@@ -110,9 +110,87 @@ button { font-family: inherit; font-weight: 700; font-size: 14px; border: none; 
 button:active { transform: scale(0.95); }
 button:disabled { opacity: 0.35; cursor: default; }
 
+/* Toolbar: 4 buttons pulled from design-lab's "boutons" layer (fond pinede
+   mockup), sat above the board rather than baked into arena/frame.webp — rough
+   placeholder placement/functions, to be refined once the underlying features
+   (sound toggle, ?, clear, ?) are actually implemented. */
+/* top:7% sits its bottom edge just above the scoreboard plaque baked into
+   arena/frame.webp (plaque top row 73/905 = 8.07%, see the SCORE_SLOT_CY
+   comment in game.js) and the turn-timer bar drawn just inside it
+   (TIMER_BAR_Y=96), without overlapping either. left:0/right:0 (rather than
+   left:50%+translateX(-50%)) gives #toolbar itself a definite width (100% of
+   #stage-wrap) so .tbtn's own percentage width below has something definite
+   to resolve against — with width:auto here, that percentage was resolving
+   against a stray shrink-to-fit box instead, leaving the 4 buttons packed at
+   its left edge rather than centered. justify-content centers the row inside
+   this now full-width bar, landing it on the same axis as CENTER_X. */
+#toolbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 7%;
+  transform: translateY(-100%);
+  display: flex;
+  justify-content: center;
+  gap: 3%;
+  z-index: 5;
+}
+/* Toolbar reads as part of the arena graphics, not app chrome — stays hidden
+   through the local/LAN/solo mode-select screen and is only revealed once
+   main.js actually starts a game (see showToolbar() there). */
+#toolbar.hidden { display: none; }
+.tbtn {
+  position: relative;
+  width: 6.3%;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+/* Override the generic button:active { transform: scale(0.95) } above — the
+   bezel/socket must stay put, only .tbtn-cap is allowed to move. */
+.tbtn:active { transform: none; }
+.tbtn img { display: block; width: 100%; height: 100%; }
+/* .tbtn-base is the outer bezel/socket, static — .tbtn-cap is just the inner
+   disc (cropped from the same art, see design/ui/btn-*-cap.png), stacked
+   exactly on top so it reads as one button until pressed. */
+.tbtn-base { position: relative; }
+.tbtn-cap { position: absolute; inset: 0; }
+/* Same feel as the canvas-drawn PLAY cap (game.js drawPlayButton): a sharp
+   snap down then a slower spring back, not a soft symmetric bounce — but here
+   only the cap dips toward the socket, the bezel underneath stays put. */
+.tbtn-cap.pressed { animation: tbtnCapPress 220ms ease-out; }
+@keyframes tbtnCapPress {
+  0% { transform: scale(1) translateY(0); filter: brightness(1); }
+  20% { transform: scale(0.9) translateY(3px); filter: brightness(0.85); }
+  100% { transform: scale(1) translateY(0); filter: brightness(1); }
+}
+/* "Balai"/sweep toolbar toggle: once a team's one placement per round has
+   actually been launched (game.js's sweep.<team>.used), an X is pinned over
+   the button until the round resets — CSS-drawn (two rotated bars) rather
+   than another baked PNG so it composites over either cap state cleanly. */
+.tbtn-used-cross {
+  position: absolute; inset: 20%; pointer-events: none;
+  opacity: 0; transition: opacity 120ms ease-out;
+}
+.tbtn-used-cross.show { opacity: 1; }
+.tbtn-used-cross::before, .tbtn-used-cross::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 100%; height: 13%;
+  background: rgba(20, 20, 20, 0.9); border-radius: 999px;
+  box-shadow: 0 0 3px rgba(255,255,255,0.4);
+}
+.tbtn-used-cross::before { transform: translate(-50%, -50%) rotate(45deg); }
+.tbtn-used-cross::after { transform: translate(-50%, -50%) rotate(-45deg); }
 #overlay {
   position: absolute; inset: 0; background: rgba(6,16,20,0.92); border-radius: 18px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; padding: 30px;
+  /* Above #modeOverlay/#startOverlay (DOM siblings, no z-index of their own —
+     #startOverlay comes later in source order and would otherwise win the
+     stacking tie) so the exit-confirm dialog reads cleanly even when clicked
+     before the ready-tap screen is dismissed. */
+  z-index: 10;
 }
 #overlay.hidden { display: none; }
 #overlay h2 { margin: 0; font-size: 26px; }

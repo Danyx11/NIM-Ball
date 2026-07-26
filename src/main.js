@@ -5,8 +5,83 @@ import { startGame } from './game.js';
 import { connectNimiq } from './nimiq.js';
 import { initBackground } from './background.js';
 import { connectLan } from './net.js';
+import { isBasicLaser, setBasicLaser } from './settings.js';
+
+const ASSET_BASE = import.meta.env.BASE_URL;
 
 initBackground();
+
+// ---- Toolbar: 5 buttons pulled from design-lab's "boutons" layer (+ a 5th,
+// hand-supplied "exit" icon), sat above the board (see style.css #toolbar).
+// "play" replaced the old canvas PLAY cap and is wired to the real launch
+// action inside game.js's startGame(); "power" toggles game.js's aim-laser
+// mode (full predictive cascade vs a basic direction/energy line, see
+// settings.js); "sweep" (id kept as "sweep", asset files renamed from the old
+// btn-clear-*.png — see git history — since its broom art turned out to be
+// the perfect fit for the curling-style "balai" slippery-patch feature) is
+// wired inside game.js's startGame() alongside "play", since it needs live
+// access to phase/entities state; "exit" shows a quit-confirm dialog in the
+// shared #overlay (below) — "sound" is still a placeholder, so this just
+// plays the click SFX/animation and logs a stub for it.
+const TOOLBAR_BUTTONS = ['sound', 'power', 'sweep', 'play', 'exit'];
+const TOOLBAR_STUB_BUTTONS = ['sound'];
+const toolbarClickSfx = new Audio(`${ASSET_BASE}sfx/button.wav`);
+TOOLBAR_BUTTONS.forEach((id) => {
+  document.getElementById(`tbtn-${id}-img`).src = `${ASSET_BASE}ui/btn-${id}.png`;
+  document.getElementById(`tbtn-${id}-cap`).src = `${ASSET_BASE}ui/btn-${id}-cap.png`;
+});
+function playToolbarClick(cap) {
+  toolbarClickSfx.currentTime = 0;
+  toolbarClickSfx.play().catch(() => {});
+  cap.classList.remove('pressed');
+  void cap.offsetWidth; // restart the animation if pressed again mid-tween
+  cap.classList.add('pressed');
+}
+TOOLBAR_STUB_BUTTONS.forEach((id) => {
+  const cap = document.getElementById(`tbtn-${id}-cap`);
+  const btn = document.getElementById(`tbtn-${id}`);
+  btn.addEventListener('click', () => {
+    playToolbarClick(cap);
+    console.log(`[toolbar] ${id} pressed — function not implemented yet`);
+  });
+});
+
+// "power" off (basic laser) swaps in a hollowed-out variant of the bolt icon
+// (thin outline, near-white fill instead of solid black — see
+// scripts/make_power_off_icon.py) so the toggle reads as disengaged without
+// dimming the whole disc. Read the persisted preference (see settings.js) at
+// load so a reload doesn't silently reset it back to the full predictive laser.
+const POWER_CAP_SRC = { on: `${ASSET_BASE}ui/btn-power-cap.png`, off: `${ASSET_BASE}ui/btn-power-cap-off.png` };
+const powerBtn = document.getElementById('tbtn-power');
+const powerCap = document.getElementById('tbtn-power-cap');
+function syncPowerButton() { powerCap.src = isBasicLaser() ? POWER_CAP_SRC.off : POWER_CAP_SRC.on; }
+syncPowerButton();
+powerBtn.addEventListener('click', () => {
+  playToolbarClick(powerCap);
+  setBasicLaser(!isBasicLaser());
+  syncPowerButton();
+});
+
+// "exit": standard confirm dialog in the shared #overlay/#ovContent modal
+// (see showLobby/hideLobby below, also used for the LAN lobby screens) rather
+// than a bespoke one — reloading the page on confirm is the simplest way to
+// get back to a clean mode-select screen, since startGame() has no teardown
+// path of its own to unwind an in-progress match.
+const exitBtn = document.getElementById('tbtn-exit');
+const exitCap = document.getElementById('tbtn-exit-cap');
+exitBtn.addEventListener('click', () => {
+  playToolbarClick(exitCap);
+  showLobby(`
+    <h2>Quitter la partie ?</h2>
+    <p>La partie en cours sera perdue.</p>
+    <div style="display:flex; gap:12px;">
+      <button class="bigbtn" id="exitYesBtn">Oui</button>
+      <button class="bigbtn" id="exitNoBtn">Non</button>
+    </div>
+  `);
+  document.getElementById('exitYesBtn').onclick = () => location.reload();
+  document.getElementById('exitNoBtn').onclick = () => hideLobby();
+});
 
 // Best-effort: only succeeds when the app is opened inside Nimiq Pay.
 // Logged for now — wire this up to real features (wallet identity,
@@ -30,9 +105,16 @@ const ovContent = document.getElementById('ovContent');
 function showLobby(html) { overlay.classList.remove('hidden'); ovContent.innerHTML = html; }
 function hideLobby() { overlay.classList.add('hidden'); }
 
+// Toolbar reads as arena chrome, not app UI — stays hidden through mode-select
+// (and, for LAN, the address-entry/waiting-for-opponent lobby) and is only
+// revealed right at each of the 3 actual startGame() call sites below.
+const toolbar = document.getElementById('toolbar');
+function showToolbar() { toolbar.classList.remove('hidden'); }
+
 modeLocal.addEventListener('click', () => {
   modeOverlay.classList.add('hidden');
   startOverlay.classList.remove('hidden');
+  showToolbar();
   startGame();
 });
 
@@ -45,6 +127,7 @@ modeLan.addEventListener('click', () => {
 // (game.js's aiTeam branch skips #startOverlay itself), straight into aimA.
 modeSolo.addEventListener('click', () => {
   modeOverlay.classList.add('hidden');
+  showToolbar();
   startGame({ aiTeam: 'B' });
 });
 
@@ -90,6 +173,7 @@ function showWaitingScreen(net) {
   `);
   net.onOpponentJoined(() => {
     hideLobby();
+    showToolbar();
     startGame({ net, myTeam: net.myTeam });
   });
   net.onDisconnect(() => {

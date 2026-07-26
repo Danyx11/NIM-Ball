@@ -8,6 +8,7 @@
 import { createAudio } from './audio.js';
 import { getIdenticonCanvas } from './identicons.js';
 import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
+import { isBasicLaser } from './settings.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 // Placeholder demo addresses (real per-player wallet addresses aren't wired
@@ -19,7 +20,6 @@ const IDENTICON_ADDRESS = {
 };
 const MODULE_SRC = { A: `${ASSET_BASE}identicons/bubble-v4-navy.webp`, B: `${ASSET_BASE}identicons/bubble-v4-gold.webp` };
 const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
-const PLAY_CAP_SRC = `${ASSET_BASE}arena/play-cap.png`;
 const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
 
 export function startGame(opts = {}) {
@@ -50,7 +50,7 @@ export function startGame(opts = {}) {
   // at 2 — Pixi/Phaser's standard tradeoff, since the per-frame shadow blur in
   // drawContactShadow scales with pixel count) and ctx.scale()'d once so every
   // existing drawImage/fillRect/arc call keeps working unmodified.
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.5); // perf test: was 2, see perf audit
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.3); // perf test: was 2, see perf audit
   canvas.width = W * dpr;
   canvas.height = H * dpr;
   ctx.scale(dpr, dpr);
@@ -207,18 +207,6 @@ export function startGame(opts = {}) {
   };
   ballImg.src = BALL_SRC;
 
-  // PLAY cap: cut out of the arena artwork itself (same pixels, same look) so it can be
-  // pressed/animated independently of the static background it was extracted from.
-  // Cropped tight to just the orange capsule (alpha-masked) — the panel/frame around it
-  // stays in arena/frame.webp and must never move when the cap is pressed.
-  // Repositioned for the V1.2 arena redesign: the old socket sat right of the
-  // score panel at the same height; the new wood scoreboard plaque is wider
-  // and centered (x:416-789, see SCORE_SLOT_CY below), so the cap now sits
-  // further right, still on the solid wood band above the ice (y:75-206).
-  const PLAY_CAP_X0 = 850, PLAY_CAP_Y0 = 105, PLAY_CAP_X1 = 977, PLAY_CAP_Y1 = 162;
-  const playCapImage = new Image();
-  playCapImage.src = PLAY_CAP_SRC;
-
   // ---------- Config ----------
   // Field bounds match the illustrated arena (light-blue Nimiq accents),
   // scaled from the reference art — the pitch bounds match where the ice
@@ -271,11 +259,15 @@ export function startGame(opts = {}) {
   const MAX_SPEED = 8;
   const STOP_THRESHOLD = 0.08;
   const WIN_SCORE = 3;
-  // Stone "damage": each impact against an opposing-team stone knocks out one
-  // LED (top first, then clockwise — see LED_RECTS order). On the 4th hit the
-  // stone dies: no longer selectable to aim, but it stays on the ice and keeps
-  // full collision/physics behavior if something else hits it.
-  const STONE_MAX_HITS = 4;
+  // Stone "damage": each impact against an opposing-team stone counts one hit
+  // toward STONE_MAX_HITS (8 — 2 hits per LED, see STONE_HITS_PER_LED below).
+  // LEDs/ring quadrants go out one at a time, top first then clockwise (see
+  // LED_RECTS order). On the last hit the stone dies (no longer selectable to
+  // aim) and, once it finishes sliding from that final impact, plays the same
+  // shrink-into-the-void animation as a goal loss (see the g.dead check in
+  // physicsStep) — it keeps colliding/sliding normally right up until then.
+  const STONE_MAX_HITS = 8;
+  const STONE_HITS_PER_LED = 2; // hits needed to knock out each of the 4 LEDs/quadrants
   // debounce so a single prolonged/grazing contact (spanning several physics
   // frames) only ever counts as one hit — see registerStoneHit in resolveCollision
   const HIT_COOLDOWN_FRAMES = 20;
@@ -286,6 +278,62 @@ export function startGame(opts = {}) {
     A: [{ x: FX0 + 0.16 * PW, y: FY0 + 0.267 * PH }, { x: FX0 + 0.13 * PW, y: FY0 + 0.5 * PH }, { x: FX0 + 0.16 * PW, y: FY0 + 0.733 * PH }],
     B: [{ x: FX1 - 0.16 * PW, y: FY0 + 0.267 * PH }, { x: FX1 - 0.13 * PW, y: FY0 + 0.5 * PH }, { x: FX1 - 0.16 * PW, y: FY0 + 0.733 * PH }],
   };
+
+  // "Balai" (curling-style sweep): one placeable-then-removable slippery ice
+  // patch per team per round (see beginRoundReset for the `used` reset), a
+  // circle (not the originally-floated hexagon — simpler math, no rotation/
+  // in-polygon test). Purely cosmetic/tunable numbers, adjust freely by feel —
+  // was a pitch-relative formula (fifth, then two-fifths of the shorter pitch
+  // dimension), now a flat px value per feedback.
+  const SWEEP_R = 150;
+  const SWEEP_FRICTION_BONUS = 1; // was 0.3, then 0.5, 0.6, 0.7, 0.8 — 100%: zero friction inside the patch (frictionless glide until it exits), tune by feel
+
+  // Baked once (a soft white/ice radial falloff, 2x-oversampled like
+  // ballSprite above) rather than recomputing a gradient every frame — a
+  // brightening wash meant to read as thinner/glassier ice, not a flat
+  // sticker, so it's drawn with 'lighten' (see drawSweepZone) instead of
+  // plain alpha compositing.
+  const sweepSprite = document.createElement('canvas');
+  (function bakeSweepSprite() {
+    const S = Math.round(SWEEP_R * 4);
+    sweepSprite.width = S; sweepSprite.height = S;
+    const sctx = sweepSprite.getContext('2d');
+    const cx = S / 2, cy = S / 2, r = S / 2;
+    const grad = sctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, 'rgba(255,255,255,0.92)');
+    grad.addColorStop(0.7, 'rgba(255,255,255,0.58)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    sctx.fillStyle = grad;
+    sctx.beginPath(); sctx.arc(cx, cy, r, 0, Math.PI * 2); sctx.fill();
+  })();
+  // Clipped to the ice rect so a patch placed near an edge has its overflow
+  // cropped away instead of spilling onto the wood frame art — cosmetic only,
+  // physics itself never needs cropping (the in-circle test in
+  // physicsStep/stepGhostBodies already only ever looks at whichever part of
+  // the pitch entities can actually occupy).
+  function drawSweepZone(sw) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(FX0, FY0, FX1 - FX0, FY1 - FY0);
+    ctx.clip();
+    ctx.globalCompositeOperation = 'lighten';
+    const d = sw.r * 2;
+    ctx.drawImage(sweepSprite, sw.x - sw.r, sw.y - sw.r, d, d);
+    ctx.restore();
+  }
+  // Own patch while still being placed/dragged (pre-commit) is visible only
+  // on the owning team's own screen (sweepViewTeam) — same phases the aim
+  // laser itself stays visible through, so it vanishes at the same moment.
+  // Once committed, both patches are drawn during 'sim'/'goal' regardless of
+  // sweepViewTeam: the shared "reveal" moment both players see together.
+  function drawSweepOverlay() {
+    const ownTeam = sweepViewTeam();
+    if (ownTeam && sweep[ownTeam].active && !sweep[ownTeam].committed) drawSweepZone(sweep[ownTeam]);
+    if (phase === 'sim' || phase === 'goal') {
+      if (sweep.A.committed) drawSweepZone(sweep.A);
+      if (sweep.B.committed) drawSweepZone(sweep.B);
+    }
+  }
 
   let scoreA = 0, scoreB = 0;
   let round = 1;
@@ -298,11 +346,42 @@ export function startGame(opts = {}) {
   let entities = { A: [], B: [], ball: null };
   let drag = null;
   let readyA = false, readyB = false;
+  // sweep.<team>.active: currently placed (visible only to that team while
+  // aiming, or during 'sim' as the shared reveal — see sweepViewTeam/render).
+  // .committed: this placement was locked in for the sim that's about to run
+  // (or is running) — cleared again in beginAimPhase once that sim is over,
+  // since the effect is a one-shot boost for the single exchange it was
+  // played into, not a standing fixture for the rest of the round. .used:
+  // this team's one placement for the round has been spent — persists across
+  // exchanges until beginRoundReset (see CLAUDE.md: a "round"/manche can span
+  // many aimA/aimB/sim cycles, only ending on a goal/wipeout).
+  let sweep = {
+    A: { active: false, committed: false, used: false, x: CENTER_X, y: CY, r: SWEEP_R },
+    B: { active: false, committed: false, used: false, x: CENTER_X, y: CY, r: SWEEP_R },
+  };
+  let sweepDrag = null;
   // LAN mode: both teams aim simultaneously ('lanAim'), each client only
   // controls entities[myTeam]; 'lanWait' shows once the local shot is sent,
   // until the arbiter relays both sides' shots (see src/net.js).
   function isAimingPhase(p) { return p === 'aimA' || p === 'aimB' || p === 'lanAim'; }
   function firstAimPhase() { return net ? 'lanAim' : 'aimA'; }
+  // Which team can currently drag stones/their own sweep patch — null once
+  // committed (lanWait/pending/sim/etc.), unlike sweepViewTeam below which
+  // stays truthy a bit longer purely for rendering continuity.
+  function aimingTeam() {
+    if (net) return phase === 'lanAim' ? myTeam : null;
+    if (phase === 'aimA') return 'A';
+    if (phase === 'aimB') return 'B';
+    return null;
+  }
+  // Same idea, but stays truthy through 'lanWait' too (own screen only, shot
+  // already sent) — mirrors exactly which phases renderAimCascade's own laser
+  // stays visible through, so the sweep patch disappears at the same moment
+  // the laser does.
+  function sweepViewTeam() {
+    if (net) return (phase === 'lanAim' || phase === 'lanWait') ? myTeam : null;
+    return aimingTeam();
+  }
   // Solo vs IA: the AI's shots for the coming turn are computed the instant
   // the board re-enters an aiming phase, using only the just-settled,
   // confirmed positions — never the human's in-progress drag (see the
@@ -311,6 +390,12 @@ export function startGame(opts = {}) {
   // (see onValidate). Its own laser trajectory is never rendered either way:
   // render() only calls renderAimCascade() for the human's own aiming team.
   function beginAimPhase() {
+    // Retire whichever patch(es) were committed into the sim that just
+    // finished — the effect and its shared reveal were only ever meant for
+    // that one exchange (see the comment on the `sweep` state above); `used`
+    // is untouched here, it only clears on a real round reset.
+    sweep.A.active = false; sweep.A.committed = false;
+    sweep.B.active = false; sweep.B.committed = false;
     phase = firstAimPhase();
     if (aiTeam) prepareAiShots();
   }
@@ -323,7 +408,7 @@ export function startGame(opts = {}) {
       aiStones: stones.map(g => ({ id: g.id, x: g.x, y: g.y })),
       opponentStones: opponentStones.map(g => ({ id: g.id, x: g.x, y: g.y })),
       ball: { x: entities.ball.x, y: entities.ball.y },
-      bounds: { FX0, FX1, FY0, FY1, GY0, GY1, CY, GOAL_HALF_HEIGHT, MAX_DRAG, POWER_SCALE, STONE_R },
+      bounds: { FX0, FX1, FY0, FY1, GY0, GY1, CY, GOAL_HALF_HEIGHT, MAX_DRAG, POWER_SCALE, STONE_R, BALL_R },
       config: AI_CONFIG,
     });
     stones.forEach(g => {
@@ -372,10 +457,8 @@ export function startGame(opts = {}) {
     return { x: (t.clientX - rect.left) * scaleX, y: (t.clientY - rect.top) * scaleY };
   }
   function currentTeamStones() {
-    if (net) return phase === 'lanAim' ? entities[myTeam].filter(g => !g.out && !g.falling && !g.dead) : [];
-    if (phase === 'aimA') return entities.A.filter(g => !g.out && !g.falling && !g.dead);
-    if (phase === 'aimB') return entities.B.filter(g => !g.out && !g.falling && !g.dead);
-    return [];
+    const team = aimingTeam();
+    return team ? entities[team].filter(g => !g.out && !g.falling && !g.dead) : [];
   }
   function findStoneAt(pos) {
     for (const g of currentTeamStones())
@@ -385,29 +468,45 @@ export function startGame(opts = {}) {
   function onPointerDown(evt) {
     audio.unlock();
     const pos = getPointerPos(evt);
-    if (isPlayButtonActive() && pointInPlayButton(pos)) {
-      evt.preventDefault();
-      pressPlayButton();
-      return;
-    }
     if (!isAimingPhase(phase)) return;
     evt.preventDefault();
     const g = findStoneAt(pos);
-    if (!g) return;
-    g.pendingVx = 0; g.pendingVy = 0;
-    // halo/LED "programmed" state (haloMode) starts the instant a stone is
-    // picked up, not only once released — onPointerUp still reverts this to
-    // false if the drag turns out too short to count as an actual shot.
-    g.used = true;
-    drag = { entity: g, startX: g.x, startY: g.y, curX: pos.x, curY: pos.y };
+    if (g) {
+      g.pendingVx = 0; g.pendingVy = 0;
+      // halo/LED "programmed" state (haloMode) starts the instant a stone is
+      // picked up, not only once released — onPointerUp still reverts this to
+      // false if the drag turns out too short to count as an actual shot.
+      g.used = true;
+      drag = { entity: g, startX: g.x, startY: g.y, curX: pos.x, curY: pos.y };
+      return;
+    }
+    // No stone at this point — check for a grab on the aiming team's own
+    // sweep patch (only reachable/visible to them, no placement restriction
+    // per feedback: it can sit anywhere, including under a stone/the ball).
+    const team = aimingTeam();
+    if (!team) return;
+    const sw = sweep[team];
+    if (sw.active && !sw.used && Math.hypot(sw.x - pos.x, sw.y - pos.y) <= sw.r) {
+      sweepDrag = { team, offsetX: pos.x - sw.x, offsetY: pos.y - sw.y };
+    }
   }
   function onPointerMove(evt) {
-    if (!drag) return;
-    evt.preventDefault();
-    const pos = getPointerPos(evt);
-    drag.curX = pos.x; drag.curY = pos.y;
+    if (drag) {
+      evt.preventDefault();
+      const pos = getPointerPos(evt);
+      drag.curX = pos.x; drag.curY = pos.y;
+      return;
+    }
+    if (sweepDrag) {
+      evt.preventDefault();
+      const pos = getPointerPos(evt);
+      const sw = sweep[sweepDrag.team];
+      sw.x = pos.x - sweepDrag.offsetX;
+      sw.y = pos.y - sweepDrag.offsetY;
+    }
   }
   function onPointerUp(evt) {
+    if (sweepDrag) { evt.preventDefault(); sweepDrag = null; return; }
     if (!drag) return;
     evt.preventDefault();
     let dx = drag.startX - drag.curX;
@@ -459,11 +558,20 @@ export function startGame(opts = {}) {
   // J1->J2: no "pass the device" screen, straight into the other team's aim phase.
   // J2->sim: a fixed 2s beat after the PLAY press before the shots actually launch.
   const PRE_SIM_DELAY = 1000;
+  // Locks in whichever patch a team had placed for the sim about to run —
+  // `committed` is what physicsStep/the reveal actually key off; `used` is
+  // the round-scoped "spent" flag the toolbar button crosses out.
+  function commitSweep(team) {
+    const sw = sweep[team];
+    if (sw.active) { sw.used = true; sw.committed = true; }
+  }
   function onValidate() {
     if (net) {
       if (phase !== 'lanAim') return;
       const stones = entities[myTeam].map(g => ({ vx: g.pendingVx || 0, vy: g.pendingVy || 0, used: g.used }));
-      net.sendShots(stones);
+      commitSweep(myTeam);
+      const sw = sweep[myTeam];
+      net.sendShots(stones, sw.active ? { x: sw.x, y: sw.y, r: sw.r } : null);
       phase = 'lanWait';
       // No full-screen overlay here on purpose — the arena stays visible while
       // waiting; see drawWaitingLabel() for the small pulsing score-panel message.
@@ -479,6 +587,9 @@ export function startGame(opts = {}) {
         g.pendingVy = g._aiVy || 0;
         g._aiVx = g._aiVy = undefined;
       });
+      // Human is always team 'A' in solo mode (see main.js) — the AI side
+      // never places a sweep patch of its own (out of scope for now).
+      commitSweep('A');
       phase = 'pending';
       // Extra "thinking" pause on top of the usual pre-launch beat — purely a
       // feel beat (see reactionDelay in ai.js), not real computation time.
@@ -486,8 +597,8 @@ export function startGame(opts = {}) {
       setTimeout(launchSimulation, PRE_SIM_DELAY + think);
       return;
     }
-    if (phase === 'aimA') phase = 'aimB';
-    else if (phase === 'aimB') { phase = 'pending'; setTimeout(launchSimulation, PRE_SIM_DELAY); }
+    if (phase === 'aimA') { commitSweep('A'); phase = 'aimB'; }
+    else if (phase === 'aimB') { commitSweep('B'); phase = 'pending'; setTimeout(launchSimulation, PRE_SIM_DELAY); }
   }
   function launchSimulation() {
     entities.A.forEach(g => { g.vx = g.pendingVx || 0; g.vy = g.pendingVy || 0; });
@@ -501,9 +612,18 @@ export function startGame(opts = {}) {
     startOverlay.classList.add('hidden');
     controlsEnabled = true;
     phase = 'lanAim';
-    net.onLaunch(({ shotsA, shotsB }) => {
+    net.onLaunch(({ shotsA, shotsB, sweepA, sweepB }) => {
       hideOverlay();
       phase = 'pending';
+      // Own patch is already active/committed locally from commitSweep() at
+      // send time — this overwrites both sides fully from what the arbiter
+      // actually relayed (same pattern as the `used` flag below) so both
+      // clients' physics/reveal are byte-identical regardless of any local
+      // state quirk, rather than trusting the local copy for our own team.
+      sweep.A.active = !!sweepA; sweep.A.committed = !!sweepA;
+      if (sweepA) { sweep.A.x = sweepA.x; sweep.A.y = sweepA.y; sweep.A.r = sweepA.r; sweep.A.used = true; }
+      sweep.B.active = !!sweepB; sweep.B.committed = !!sweepB;
+      if (sweepB) { sweep.B.x = sweepB.x; sweep.B.y = sweepB.y; sweep.B.r = sweepB.r; sweep.B.used = true; }
       setTimeout(() => {
         // used flag comes from the network too, not just local drags — on this
         // client the opponent's own stones were never dragged locally, so their
@@ -576,8 +696,15 @@ export function startGame(opts = {}) {
     const u = Math.max(-1, Math.min(1, depth / r));
     return 0.5 + (u * Math.sqrt(1 - u * u) + Math.asin(u)) / Math.PI;
   }
+  // Less per-tick speed loss inside a currently-committed sweep patch (see
+  // the `sweep` state comment) — scales the friction DEFICIT rather than fr
+  // itself, since fr sits so close to 1 already that scaling it directly
+  // would barely move the needle; this compounds into a clearly longer glide
+  // over the many ticks of an actual shot.
+  function withSweepBoost(fr) { return 1 - (1 - fr) * (1 - SWEEP_FRICTION_BONUS); }
   function physicsStep() {
     const list = allEntities();
+    const boostZones = [sweep.A, sweep.B].filter(s => s.committed);
     let goalResult = null;
     for (const e of list) {
       if (e.falling) {
@@ -587,7 +714,8 @@ export function startGame(opts = {}) {
         continue;
       }
       e.x += e.vx; e.y += e.vy;
-      const fr = e === entities.ball ? BALL_FRICTION : FRICTION;
+      let fr = e === entities.ball ? BALL_FRICTION : FRICTION;
+      if (boostZones.some(z => Math.hypot(e.x - z.x, e.y - z.y) <= z.r)) fr = withSweepBoost(fr);
       e.vx *= fr; e.vy *= fr;
       const spd0 = Math.hypot(e.vx, e.vy);
       if (spd0 < STOP_THRESHOLD) { e.vx = 0; e.vy = 0; }
@@ -784,30 +912,32 @@ export function startGame(opts = {}) {
   function onGoal(scoringTeam, isWipeout) {
     audio.play(isWipeout ? 'wipeout' : 'goal');
     if (scoringTeam === 'A') scoreA++; else scoreB++;
-    if (scoreA >= WIN_SCORE || scoreB >= WIN_SCORE) {
-      phase = 'gameover';
-      audio.play('win');
-      const winner = scoreA >= WIN_SCORE ? 'BLEUE' : 'ROUGE';
-      const cls = scoreA >= WIN_SCORE ? 'a' : 'b';
-      showOverlay(`
-        <span class="team-pill ${cls}">ÉQUIPE ${winner}</span>
-        <h2>Victoire !</h2>
-        <p>Score final ${scoreA} – ${scoreB}</p>
-        <button class="bigbtn" id="playAgainBtn">Rejouer</button>
-      `);
-      document.getElementById('playAgainBtn').onclick = () => {
-        scoreA = 0; scoreB = 0; round = 1;
-        resetPositions(); beginAimPhase(); hideOverlay();
-      };
-      return;
-    }
-    round++;
-    // Same GOAL_PAUSE_MS pause for a wipeout as a real goal — even though the
-    // stone that tips a team into wipeout (last one out, or its 4th LED hit)
-    // is itself instantly resolved, that hit happens mid-collision: the shot's
-    // impact is still playing out (bounce, squish, other stones/ball still
-    // moving) and needs the same grace period to settle before resetting.
-    setTimeout(beginRoundReset, GOAL_PAUSE_MS);
+    const isMatchWin = scoreA >= WIN_SCORE || scoreB >= WIN_SCORE;
+    if (!isMatchWin) round++;
+    // Same GOAL_PAUSE_MS pause whether the round continues or the match just
+    // ended — even a winning goal/wipeout is instantly resolved as a state
+    // flip, but the shot's impact is still playing out (ball still sliding
+    // into the net, other stones bouncing/squishing) and phase stays 'goal'
+    // through this wait so physicsStep keeps running (see loop()) and lets
+    // that finish before we cut to either the next round or the victory screen.
+    setTimeout(isMatchWin ? showVictory : beginRoundReset, GOAL_PAUSE_MS);
+  }
+  function showVictory() {
+    phase = 'gameover';
+    audio.play('win');
+    const winner = scoreA >= WIN_SCORE ? 'BLEUE' : 'ROUGE';
+    const cls = scoreA >= WIN_SCORE ? 'a' : 'b';
+    showOverlay(`
+      <span class="team-pill ${cls}">ÉQUIPE ${winner}</span>
+      <h2>Victoire !</h2>
+      <p>Score final ${scoreA} – ${scoreB}</p>
+      <button class="bigbtn" id="playAgainBtn">Rejouer</button>
+    `);
+    document.getElementById('playAgainBtn').onclick = () => {
+      scoreA = 0; scoreB = 0; round = 1;
+      sweep.A.used = false; sweep.B.used = false;
+      resetPositions(); beginAimPhase(); hideOverlay();
+    };
   }
 
   // No more "ready" gate/button between rounds — the board resets itself:
@@ -820,6 +950,9 @@ export function startGame(opts = {}) {
   const ROUND_RESET_REVIVE_MS = 1000;
   let roundResetStart = 0;
   function beginRoundReset() {
+    // A real round boundary (goal/wipeout) — each team's single sweep
+    // placement for the round to come is available again.
+    sweep.A.used = false; sweep.B.used = false;
     for (const g of [...entities.A, ...entities.B]) {
       const idx = parseInt(g.id.slice(1), 10) || 0;
       const target = startPositions[g.team][idx];
@@ -890,7 +1023,6 @@ export function startGame(opts = {}) {
     }
 
     drawScorePanel();
-    drawPlayButton();
   }
 
   // Score lives on the wood scoreboard plaque baked into arena/frame.webp (see
@@ -986,55 +1118,64 @@ export function startGame(opts = {}) {
     ctx.restore();
   }
 
-  // PLAY cap: extracted from the artwork, drawn back on top of the socket that was
-  // patched into the background where it used to sit — see PLAY_CAP_X0..Y1 above.
-  // Pressing it squashes/dips it toward the socket and springs it back, like a real button.
-  const PLAY_PRESS_DURATION = 220;
-  let playPressAt = 0;
-  function playButtonBounds() {
-    return { x0: PLAY_CAP_X0, y0: PLAY_CAP_Y0, x1: PLAY_CAP_X1, y1: PLAY_CAP_Y1 };
-  }
+  // PLAY: the red toolbar button (index.html #tbtn-play, see src/style.css
+  // .tbtn-cap for the press animation) instead of a canvas-drawn cap — this
+  // just gates the click to the same "can actually launch" condition the old
+  // canvas button used, and replays the same press animation + click SFX.
   function isPlayButtonActive() {
     return controlsEnabled && isAimingPhase(phase);
   }
-  function pointInPlayButton(pos) {
-    const b = playButtonBounds();
-    return pos.x >= b.x0 && pos.x <= b.x1 && pos.y >= b.y0 && pos.y <= b.y1;
-  }
-  function pressPlayButton() {
-    playPressAt = performance.now();
+  const playBtn = document.getElementById('tbtn-play');
+  const playBtnCap = document.getElementById('tbtn-play-cap');
+  playBtn.addEventListener('click', () => {
+    if (!isPlayButtonActive()) return;
+    playBtnCap.classList.remove('pressed');
+    void playBtnCap.offsetWidth; // restart the animation if pressed again mid-tween
+    playBtnCap.classList.add('pressed');
     audio.play('button');
     onValidate();
-  }
-  function drawPlayButton() {
-    if (!playCapImage.complete || !playCapImage.naturalWidth) return;
-    const b = playButtonBounds();
-    const cw = b.x1 - b.x0, ch = b.y1 - b.y0;
-    const cx = b.x0 + cw / 2, cy = b.y0 + ch / 2;
-    let p = 0;
-    if (playPressAt) {
-      const t = performance.now() - playPressAt;
-      if (t >= PLAY_PRESS_DURATION) playPressAt = 0;
-      else p = t / PLAY_PRESS_DURATION;
-    }
-    // Sharp snap down, slower ease back — a linear tent (not a sine bell) reads as a
-    // crisp mechanical press instead of a soft/floaty squish.
-    const squash = p < 0.2 ? p / 0.2 : Math.max(0, 1 - (p - 0.2) / 0.8);
-    const scale = 1 - 0.04 * squash;
-    const dy = 1.5 * squash;
-    const dim = 1; // always reads full color once back to size, even while resolving/simulating
+  });
 
-    ctx.save();
-    ctx.globalAlpha = dim;
-    ctx.translate(cx, cy + dy);
-    ctx.scale(scale, scale);
-    ctx.drawImage(playCapImage, -cw / 2, -ch / 2, cw, ch);
-    if (squash > 0) {
-      ctx.globalAlpha = dim * squash * 0.15;
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(-cw / 2, -ch / 2, cw, ch);
-    }
-    ctx.restore();
+  // BALAI / "sweep": reuses the Effacer/"clear" toolbar slot (its broom art
+  // already fit) rather than a new 5th button — see index.html/main.js. Click
+  // toggles the aiming team's own patch on/off (freely, before PLAY — see
+  // commitSweep for what actually locks it in); the cap swaps to a hollow
+  // "engaged" variant while a not-yet-committed placement is active (same
+  // hollow-outline technique as the power button's off state, see
+  // scripts/make_sweep_active_icon.py), and an X overlay (see style.css
+  // .tbtn-used-cross) shows once that team's one placement for the round has
+  // actually been spent.
+  const SWEEP_CAP_SRC = { idle: `${ASSET_BASE}ui/btn-sweep-cap.png`, active: `${ASSET_BASE}ui/btn-sweep-cap-active.png` };
+  const sweepBtn = document.getElementById('tbtn-sweep');
+  const sweepBtnCap = document.getElementById('tbtn-sweep-cap');
+  const sweepBtnCross = document.getElementById('tbtn-sweep-cross');
+  sweepBtn.addEventListener('click', () => {
+    const team = aimingTeam();
+    if (!controlsEnabled || !team || sweep[team].used) return;
+    const sw = sweep[team];
+    sw.active = !sw.active;
+    if (sw.active) { sw.x = CENTER_X; sw.y = CY; }
+    sweepBtnCap.classList.remove('pressed');
+    void sweepBtnCap.offsetWidth; // restart the animation if pressed again mid-tween
+    sweepBtnCap.classList.add('pressed');
+    audio.play('button');
+  });
+  // Called every rendered frame (see render()) rather than only from the
+  // click handler above — the aiming team itself changes on its own as the
+  // phase machine advances (aimA -> aimB, LAN sync, round reset), with
+  // nothing routing back through this click handler to catch that.
+  function syncSweepButton() {
+    const team = aimingTeam();
+    const sw = team ? sweep[team] : null;
+    sweepBtnCap.src = (sw && sw.active && !sw.used) ? SWEEP_CAP_SRC.active : SWEEP_CAP_SRC.idle;
+    // Outside an actual aim phase (pending/sim/goal/roundReset/straighten —
+    // nobody's turn to place one right now) there's no specific team to read
+    // `used` off of, but the cross shouldn't blink off for that stretch just
+    // because aimingTeam() went null — keep it up through the reveal and
+    // beyond if EITHER team spent their round's placement, falling back to
+    // that once a real aim phase picks a specific team again.
+    const used = team ? sw.used : (sweep.A.used || sweep.B.used);
+    sweepBtnCross.classList.toggle('show', used);
   }
 
   // Splits the entity into two clipped halves along the line through its own
@@ -1067,7 +1208,6 @@ export function startGame(opts = {}) {
     drawFn();
     ctx.restore();
   }
-  function withSquish(e, drawFn) { drawSquished(e, drawFn); }
   // tight contact shadow shared by the bubbles and the ball — matched to the
   // arena's own light direction but barely spilling past the entity's own
   // footprint, like it's floating just above the grass rather than resting on it.
@@ -1194,9 +1334,10 @@ export function startGame(opts = {}) {
   // art the same way as HEX above, as fractions of the module's own square
   // canvas so they scale with whatever size the bubble is baked at. The art
   // bakes them permanently lit; drawStoneLeds below dims each one to an "off"
-  // gray individually. Index i is knocked out for good once g.hits > i, so
-  // the top strip is the first to go dark on the stone's 1st hit, then
-  // clockwise — see registerStoneHit/STONE_MAX_HITS. Still-alive LEDs breathe
+  // gray individually. Index i is knocked out for good once g.hits reaches
+  // (i+1) * STONE_HITS_PER_LED, so the top strip is the first to go dark
+  // (after 2 hits), then clockwise — see registerStoneHit/STONE_MAX_HITS.
+  // Still-alive LEDs breathe
   // (smooth pulse, not a hard on/off blink — reads as "alive" rather than
   // flickering/broken) so the damage state is still visible at a glance.
   // Fully independent of the halo above (own state, not tied to
@@ -1228,6 +1369,9 @@ export function startGame(opts = {}) {
     const wave = (1 - Math.cos(cycle * Math.PI * 2)) / 2; // smooth 0 -> 1 -> 0
     return LED_PULSE_FLOOR + (1 - LED_PULSE_FLOOR) * wave;
   }
+  // how many of the 4 LEDs/quadrants (0..4) are knocked out so far — each
+  // takes STONE_HITS_PER_LED hits, top first then clockwise.
+  function stoneLedsOut(g) { return Math.floor(g.hits / STONE_HITS_PER_LED); }
   // called from inside the same translate/rotate transform as the sprite draw
   // (local (0,0) = stone's own center, d = on-screen diameter). 'overlay'
   // blend (not a flat fill) so the ring's existing embossed shading still
@@ -1235,8 +1379,9 @@ export function startGame(opts = {}) {
   function drawStoneRingQuadrants(g, d) {
     const rgb = LED_LIT_RGB[g.team];
     const outerR = d * RING_OUTER_FRAC, innerR = d * RING_INNER_FRAC;
+    const ledsOut = stoneLedsOut(g);
     RING_QUADRANT_ANGLES.forEach((centerAngle, i) => {
-      if (i < g.hits) return; // this quarter's LED is already out — ring stays neutral
+      if (i < ledsOut) return; // this quarter's LED is already out — ring stays neutral
       const a0 = centerAngle - RING_QUADRANT_HALF_SPAN, a1 = centerAngle + RING_QUADRANT_HALF_SPAN;
       ctx.save();
       ctx.beginPath();
@@ -1256,8 +1401,9 @@ export function startGame(opts = {}) {
   function drawStoneLeds(g, d) {
     const rgb = LED_LIT_RGB[g.team];
     const pulse = ledPulseStrength();
+    const ledsOut = stoneLedsOut(g);
     LED_RECTS.forEach((led, i) => {
-      const alive = i >= g.hits;
+      const alive = i >= ledsOut;
       const strength = alive ? pulse : 0;
       const lx = (led.cxFrac - 0.5) * d, ly = (led.cyFrac - 0.5) * d;
       const hw = led.halfWFrac * d, hh = led.halfHFrac * d;
@@ -1297,7 +1443,7 @@ export function startGame(opts = {}) {
     const halo = haloMode(g);
     if (halo !== 'off') drawAimHalo(g, halo);
     drawContactShadow(g, stoneShadowSprite);
-    withSquish(g, () => {
+    drawSquished(g, () => {
       const sprite = bubbleSprites[g.team];
       if (sprite) {
         // pre-baked (module ring + identicon) at load time, so this draw is
@@ -1663,13 +1809,14 @@ export function startGame(opts = {}) {
   // physicsStep itself uses (move+friction+clamp for everyone first, then
   // walls, then pairwise), so a shot's predicted path is what N real ticks
   // would actually produce.
-  function stepGhostBodies(bodies, blockers) {
+  function stepGhostBodies(bodies, blockers, boostZone) {
     for (const b of bodies) {
       if (!b.moving) continue;
       const moveDist = Math.hypot(b.vx, b.vy);
       b.x += b.vx; b.y += b.vy;
       b.traveled += moveDist;
-      const fr = b.kind === 'ball' ? BALL_FRICTION : FRICTION;
+      let fr = b.kind === 'ball' ? BALL_FRICTION : FRICTION;
+      if (boostZone && Math.hypot(b.x - boostZone.x, b.y - boostZone.y) <= boostZone.r) fr = withSweepBoost(fr);
       b.vx *= fr; b.vy *= fr;
       const spd = Math.hypot(b.vx, b.vy);
       if (spd < STOP_THRESHOLD || b.traveled >= b.budget) {
@@ -1755,8 +1902,13 @@ export function startGame(opts = {}) {
       .map(g => makeGhostBody(g, 'stone', STONE_R, STONE_MASS));
     bodies.push(makeGhostBody(entities.ball, 'ball', BALL_R, BALL_MASS));
 
+    // Only the aiming team's own not-yet-committed patch can ever apply here
+    // (this cascade only ever renders for the currently-aiming team's own
+    // screen, never the opponent's — see render()), so there's no visibility
+    // leak in letting the prediction react to it live as it's dragged around.
+    const boostZone = sweep[team].active ? sweep[team] : null;
     for (let tick = 0; tick < GHOST_MAX_TICKS && bodies.some(b => b.moving); tick++) {
-      stepGhostBodies(bodies, blockers);
+      stepGhostBodies(bodies, blockers, boostZone);
     }
     for (const b of bodies) {
       if (b.moving) { currentLeg(b).points.push({ x: b.x, y: b.y }); b.moving = false; }
@@ -1769,6 +1921,21 @@ export function startGame(opts = {}) {
       if (leg.totalLen < 1 || leg.points.length < 2) continue;
       if (b.kind === 'ball') drawBallLaserTrail(leg.points, leg.totalLen);
       else drawLaserTrail(leg.points, team, leg.totalLen);
+    }
+  }
+  // "Power" toolbar toggle, off-branch: a straight direction/energy readout
+  // per stone — no ghost simulation, no bounces, no ball trail. Each stone
+  // still eases via smoothLaserAim (shared with the cascade) so flipping the
+  // toggle mid-drag doesn't introduce a second, differently-behaved smoothing
+  // path; only the shape drawn from that smoothed aim changes.
+  function renderBasicLaser(team) {
+    for (const g of entities[team]) {
+      if (g.out || g.falling) continue;
+      const aim = getBodyAim(g);
+      if (!aim) { g._laserUx = g._laserUy = g._laserLen = undefined; continue; }
+      const s = smoothLaserAim(g, aim.ux, aim.uy, aim.len);
+      const points = [{ x: g.x, y: g.y }, { x: g.x + s.ux * s.len, y: g.y + s.uy * s.len }];
+      drawLaserTrail(points, team, s.len);
     }
   }
   function drawDragPreview() {
@@ -1896,17 +2063,21 @@ export function startGame(opts = {}) {
     drawBackground();
     // laser drawn before the bubbles/identicons so it reads as coming from
     // underneath the stone instead of overlapping its face
-    if (phase === 'aimA') renderAimCascade('A');
-    else if (phase === 'aimB') renderAimCascade('B');
+    const drawAimLaser = isBasicLaser() ? renderBasicLaser : renderAimCascade;
+    if (phase === 'aimA') drawAimLaser('A');
+    else if (phase === 'aimB') drawAimLaser('B');
     // lanWait too: local shot is locked in but stays visible as feedback
     // while waiting on the opponent, instead of vanishing the instant PLAY
     // is pressed.
-    else if (phase === 'lanAim' || phase === 'lanWait') renderAimCascade(myTeam);
+    else if (phase === 'lanAim' || phase === 'lanWait') drawAimLaser(myTeam);
     drawDragPreview();
+    // under the stones/ball (painter's order) — see drawSweepZone's own comment
+    drawSweepOverlay();
     entities.A.forEach(g => { if (!g.out) drawStone(g); });
     entities.B.forEach(g => { if (!g.out) drawStone(g); });
     if (!entities.ball.out) drawBall(entities.ball);
     // atmosphere.draw(ctx); // neutralized for perf, see note at createAtmosphere()
+    syncSweepButton();
     if (import.meta.env.DEV) drawPerfOverlay();
   }
 
@@ -2008,12 +2179,17 @@ export function startGame(opts = {}) {
       if (isAimingPhase(phase)) turnTimerStart = performance.now();
       turnTimerPhase = phase;
     }
-    // LAN only: each client enforces its own local 30s clock independently (no
-    // arbiter-side timer) — see "timer nimball" design note. A stone whose drag
-    // hasn't been released yet still has pendingVx/Vy reset to 0 from
-    // onPointerDown, so cancelling the in-flight drag and reusing the normal
-    // PLAY submission path naturally sends "no shot" for it.
-    if (net && phase === 'lanAim' && turnTimerProgress() >= 1) {
+    // LAN: each client enforces its own local 30s clock independently (no
+    // arbiter-side timer) — see "timer nimball" design note. Solo vs IA: same
+    // 30s cap on the human's own turn (aiTeam's shots are already decided in
+    // prepareAiShots(), so only the human side can ever be the one stalling).
+    // Local pass-and-play has no cap — both players are already looking at
+    // the same screen, so there's no "someone might not be paying attention"
+    // case to guard against. A stone whose drag hasn't been released yet
+    // still has pendingVx/Vy reset to 0 from onPointerDown, so cancelling the
+    // in-flight drag and reusing the normal PLAY submission path naturally
+    // sends "no shot" for it.
+    if (((net && phase === 'lanAim') || (aiTeam && phase === 'aimA')) && turnTimerProgress() >= 1) {
       drag = null;
       onValidate();
     }
@@ -2040,5 +2216,5 @@ export function startGame(opts = {}) {
   loop();
 
   // dev-only handle for physics-tuning scripts (position/phase readback)
-  if (import.meta.env.DEV) window.__nb = { entities: () => entities, phase: () => phase, step: () => physicsStep(), render: () => render() };
+  if (import.meta.env.DEV) window.__nb = { entities: () => entities, phase: () => phase, step: () => physicsStep(), render: () => render(), sweep: () => sweep, aimingTeam: () => aimingTeam(), controlsEnabled: () => controlsEnabled };
 }
