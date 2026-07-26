@@ -6,49 +6,33 @@
 <style>
   html, body { margin: 0; padding: 0; background: #000; }
   #stage { display: block; margin: 0 auto; }
+  #controls {
+    position: fixed; top: 12px; left: 12px;
+    font: 14px/1.4 system-ui, sans-serif; color: #fff;
+    background: rgba(0,0,0,0.55); padding: 10px 14px; border-radius: 8px;
+    user-select: none;
+  }
+  #controls label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 </style>
 </head>
 <body>
+  <div id="controls">
+    <label><input type="checkbox" id="toggleIdenticon" checked /> Identicon dans l'hexagone</label>
+  </div>
   <canvas id="stage" width="1200" height="905" style="width:1200px;height:905px"></canvas>
 
-<script>
-function stripWhiteBackground(img) {
-  const c = document.createElement('canvas');
-  c.width = img.naturalWidth || img.width; c.height = img.naturalHeight || img.height;
-  const cctx = c.getContext('2d');
-  cctx.drawImage(img, 0, 0, c.width, c.height);
-  const data = cctx.getImageData(0, 0, c.width, c.height);
-  const d = data.data;
-  const bg = [d[0], d[1], d[2]];
-  const lo = 6, hi = 46;
-  for (let i = 0; i < d.length; i += 4) {
-    const r = d[i], g = d[i + 1], b = d[i + 2];
-    const dist = Math.max(Math.abs(r - bg[0]), Math.abs(g - bg[1]), Math.abs(b - bg[2]));
-    if (dist <= lo) { d[i + 3] = 0; }
-    else if (dist < hi) { d[i + 3] = Math.round(255 * (dist - lo) / (hi - lo)); }
-  }
-  cctx.putImageData(data, 0, 0);
-  return c;
-}
+<script type="module">
+import { getIdenticonCanvas } from '../src/identicons.js';
 
-// measured from module-cyan-v3.png / module-orange-v3.png (716x716, real alpha): hex slot bbox
-const HEX = { cxFrac: 0.503, cyFrac: 0.516, halfWFrac: 0.261, halfHFrac: 0.241 };
+// Same demo addresses / module art as src/game.js, so this preview matches
+// the real in-game bubble bake exactly (compare against startGame()'s
+// bakeBubble if either drifts).
+const IDENTICON_ADDRESS = {
+  A: 'NQ16 2SSN 82TL SMQS KXT3 Q01V CMAL NU6F 1LJG',
+  B: 'NQ19 AXEU PPQ9 5610 YF48 VLTJ QR6Y 0HS1 UH89',
+};
+const MODULE_SRC = { A: '/identicons/module-navy-v4-light.png', B: '/identicons/module-gold-v4-light.png' };
 
-function hexPath(ctx, cx, cy, halfW, halfH) {
-  ctx.beginPath();
-  ctx.moveTo(cx + halfW, cy);
-  ctx.lineTo(cx + halfW * 0.5, cy - halfH);
-  ctx.lineTo(cx - halfW * 0.5, cy - halfH);
-  ctx.lineTo(cx - halfW, cy);
-  ctx.lineTo(cx - halfW * 0.5, cy + halfH);
-  ctx.lineTo(cx + halfW * 0.5, cy + halfH);
-  ctx.closePath();
-}
-
-// shrinks in halving steps (properly box-filtered) instead of one big jump,
-// which is what a single drawImage downscale does when shrinking a lot in
-// one go — that undersamples fine edges (the hex outline, LED highlights)
-// and is what made the module look degraded/muddy at bubble size.
 function downscaleToFit(src, targetW, targetH) {
   let cur = src, cw = src.width, ch = src.height;
   while (cw > targetW * 2 && ch > targetH * 2) {
@@ -68,18 +52,31 @@ function downscaleToFit(src, targetW, targetH) {
   return out;
 }
 
-// bakes module + identicon into one transparent-cornered sprite, once, directly
-// at the final on-screen size (S) so there's a single high-quality downscale
-// from the 1254px source instead of stacking two lossy resizes.
-function bakeBubble(moduleImg, identiconImg, S) {
-  const canvas = document.createElement('canvas');
-  canvas.width = S; canvas.height = S;
-  const ctx = canvas.getContext('2d');
+// hex slot on the module art (module-navy-v4-light.png / module-gold-v4-light.png,
+// real alpha), measured as a fraction of the module's own square canvas — kept
+// in sync with the HEX constant in src/game.js.
+const HEX = { cxFrac: 0.499, cyFrac: 0.498, halfWFrac: 0.235, halfHFrac: 0.205 };
+function hexPath(hctx, cx, cy, halfW, halfH) {
+  hctx.beginPath();
+  hctx.moveTo(cx + halfW, cy);
+  hctx.lineTo(cx + halfW * 0.5, cy - halfH);
+  hctx.lineTo(cx - halfW * 0.5, cy - halfH);
+  hctx.lineTo(cx - halfW, cy);
+  hctx.lineTo(cx - halfW * 0.5, cy + halfH);
+  hctx.lineTo(cx + halfW * 0.5, cy + halfH);
+  hctx.closePath();
+}
 
+// Bakes the module ring with its hex slot punched transparent. `id` is
+// optional: when provided, the identicon is drawn into the hex before the
+// ring is composited back on top — omit it to preview the ring alone (the
+// "without identicon" comparison state).
+function bakeBubble(mod, id, diameterPx) {
+  const S = Math.round(diameterPx * 2);
   const cx = S * HEX.cxFrac, cy = S * HEX.cyFrac;
   const halfW = S * HEX.halfWFrac, halfH = S * HEX.halfHFrac;
 
-  const sizedModule = downscaleToFit(moduleImg, S, S);
+  const sizedModule = downscaleToFit(mod, S, S);
   const punched = document.createElement('canvas');
   punched.width = S; punched.height = S;
   const pctx = punched.getContext('2d');
@@ -88,21 +85,25 @@ function bakeBubble(moduleImg, identiconImg, S) {
   hexPath(pctx, cx, cy, halfW, halfH);
   pctx.fill();
 
-  const stripped = stripWhiteBackground(identiconImg);
-  const fit = Math.max(halfW * 2, halfH * 2) * 1.05;
-  const scale = fit / Math.max(stripped.width, stripped.height);
-  const dw = Math.round(stripped.width * scale), dh = Math.round(stripped.height * scale);
-  const sizedIdenticon = downscaleToFit(stripped, dw, dh);
+  const bubble = document.createElement('canvas');
+  bubble.width = S; bubble.height = S;
+  const bctx = bubble.getContext('2d');
+  bctx.imageSmoothingEnabled = true; bctx.imageSmoothingQuality = 'high';
 
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.save();
-  hexPath(ctx, cx, cy, halfW, halfH);
-  ctx.clip();
-  ctx.drawImage(sizedIdenticon, cx - dw / 2, cy - dh / 2);
-  ctx.restore();
+  if (id) {
+    const fit = Math.max(halfW * 2, halfH * 2) * 1.05;
+    const scale = fit / Math.max(id.width, id.height);
+    const dw = Math.round(id.width * scale), dh = Math.round(id.height * scale);
+    const sizedIdenticon = downscaleToFit(id, dw, dh);
+    bctx.save();
+    hexPath(bctx, cx, cy, halfW, halfH);
+    bctx.clip();
+    bctx.drawImage(sizedIdenticon, cx - dw / 2, cy - dh / 2);
+    bctx.restore();
+  }
 
-  ctx.drawImage(punched, 0, 0);
-  return canvas;
+  bctx.drawImage(punched, 0, 0);
+  return bubble;
 }
 
 function loadImg(src) {
@@ -126,45 +127,58 @@ canvas.width = CSS_W * DPR;
 canvas.height = CSS_H * DPR;
 ctx.scale(DPR, DPR);
 
+// matches src/game.js's GLOB_R * 2 (34.2 * 2 = 68.4). Baked at DPR-multiplied
+// resolution so the sprite has as many source pixels as the display can
+// actually show.
+const DISPLAY_SIZE = 68.4;
+const posA = [370 - DISPLAY_SIZE / 2, 490 - DISPLAY_SIZE / 2];
+const posB = [830 - DISPLAY_SIZE / 2, 490 - DISPLAY_SIZE / 2];
+
+function drawGroundShadow(x, y, size) {
+  ctx.beginPath();
+  ctx.ellipse(x + size * 0.55, y + size * 0.58, size * 0.5, size * 0.46, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.filter = 'blur(3px)';
+  ctx.fill();
+  ctx.filter = 'none';
+}
+
 (async () => {
-  const [arena, modA, modB, idA, idB] = await Promise.all([
+  const [arena, modA, modB, idACanvas, idBCanvas] = await Promise.all([
     loadImg('/arena/frame.webp'),
-    loadImg('/identicons/module-cyan-v3.png'),
-    loadImg('/identicons/module-orange-v3.png'),
-    loadImg('/identicons/team-a.png'),
-    loadImg('/identicons/team-b.png'),
+    loadImg(MODULE_SRC.A),
+    loadImg(MODULE_SRC.B),
+    getIdenticonCanvas(IDENTICON_ADDRESS.A),
+    getIdenticonCanvas(IDENTICON_ADDRESS.B),
   ]);
 
-  // matches the current game's defined bubble size (GLOB_R * 2 = 76,
-  // src/game.js). Baked at DPR-multiplied resolution so the sprite has as
-  // many source pixels as the display can actually show.
-  const DISPLAY_SIZE = 76;
-  const bubbleA = bakeBubble(modA, idA, DISPLAY_SIZE * DPR);
-  const bubbleB = bakeBubble(modB, idB, DISPLAY_SIZE * DPR);
+  // team B starts on the right side of the pitch, so mirror it to face the
+  // ball at kickoff instead of away from it — same as src/game.js.
+  const flipped = document.createElement('canvas');
+  flipped.width = idBCanvas.width; flipped.height = idBCanvas.height;
+  const fctx = flipped.getContext('2d');
+  fctx.translate(flipped.width, 0);
+  fctx.scale(-1, 1);
+  fctx.drawImage(idBCanvas, 0, 0);
 
-  // matches the arena's own light direction (the NIM-BALL header panel casts
-  // its shadow down-and-slightly-right) but kept tight and barely peeking past
-  // the module's silhouette, like it's floating just above the grass
-  function drawGroundShadow(x, y, size) {
-    ctx.beginPath();
-    ctx.ellipse(x + size * 0.55, y + size * 0.58, size * 0.5, size * 0.46, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.filter = 'blur(3px)';
-    ctx.fill();
-    ctx.filter = 'none';
+  const checkbox = document.getElementById('toggleIdenticon');
+
+  function render() {
+    const withIdenticon = checkbox.checked;
+    const bubbleA = bakeBubble(modA, withIdenticon ? idACanvas : null, DISPLAY_SIZE * DPR);
+    const bubbleB = bakeBubble(modB, withIdenticon ? flipped : null, DISPLAY_SIZE * DPR);
+
+    ctx.clearRect(0, 0, CSS_W, CSS_H);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(arena, 0, 0, CSS_W, CSS_H);
+    drawGroundShadow(...posA, DISPLAY_SIZE);
+    drawGroundShadow(...posB, DISPLAY_SIZE);
+    ctx.drawImage(bubbleA, ...posA, DISPLAY_SIZE, DISPLAY_SIZE);
+    ctx.drawImage(bubbleB, ...posB, DISPLAY_SIZE, DISPLAY_SIZE);
   }
 
-  // same on-screen centers as before (370,490) / (830,490), just re-anchored
-  // to the smaller bubble's top-left corner
-  const posA = [370 - DISPLAY_SIZE / 2, 490 - DISPLAY_SIZE / 2];
-  const posB = [830 - DISPLAY_SIZE / 2, 490 - DISPLAY_SIZE / 2];
-
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(arena, 0, 0, CSS_W, CSS_H);
-  drawGroundShadow(...posA, DISPLAY_SIZE);
-  drawGroundShadow(...posB, DISPLAY_SIZE);
-  ctx.drawImage(bubbleA, ...posA, DISPLAY_SIZE, DISPLAY_SIZE);
-  ctx.drawImage(bubbleB, ...posB, DISPLAY_SIZE, DISPLAY_SIZE);
+  checkbox.addEventListener('change', render);
+  render();
 })();
 </script>
 </body>

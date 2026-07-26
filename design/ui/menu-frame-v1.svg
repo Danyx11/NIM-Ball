@@ -1,0 +1,17 @@
+<svg viewBox="0 0 1340 820" width="1340" height="820" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="blur"/>
+      <feColorMatrix in="blur" mode="matrix" values="
+        1 0 0 0 0
+        0 1 0 0 0
+        0 0 1 0 0
+        0 0 0 0.55 0" result="softBlur"/>
+      <feMerge>
+        <feMergeNode in="softBlur"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <path d="M 70.00 216.00 Q 70.00 210.00 73.71 205.28 L 176.29 74.72 Q 180.00 70.00 186.00 70.00 L 1154.00 70.00 Q 1160.00 70.00 1163.71 74.72 L 1266.29 205.28 Q 1270.00 210.00 1270.00 216.00 L 1270.00 604.00 Q 1270.00 610.00 1266.29 614.72 L 1163.71 745.28 Q 1160.00 750.00 1154.00 750.00 L 186.00 750.00 Q 180.00 750.00 176.29 745.28 L 73.71 614.72 Q 70.00 610.00 70.00 604.00 Z" fill="none" stroke="#FFFFFF" stroke-width="15" stroke-linejoin="round" filter="url(#softGlow)" opacity="0.32"/>
+  <path d="M 70.00 216.00 Q 70.00 210.00 73.71 205.28 L 176.29 74.72 Q 180.00 70.00 186.00 70.00 L 1154.00 70.00 Q 1160.00 70.00 1163.71 74.72 L 1266.29 205.28 Q 1270.00 210.00 1270.00 216.00 L 1270.00 604.00 Q 1270.00 610.00 1266.29 614.72 L 1163.71 745.28 Q 1160.00 750.00 1154.00 750.00 L 186.00 750.00 Q 180.00 750.00 176.29 745.28 L 73.71 614.72 Q 70.00 610.00 70.00 604.00 Z" fill="none" stroke="#FFFFFF" stroke-width="11" stroke-linejoin="round"/>
+</svg>

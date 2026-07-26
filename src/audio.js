@@ -5,19 +5,24 @@
 // shared <audio> element would.
 const ASSET_BASE = import.meta.env.BASE_URL;
 const SFX_SRC = {
-  hitWall: `${ASSET_BASE}sfx/hit-wall.wav`,   // glob/ball bouncing off a rail
-  hitGlob: `${ASSET_BASE}sfx/hit-glob.wav`,   // glob-glob or glob-ball collision
-  shot: `${ASSET_BASE}sfx/shot.wav`,          // drag released, a glob launches
+  hitWall: `${ASSET_BASE}sfx/hit-wall.wav`,   // stone/ball bouncing off a rail
+  hitStone: `${ASSET_BASE}sfx/hit-stone.wav`,   // stone-stone or stone-ball collision
+  shot: `${ASSET_BASE}sfx/shot.wav`,          // drag released, a stone launches
   goal: `${ASSET_BASE}sfx/goal.wav`,          // ball crosses into the goal mouth
   wipeout: `${ASSET_BASE}sfx/wipeout.wav`,    // a whole team has fallen in
   button: `${ASSET_BASE}sfx/button.wav`,      // PLAY cap pressed
   win: `${ASSET_BASE}sfx/win.wav`,            // match point reached
 };
+const AMBIENCE_SRC = `${ASSET_BASE}sfx/ambience-forest.m4a`;
+const AMBIENCE_VOLUME = 0.35;
 
 export function createAudio() {
   let ctx = null;
   let muted = false;
   const buffers = {};
+  let ambienceBuffer = null;
+  let ambienceSource = null;
+  let ambienceGain = null;
 
   function ensureContext() {
     if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -39,6 +44,13 @@ export function createAudio() {
         console.warn(`[audio] couldn't load "${name}" from ${url}`, err);
       }
     }));
+    try {
+      const res = await fetch(AMBIENCE_SRC);
+      const data = await res.arrayBuffer();
+      ambienceBuffer = await c.decodeAudioData(data);
+    } catch (err) {
+      console.warn(`[audio] couldn't load ambience from ${AMBIENCE_SRC}`, err);
+    }
   }
 
   // volume: 0-1 gain; rate: playback rate, nudge it per call (e.g. 0.95-1.05)
@@ -54,12 +66,35 @@ export function createAudio() {
     src.start();
   }
 
-  function setMuted(v) { muted = v; }
+  function setMuted(v) {
+    muted = v;
+    if (ambienceGain) ambienceGain.gain.value = muted ? 0 : AMBIENCE_VOLUME;
+  }
   function isMuted() { return muted; }
 
   // call from the first pointerdown/click in the page — resume() above only
   // actually unlocks audio when invoked from within a user-gesture handler
   function unlock() { ensureContext(); }
 
-  return { load, play, setMuted, isMuted, unlock };
+  // loops the background ambience track; safe to call multiple times, a
+  // second call is a no-op while a loop is already playing
+  function playAmbience() {
+    if (ambienceSource || !ctx || !ambienceBuffer) return;
+    ambienceSource = ctx.createBufferSource();
+    ambienceSource.buffer = ambienceBuffer;
+    ambienceSource.loop = true;
+    ambienceGain = ctx.createGain();
+    ambienceGain.gain.value = muted ? 0 : AMBIENCE_VOLUME;
+    ambienceSource.connect(ambienceGain).connect(ctx.destination);
+    ambienceSource.start();
+  }
+
+  function stopAmbience() {
+    if (!ambienceSource) return;
+    ambienceSource.stop();
+    ambienceSource = null;
+    ambienceGain = null;
+  }
+
+  return { load, play, setMuted, isMuted, unlock, playAmbience, stopAmbience };
 }

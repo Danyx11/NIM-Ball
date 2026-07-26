@@ -6,18 +6,54 @@
 // still resolve when the app is served from a subpath, e.g. GitHub Pages at
 // https://danyx11.github.io/NIM-Ball/.
 import { createAudio } from './audio.js';
+import { getIdenticonCanvas } from './identicons.js';
+import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
+import { isBasicLaser } from './settings.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
-const IDENTICON_SRC = { A: `${ASSET_BASE}identicons/team-a.png`, B: `${ASSET_BASE}identicons/team-b.png` };
-const MODULE_SRC = { A: `${ASSET_BASE}identicons/module-cyan-v3.png`, B: `${ASSET_BASE}identicons/module-orange-v3.png` };
+// Placeholder demo addresses (real per-player wallet addresses aren't wired
+// up yet — see src/nimiq.js). Swap these once that flow exists; the identicon
+// pipeline below doesn't care where the address string comes from.
+const IDENTICON_ADDRESS = {
+  A: 'NQ16 2SSN 82TL SMQS KXT3 Q01V CMAL NU6F 1LJG',
+  B: 'NQ19 AXEU PPQ9 5610 YF48 VLTJ QR6Y 0HS1 UH89',
+};
+const MODULE_SRC = { A: `${ASSET_BASE}identicons/bubble-v4-navy.webp`, B: `${ASSET_BASE}identicons/bubble-v4-gold.webp` };
 const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
-const PLAY_CAP_SRC = `${ASSET_BASE}arena/play-cap.png`;
 const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
 
-export function startGame() {
+export function startGame(opts = {}) {
+  const { net = null, myTeam = null, aiTeam = null, aiConfig = {} } = opts;
+  const AI_CONFIG = { ...DEFAULT_AI_CONFIG, ...aiConfig };
   const canvas = document.getElementById('stage');
+  // Guards against startGame() ever running twice on the same canvas (e.g. a
+  // stray reconnect/reload race) — canvas.width/height below are reflected
+  // HTML attributes, so a second pass would read back the *already*
+  // dpr-scaled size and scale it again, compounding on every call. The
+  // backing buffer keeps growing while the CSS-displayed box stays the same
+  // size, so the drawn scene ends up squeezed into a shrinking corner of it —
+  // this is the exact "everything renders tiny" bug. Bailing out here makes
+  // sizing idempotent regardless of what triggers a second call.
+  if (canvas.dataset.nbStarted === 'true') {
+    console.warn('[game] startGame() called again on an already-started canvas — ignoring.');
+    return;
+  }
+  canvas.dataset.nbStarted = 'true';
   const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
+  // Logical coordinate system used throughout this file (physics bounds,
+  // getPointerPos, all drawing) stays 1200x905 regardless of screen density —
+  // matches index.html's <canvas width="1200" height="905">. Read as fixed
+  // constants, not from canvas.width/height (which the dpr scaling below
+  // mutates in place, so re-reading them would compound on every call).
+  const W = 1200, H = 905;
+  // The canvas's actual backing buffer is upsized to devicePixelRatio (capped
+  // at 2 — Pixi/Phaser's standard tradeoff, since the per-frame shadow blur in
+  // drawContactShadow scales with pixel count) and ctx.scale()'d once so every
+  // existing drawImage/fillRect/arc call keeps working unmodified.
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.3); // perf test: was 2, see perf audit
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
 
   // ---------- Audio ----------
   // Decoding starts immediately (harmless before a user gesture); actual
@@ -27,33 +63,9 @@ export function startGame() {
   audio.load();
 
   // ---------- Identicons ----------
-  // Strips the near-pure-white background behind the identicon's hexagon,
-  // so the translucent bubble color shows through instead of a white square.
-  // The background tone is sampled from the image's own corner (it's an
-  // off-white grey, not pure white) and pixels fade out by their color
-  // distance to it. Un-mixing the background tint out of the edge pixels'
-  // color (dividing by a small alpha) blew up into a brighter white/grey
-  // ring than the hard cutoff it replaced, so this only fades alpha and
-  // leaves the anti-aliased color alone — at low alpha its exact color
-  // barely shows once blended with the bubble underneath.
-  function stripWhiteBackground(img) {
-    const c = document.createElement('canvas');
-    c.width = img.naturalWidth || img.width; c.height = img.naturalHeight || img.height;
-    const cctx = c.getContext('2d');
-    cctx.drawImage(img, 0, 0, c.width, c.height);
-    const data = cctx.getImageData(0, 0, c.width, c.height);
-    const d = data.data;
-    const bg = [d[0], d[1], d[2]];
-    const lo = 6, hi = 46;
-    for (let i = 0; i < d.length; i += 4) {
-      const r = d[i], g = d[i + 1], b = d[i + 2];
-      const dist = Math.max(Math.abs(r - bg[0]), Math.abs(g - bg[1]), Math.abs(b - bg[2]));
-      if (dist <= lo) { d[i + 3] = 0; }
-      else if (dist < hi) { d[i + 3] = Math.round(255 * (dist - lo) / (hi - lo)); }
-    }
-    cctx.putImageData(data, 0, 0);
-    return c;
-  }
+  // Official identicons (src/identicons.js, @nimiq/identicons) render straight
+  // to a canvas with no matte behind them, so unlike the old static PNGs they
+  // need no background-stripping step before going into downscaleToFit.
   // Shrinks in halving steps (each a properly box-filtered average) rather than
   // one big jump, which is what drawImage's own bilinear scaler does when asked
   // to shrink an image a lot in one go — that undersamples the diagonal hex
@@ -79,9 +91,12 @@ export function startGame() {
     octx.drawImage(cur, 0, 0, targetW, targetH);
     return out;
   }
-  // hex slot on the module art (module-cyan-v3.png / module-orange-v3.png, 716x716,
-  // real alpha), measured as a fraction of the module's own square canvas
-  const HEX = { cxFrac: 0.503, cyFrac: 0.516, halfWFrac: 0.261, halfHFrac: 0.241 };
+  // Hex "floor" on the bubble art (bubble-v4-navy/gold.webp, 1024x1024) — unlike
+  // the old module-ring art, this hex is a solid embossed shape baked into the
+  // art itself (no punched-out alpha window), measured by scanning the source
+  // PNG for where the color plateaus flat between the beveled walls (see
+  // design-lab/main.js's HEX_MODULE, same measurement, ported 1:1).
+  const HEX = { cxFrac: 0.502, cyFrac: 0.495, halfWFrac: 0.142, halfHFrac: 0.142 };
   function hexPath(hctx, cx, cy, halfW, halfH) {
     hctx.beginPath();
     hctx.moveTo(cx + halfW, cy);
@@ -93,27 +108,26 @@ export function startGame() {
     hctx.closePath();
   }
 
-  const identiconStripped = {};
+  const identiconSources = {};
   const moduleImages = {};
   const bubbleSprites = {};
-  // bakes the module ring (hex hole punched through it) + identicon into one
-  // sprite per team, once both images are in — avoids doing this per-glob per-frame
-  function tryBakeBubble(team) {
-    const mod = moduleImages[team], id = identiconStripped[team];
-    if (!mod || !id) return;
-    // baked at 2x the on-screen diameter, same oversample convention as ballSprite
-    const S = Math.round(GLOB_R * 2 * 2);
+  const scoreBubbleSprites = {};
+  // Bakes the bubble art + identicon into one sprite, at the given on-screen
+  // diameter (2x-oversampled, same convention as ballSprite) — shared by the
+  // in-pitch stone sprite and the small score-panel icon. Unlike the old
+  // module-ring art, bubble-v4-navy/gold.webp's hex floor is solid (no punch-
+  // out needed) — the identicon is drawn ON TOP, clipped to that hex, then a
+  // cool-tint blend is applied so the glossy CG render sits inside the flatter,
+  // desaturated ice scene instead of reading as a pasted-on sticker (ported
+  // from design-lab/main.js's "intégration" slider, locked at 0.21 — see
+  // design/design-lab-locked-state.md).
+  const BUBBLE_BLEND = 0.21;
+  function bakeBubble(mod, id, diameterPx) {
+    const S = Math.round(diameterPx * 2);
     const cx = S * HEX.cxFrac, cy = S * HEX.cyFrac;
     const halfW = S * HEX.halfWFrac, halfH = S * HEX.halfHFrac;
 
     const sizedModule = downscaleToFit(mod, S, S);
-    const punched = document.createElement('canvas');
-    punched.width = S; punched.height = S;
-    const pctx = punched.getContext('2d');
-    pctx.drawImage(sizedModule, 0, 0);
-    pctx.globalCompositeOperation = 'destination-out';
-    hexPath(pctx, cx, cy, halfW, halfH);
-    pctx.fill();
 
     const fit = Math.max(halfW * 2, halfH * 2) * 1.05;
     const scale = fit / Math.max(id.width, id.height);
@@ -124,34 +138,55 @@ export function startGame() {
     bubble.width = S; bubble.height = S;
     const bctx = bubble.getContext('2d');
     bctx.imageSmoothingEnabled = true; bctx.imageSmoothingQuality = 'high';
+    bctx.drawImage(sizedModule, 0, 0);
     bctx.save();
     hexPath(bctx, cx, cy, halfW, halfH);
     bctx.clip();
     bctx.drawImage(sizedIdenticon, cx - dw / 2, cy - dh / 2);
     bctx.restore();
-    bctx.drawImage(punched, 0, 0);
 
-    bubbleSprites[team] = bubble;
+    const t = BUBBLE_BLEND;
+    const tinted = document.createElement('canvas');
+    tinted.width = S; tinted.height = S;
+    const tctx = tinted.getContext('2d');
+    tctx.filter = `saturate(${1 - 0.3 * t}) contrast(${1 - 0.12 * t}) brightness(${1 - 0.06 * t})`;
+    tctx.drawImage(bubble, 0, 0);
+    tctx.filter = 'none';
+    tctx.globalCompositeOperation = 'soft-light';
+    tctx.globalAlpha = t * 0.45;
+    tctx.fillStyle = '#1e3a5f';
+    tctx.fillRect(0, 0, S, S);
+    // re-mask to the bubble's own silhouette — soft-light + globalAlpha would
+    // otherwise tint the fully-transparent corners visible too (their alpha
+    // goes from 0 to globalAlpha under normal source-over compositing).
+    tctx.globalAlpha = 1;
+    tctx.globalCompositeOperation = 'destination-in';
+    tctx.drawImage(bubble, 0, 0);
+    return tinted;
+  }
+  function tryBakeBubble(team) {
+    const mod = moduleImages[team], id = identiconSources[team];
+    if (!mod || !id) return;
+    bubbleSprites[team] = bakeBubble(mod, id, STONE_R * 2);
+    scoreBubbleSprites[team] = bakeBubble(mod, id, SCORE_ICON_D);
   }
   for (const team of ['A', 'B']) {
-    const img = new Image();
-    img.onload = () => {
-      let stripped = stripWhiteBackground(img);
+    getIdenticonCanvas(IDENTICON_ADDRESS[team]).then((canvas) => {
+      let source = canvas;
       // team B starts on the right side of the pitch, so mirror it to face the
       // ball at kickoff instead of away from it
       if (team === 'B') {
         const flipped = document.createElement('canvas');
-        flipped.width = stripped.width; flipped.height = stripped.height;
+        flipped.width = source.width; flipped.height = source.height;
         const fctx = flipped.getContext('2d');
         fctx.translate(flipped.width, 0);
         fctx.scale(-1, 1);
-        fctx.drawImage(stripped, 0, 0);
-        stripped = flipped;
+        fctx.drawImage(source, 0, 0);
+        source = flipped;
       }
-      identiconStripped[team] = stripped;
+      identiconSources[team] = source;
       tryBakeBubble(team);
-    };
-    img.src = IDENTICON_SRC[team];
+    });
 
     const modImg = new Image();
     modImg.onload = () => { moduleImages[team] = modImg; tryBakeBubble(team); };
@@ -172,14 +207,6 @@ export function startGame() {
   };
   ballImg.src = BALL_SRC;
 
-  // PLAY cap: cut out of the arena artwork itself (same pixels, same look) so it can be
-  // pressed/animated independently of the static background it was extracted from.
-  // Cropped tight to just the orange capsule (alpha-masked) — the panel/frame around it
-  // stays in arena/frame.webp and must never move when the cap is pressed.
-  const PLAY_CAP_X0 = 761, PLAY_CAP_Y0 = 130, PLAY_CAP_X1 = 888, PLAY_CAP_Y1 = 187;
-  const playCapImage = new Image();
-  playCapImage.src = PLAY_CAP_SRC;
-
   // ---------- Config ----------
   // Field bounds match the illustrated arena (light-blue Nimiq accents),
   // scaled from the reference art — the pitch bounds match where the ice
@@ -196,18 +223,29 @@ export function startGame() {
   // fudges were then deleted below — laser and physics now share one source
   // of truth. Was FX0=159, FY0=234, FX1=1042, FY1=725; revert to those if this
   // reads worse than the split laser/physics bounds did.
-  const FX0 = 159, FY0 = 237, FX1 = 1046, FY1 = 729;
-  const GY0 = 380, GY1 = 548;                 // goal mouth y-range
+  // FY0/FY1/GY0/GY1 recentered vertically — the field/goal were art-matched
+  // (see history above) but that left them measurably off-center in the
+  // 1200x905 canvas: top/bottom margins were 237/176px (61px apart) and the
+  // goal sat 143px above / 181px below the field's own midpoint (38px apart).
+  // The upcoming arena redesign targets these physics bounds directly rather
+  // than the other way around, so centered now: FX0/FX1 untouched (already
+  // near-symmetric, 159/154px), FY0/FY1 keep the same field height (492px)
+  // but split the canvas margin evenly (206/207px), and GY0/GY1 keep the same
+  // goal height (168px) centered on the new field midpoint. Was FX0=159,
+  // FY0=237, FX1=1046, FY1=729, GY0=380, GY1=548.
+  const FX0 = 159, FY0 = 206, FX1 = 1046, FY1 = 698;
+  const GY0 = 368, GY1 = 536;                 // goal mouth y-range
   const CY = (FY0 + FY1) / 2;
   const CENTER_X = (FX0 + FX1) / 2;           // pitch's true horizontal center — ball spawn and score readout share this axis
   const GOAL_HALF_HEIGHT = (GY1 - GY0) / 2;
-  const GOAL_NET_DEPTH = 38;                  // how deep the goal box is (glob falls in past this)
+  const STONE_LOSS_FRACTION = 0.55;           // a stone is lost once this much of its circular area has crossed the goal's physical boundary (FX0/FX1)
+  const BALL_GOAL_FRACTION = 0.6;             // the goal counts once this much of the ball's circular area has crossed the same boundary — not full clearance
 
   const SCALE = 1200 / 900;                   // physics scaled up vs the original 900-wide prototype
-  const GLOB_R = 38 * 0.9;                     // shrunk another 10% per feedback (was 38)
-  const BALL_R = GLOB_R / 2 * 0.9 * 0.9;       // half a glob's diameter, shrunk 10% twice more (~15.4), rendered as the puck sprite
-  const GLOB_MASS = 2.4;
-  const BALL_MASS = 0.55;
+  const STONE_R = 38 * 0.9;                     // shrunk another 10% per feedback (was 38)
+  const BALL_R = STONE_R / 2 * 0.9 * 0.9;       // half a stone's diameter, shrunk 10% twice more (~15.4), rendered as the puck sprite
+  const STONE_MASS = 2.4;
+  const BALL_MASS = 1.0;                        // was 0.55 (4.4:1) — narrowed ratio so stones bleed more speed on ball contact, feel test
   // Pace/bounce constants calibrated against frame-tracked Globulos footage
   // (foot 2 arena): launches glide about half the field width, impacts are
   // plain billiard exchanges with no added energy — puck/curling feel.
@@ -221,6 +259,19 @@ export function startGame() {
   const MAX_SPEED = 8;
   const STOP_THRESHOLD = 0.08;
   const WIN_SCORE = 3;
+  // Stone "damage": each impact against an opposing-team stone counts one hit
+  // toward STONE_MAX_HITS (8 — 2 hits per LED, see STONE_HITS_PER_LED below).
+  // LEDs/ring quadrants go out one at a time, top first then clockwise (see
+  // LED_RECTS order). On the last hit the stone dies (no longer selectable to
+  // aim) and, once it finishes sliding from that final impact, plays the same
+  // shrink-into-the-void animation as a goal loss (see the g.dead check in
+  // physicsStep) — it keeps colliding/sliding normally right up until then.
+  const STONE_MAX_HITS = 8;
+  const STONE_HITS_PER_LED = 2; // hits needed to knock out each of the 4 LEDs/quadrants
+  // debounce so a single prolonged/grazing contact (spanning several physics
+  // frames) only ever counts as one hit — see registerStoneHit in resolveCollision
+  const HIT_COOLDOWN_FRAMES = 20;
+  const DEAD_SATURATION = 0.1;                 // 1 - 0.9: dead stones desaturate 90%
 
   const PW = FX1 - FX0, PH = FY1 - FY0;
   const startPositions = {
@@ -228,26 +279,164 @@ export function startGame() {
     B: [{ x: FX1 - 0.16 * PW, y: FY0 + 0.267 * PH }, { x: FX1 - 0.13 * PW, y: FY0 + 0.5 * PH }, { x: FX1 - 0.16 * PW, y: FY0 + 0.733 * PH }],
   };
 
+  // "Balai" (curling-style sweep): one placeable-then-removable slippery ice
+  // patch per team per round (see beginRoundReset for the `used` reset), a
+  // circle (not the originally-floated hexagon — simpler math, no rotation/
+  // in-polygon test). Purely cosmetic/tunable numbers, adjust freely by feel —
+  // was a pitch-relative formula (fifth, then two-fifths of the shorter pitch
+  // dimension), now a flat px value per feedback.
+  const SWEEP_R = 150;
+  const SWEEP_FRICTION_BONUS = 1; // was 0.3, then 0.5, 0.6, 0.7, 0.8 — 100%: zero friction inside the patch (frictionless glide until it exits), tune by feel
+
+  // Baked once (a soft white/ice radial falloff, 2x-oversampled like
+  // ballSprite above) rather than recomputing a gradient every frame — a
+  // brightening wash meant to read as thinner/glassier ice, not a flat
+  // sticker, so it's drawn with 'lighten' (see drawSweepZone) instead of
+  // plain alpha compositing.
+  const sweepSprite = document.createElement('canvas');
+  (function bakeSweepSprite() {
+    const S = Math.round(SWEEP_R * 4);
+    sweepSprite.width = S; sweepSprite.height = S;
+    const sctx = sweepSprite.getContext('2d');
+    const cx = S / 2, cy = S / 2, r = S / 2;
+    const grad = sctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, 'rgba(255,255,255,0.92)');
+    grad.addColorStop(0.7, 'rgba(255,255,255,0.58)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    sctx.fillStyle = grad;
+    sctx.beginPath(); sctx.arc(cx, cy, r, 0, Math.PI * 2); sctx.fill();
+  })();
+  // Clipped to the ice rect so a patch placed near an edge has its overflow
+  // cropped away instead of spilling onto the wood frame art — cosmetic only,
+  // physics itself never needs cropping (the in-circle test in
+  // physicsStep/stepGhostBodies already only ever looks at whichever part of
+  // the pitch entities can actually occupy).
+  function drawSweepZone(sw) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(FX0, FY0, FX1 - FX0, FY1 - FY0);
+    ctx.clip();
+    ctx.globalCompositeOperation = 'lighten';
+    const d = sw.r * 2;
+    ctx.drawImage(sweepSprite, sw.x - sw.r, sw.y - sw.r, d, d);
+    ctx.restore();
+  }
+  // Own patch while still being placed/dragged (pre-commit) is visible only
+  // on the owning team's own screen (sweepViewTeam) — same phases the aim
+  // laser itself stays visible through, so it vanishes at the same moment.
+  // Once committed, both patches are drawn during 'sim'/'goal' regardless of
+  // sweepViewTeam: the shared "reveal" moment both players see together.
+  function drawSweepOverlay() {
+    const ownTeam = sweepViewTeam();
+    if (ownTeam && sweep[ownTeam].active && !sweep[ownTeam].committed) drawSweepZone(sweep[ownTeam]);
+    if (phase === 'sim' || phase === 'goal') {
+      if (sweep.A.committed) drawSweepZone(sweep.A);
+      if (sweep.B.committed) drawSweepZone(sweep.B);
+    }
+  }
+
   let scoreA = 0, scoreB = 0;
   let round = 1;
   let phase = 'start';
+  // Visual-only 30s turn timer for the score panel LED bar — resets whenever aiming
+  // starts for either team, has no effect on the phase state machine (see turnTimerProgress).
+  const TURN_TIMER_MS = 30000;
+  let turnTimerStart = 0;
+  let turnTimerPhase = null;
   let entities = { A: [], B: [], ball: null };
   let drag = null;
   let readyA = false, readyB = false;
+  // sweep.<team>.active: currently placed (visible only to that team while
+  // aiming, or during 'sim' as the shared reveal — see sweepViewTeam/render).
+  // .committed: this placement was locked in for the sim that's about to run
+  // (or is running) — cleared again in beginAimPhase once that sim is over,
+  // since the effect is a one-shot boost for the single exchange it was
+  // played into, not a standing fixture for the rest of the round. .used:
+  // this team's one placement for the round has been spent — persists across
+  // exchanges until beginRoundReset (see CLAUDE.md: a "round"/manche can span
+  // many aimA/aimB/sim cycles, only ending on a goal/wipeout).
+  let sweep = {
+    A: { active: false, committed: false, used: false, x: CENTER_X, y: CY, r: SWEEP_R },
+    B: { active: false, committed: false, used: false, x: CENTER_X, y: CY, r: SWEEP_R },
+  };
+  let sweepDrag = null;
+  // LAN mode: both teams aim simultaneously ('lanAim'), each client only
+  // controls entities[myTeam]; 'lanWait' shows once the local shot is sent,
+  // until the arbiter relays both sides' shots (see src/net.js).
+  function isAimingPhase(p) { return p === 'aimA' || p === 'aimB' || p === 'lanAim'; }
+  function firstAimPhase() { return net ? 'lanAim' : 'aimA'; }
+  // Which team can currently drag stones/their own sweep patch — null once
+  // committed (lanWait/pending/sim/etc.), unlike sweepViewTeam below which
+  // stays truthy a bit longer purely for rendering continuity.
+  function aimingTeam() {
+    if (net) return phase === 'lanAim' ? myTeam : null;
+    if (phase === 'aimA') return 'A';
+    if (phase === 'aimB') return 'B';
+    return null;
+  }
+  // Same idea, but stays truthy through 'lanWait' too (own screen only, shot
+  // already sent) — mirrors exactly which phases renderAimCascade's own laser
+  // stays visible through, so the sweep patch disappears at the same moment
+  // the laser does.
+  function sweepViewTeam() {
+    if (net) return (phase === 'lanAim' || phase === 'lanWait') ? myTeam : null;
+    return aimingTeam();
+  }
+  // Solo vs IA: the AI's shots for the coming turn are computed the instant
+  // the board re-enters an aiming phase, using only the just-settled,
+  // confirmed positions — never the human's in-progress drag (see the
+  // "blind resolution" rule in the design brief) — so by the time the human
+  // presses PLAY the AI's move is already decided and just needs applying
+  // (see onValidate). Its own laser trajectory is never rendered either way:
+  // render() only calls renderAimCascade() for the human's own aiming team.
+  function beginAimPhase() {
+    // Retire whichever patch(es) were committed into the sim that just
+    // finished — the effect and its shared reveal were only ever meant for
+    // that one exchange (see the comment on the `sweep` state above); `used`
+    // is untouched here, it only clears on a real round reset.
+    sweep.A.active = false; sweep.A.committed = false;
+    sweep.B.active = false; sweep.B.committed = false;
+    phase = firstAimPhase();
+    if (aiTeam) prepareAiShots();
+  }
+  function prepareAiShots() {
+    const opponentTeam = aiTeam === 'A' ? 'B' : 'A';
+    const stones = entities[aiTeam].filter(g => !g.out && !g.dead);
+    const opponentStones = entities[opponentTeam].filter(g => !g.out && !g.dead);
+    const shots = computeAiShots({
+      aiTeam,
+      aiStones: stones.map(g => ({ id: g.id, x: g.x, y: g.y })),
+      opponentStones: opponentStones.map(g => ({ id: g.id, x: g.x, y: g.y })),
+      ball: { x: entities.ball.x, y: entities.ball.y },
+      bounds: { FX0, FX1, FY0, FY1, GY0, GY1, CY, GOAL_HALF_HEIGHT, MAX_DRAG, POWER_SCALE, STONE_R, BALL_R },
+      config: AI_CONFIG,
+    });
+    stones.forEach(g => {
+      const shot = shots[g.id];
+      if (!shot) return;
+      g._aiVx = shot.vx; g._aiVy = shot.vy;
+      // Marks the stone "committed" for the halo pulse below (haloMode), the
+      // same visual language a human's own dragged stone gets — it shows a
+      // shot is queued, never the trajectory itself.
+      g.used = true;
+    });
+  }
 
-  function makeGlob(team, idx, pos) {
+  function makeStone(team, idx, pos) {
     return {
-      id: team + idx, team, x: pos.x, y: pos.y, vx: 0, vy: 0, r: GLOB_R, mass: GLOB_MASS,
+      id: team + idx, team, x: pos.x, y: pos.y, vx: 0, vy: 0, r: STONE_R, mass: STONE_MASS,
       used: false, squish: 0, squishNX: 1, squishNY: 0, squishGain: 1.05, out: false,
       squishPhase: null, squishT: 0, squishPeak: 0,
       falling: false, fallScale: 1, rot: 0, rotVel: 0,
+      hits: 0, dead: false, deadMix: 0, _hitCooldown: 0,
     };
   }
   function resetPositions() {
-    entities.A = startPositions.A.map((p, i) => makeGlob('A', i, p));
-    entities.B = startPositions.B.map((p, i) => makeGlob('B', i, p));
+    entities.A = startPositions.A.map((p, i) => makeStone('A', i, p));
+    entities.B = startPositions.B.map((p, i) => makeStone('B', i, p));
     entities.ball = {
       x: CENTER_X, y: CY, vx: 0, vy: 0, r: BALL_R, mass: BALL_MASS, rot: 0,
+      falling: false, fallScale: 1, out: false,
     };
   }
   resetPositions();
@@ -267,38 +456,57 @@ export function startGame() {
     const t = evt.touches ? (evt.touches[0] || evt.changedTouches[0]) : evt;
     return { x: (t.clientX - rect.left) * scaleX, y: (t.clientY - rect.top) * scaleY };
   }
-  function currentTeamGlobs() {
-    if (phase === 'aimA') return entities.A.filter(g => !g.out && !g.falling);
-    if (phase === 'aimB') return entities.B.filter(g => !g.out && !g.falling);
-    return [];
+  function currentTeamStones() {
+    const team = aimingTeam();
+    return team ? entities[team].filter(g => !g.out && !g.falling && !g.dead) : [];
   }
-  function findGlobAt(pos) {
-    for (const g of currentTeamGlobs())
+  function findStoneAt(pos) {
+    for (const g of currentTeamStones())
       if (Math.hypot(g.x - pos.x, g.y - pos.y) <= g.r + 12) return g;
     return null;
   }
   function onPointerDown(evt) {
     audio.unlock();
     const pos = getPointerPos(evt);
-    if (isPlayButtonActive() && pointInPlayButton(pos)) {
-      evt.preventDefault();
-      pressPlayButton();
+    if (!isAimingPhase(phase)) return;
+    evt.preventDefault();
+    const g = findStoneAt(pos);
+    if (g) {
+      g.pendingVx = 0; g.pendingVy = 0;
+      // halo/LED "programmed" state (haloMode) starts the instant a stone is
+      // picked up, not only once released — onPointerUp still reverts this to
+      // false if the drag turns out too short to count as an actual shot.
+      g.used = true;
+      drag = { entity: g, startX: g.x, startY: g.y, curX: pos.x, curY: pos.y };
       return;
     }
-    if (phase !== 'aimA' && phase !== 'aimB') return;
-    evt.preventDefault();
-    const g = findGlobAt(pos);
-    if (!g) return;
-    g.pendingVx = 0; g.pendingVy = 0;
-    drag = { entity: g, startX: g.x, startY: g.y, curX: pos.x, curY: pos.y };
+    // No stone at this point — check for a grab on the aiming team's own
+    // sweep patch (only reachable/visible to them, no placement restriction
+    // per feedback: it can sit anywhere, including under a stone/the ball).
+    const team = aimingTeam();
+    if (!team) return;
+    const sw = sweep[team];
+    if (sw.active && !sw.used && Math.hypot(sw.x - pos.x, sw.y - pos.y) <= sw.r) {
+      sweepDrag = { team, offsetX: pos.x - sw.x, offsetY: pos.y - sw.y };
+    }
   }
   function onPointerMove(evt) {
-    if (!drag) return;
-    evt.preventDefault();
-    const pos = getPointerPos(evt);
-    drag.curX = pos.x; drag.curY = pos.y;
+    if (drag) {
+      evt.preventDefault();
+      const pos = getPointerPos(evt);
+      drag.curX = pos.x; drag.curY = pos.y;
+      return;
+    }
+    if (sweepDrag) {
+      evt.preventDefault();
+      const pos = getPointerPos(evt);
+      const sw = sweep[sweepDrag.team];
+      sw.x = pos.x - sweepDrag.offsetX;
+      sw.y = pos.y - sweepDrag.offsetY;
+    }
   }
   function onPointerUp(evt) {
+    if (sweepDrag) { evt.preventDefault(); sweepDrag = null; return; }
     if (!drag) return;
     evt.preventDefault();
     let dx = drag.startX - drag.curX;
@@ -340,7 +548,8 @@ export function startGame() {
     if (readyA && readyB) {
       startOverlay.classList.add('hidden');
       controlsEnabled = true;
-      phase = 'aimA';
+      beginAimPhase();
+      // ambience disabled for now — audio.playAmbience() to re-enable
     }
   }
 
@@ -349,14 +558,91 @@ export function startGame() {
   // J1->J2: no "pass the device" screen, straight into the other team's aim phase.
   // J2->sim: a fixed 2s beat after the PLAY press before the shots actually launch.
   const PRE_SIM_DELAY = 1000;
+  // Locks in whichever patch a team had placed for the sim about to run —
+  // `committed` is what physicsStep/the reveal actually key off; `used` is
+  // the round-scoped "spent" flag the toolbar button crosses out.
+  function commitSweep(team) {
+    const sw = sweep[team];
+    if (sw.active) { sw.used = true; sw.committed = true; }
+  }
   function onValidate() {
-    if (phase === 'aimA') phase = 'aimB';
-    else if (phase === 'aimB') { phase = 'pending'; setTimeout(launchSimulation, PRE_SIM_DELAY); }
+    if (net) {
+      if (phase !== 'lanAim') return;
+      const stones = entities[myTeam].map(g => ({ vx: g.pendingVx || 0, vy: g.pendingVy || 0, used: g.used }));
+      commitSweep(myTeam);
+      const sw = sweep[myTeam];
+      net.sendShots(stones, sw.active ? { x: sw.x, y: sw.y, r: sw.r } : null);
+      phase = 'lanWait';
+      // No full-screen overlay here on purpose — the arena stays visible while
+      // waiting; see drawWaitingLabel() for the small pulsing score-panel message.
+      return;
+    }
+    if (aiTeam) {
+      if (phase !== 'aimA') return;
+      // Reveal: the AI's shots were already decided in prepareAiShots() at
+      // the start of this turn — apply them now, exactly like launchSimulation
+      // applies a human's own pendingVx/Vy, then launch both sides together.
+      entities[aiTeam].forEach(g => {
+        g.pendingVx = g._aiVx || 0;
+        g.pendingVy = g._aiVy || 0;
+        g._aiVx = g._aiVy = undefined;
+      });
+      // Human is always team 'A' in solo mode (see main.js) — the AI side
+      // never places a sweep patch of its own (out of scope for now).
+      commitSweep('A');
+      phase = 'pending';
+      // Extra "thinking" pause on top of the usual pre-launch beat — purely a
+      // feel beat (see reactionDelay in ai.js), not real computation time.
+      const think = AI_CONFIG.reactionDelay[0] + Math.random() * (AI_CONFIG.reactionDelay[1] - AI_CONFIG.reactionDelay[0]);
+      setTimeout(launchSimulation, PRE_SIM_DELAY + think);
+      return;
+    }
+    if (phase === 'aimA') { commitSweep('A'); phase = 'aimB'; }
+    else if (phase === 'aimB') { commitSweep('B'); phase = 'pending'; setTimeout(launchSimulation, PRE_SIM_DELAY); }
   }
   function launchSimulation() {
     entities.A.forEach(g => { g.vx = g.pendingVx || 0; g.vy = g.pendingVy || 0; });
     entities.B.forEach(g => { g.vx = g.pendingVx || 0; g.vy = g.pendingVy || 0; });
     phase = 'sim';
+  }
+
+  // Lobby (index.html) already confirms both players are connected before
+  // calling startGame — no in-canvas ready-tap step needed for LAN mode.
+  if (net) {
+    startOverlay.classList.add('hidden');
+    controlsEnabled = true;
+    phase = 'lanAim';
+    net.onLaunch(({ shotsA, shotsB, sweepA, sweepB }) => {
+      hideOverlay();
+      phase = 'pending';
+      // Own patch is already active/committed locally from commitSweep() at
+      // send time — this overwrites both sides fully from what the arbiter
+      // actually relayed (same pattern as the `used` flag below) so both
+      // clients' physics/reveal are byte-identical regardless of any local
+      // state quirk, rather than trusting the local copy for our own team.
+      sweep.A.active = !!sweepA; sweep.A.committed = !!sweepA;
+      if (sweepA) { sweep.A.x = sweepA.x; sweep.A.y = sweepA.y; sweep.A.r = sweepA.r; sweep.A.used = true; }
+      sweep.B.active = !!sweepB; sweep.B.committed = !!sweepB;
+      if (sweepB) { sweep.B.x = sweepB.x; sweep.B.y = sweepB.y; sweep.B.r = sweepB.r; sweep.B.used = true; }
+      setTimeout(() => {
+        // used flag comes from the network too, not just local drags — on this
+        // client the opponent's own stones were never dragged locally, so their
+        // g.used would otherwise stay permanently false and their halo would
+        // never show 'on' during the reveal (see haloMode above).
+        entities.A.forEach((g, i) => { g.vx = shotsA[i]?.vx || 0; g.vy = shotsA[i]?.vy || 0; g.used = !!shotsA[i]?.used; });
+        entities.B.forEach((g, i) => { g.vx = shotsB[i]?.vx || 0; g.vy = shotsB[i]?.vy || 0; g.used = !!shotsB[i]?.used; });
+        phase = 'sim';
+      }, PRE_SIM_DELAY);
+    });
+    net.onDisconnect(() => {
+      showOverlay(`<h2>Connexion perdue</h2><p>L'autre joueur s'est déconnecté.</p>`);
+    });
+  } else if (aiTeam) {
+    // Solo vs IA: no lobby/ready-tap step needed (only one human) — straight
+    // into the human's aim phase, same as LAN skips the local ready screen.
+    startOverlay.classList.add('hidden');
+    controlsEnabled = true;
+    beginAimPhase();
   }
 
   // ---------- Physics ----------
@@ -372,7 +658,7 @@ export function startGame() {
   const SQUISH_OVERSHOOT_FRAMES = 8, SQUISH_OVERSHOOT_FRAC = 0.22;
   const SQUISH_AMPLITUDE = 0.2;  // was 0 (0.7, 0.5, 1 before that) — near-imperceptible, testing a hint vs fully off
   function triggerSquish(e, nx, ny, strength) {
-    // globs only: a contact spins them, torque coming from the tangential
+    // stones only: a contact spins them, torque coming from the tangential
     // slip at the point of impact (a dead-center hit has none) — decays back
     // out on its own in physicsStep, like real angular friction bleeding it off
     if (e.rotVel !== undefined) {
@@ -400,10 +686,26 @@ export function startGame() {
   }
   function playBodyHit(impact) {
     if (impact < MIN_AUDIBLE_IMPACT) return;
-    audio.play('hitGlob', { volume: Math.min(1, impact / MAX_SPEED), rate: 0.95 + Math.random() * 0.1 });
+    audio.play('hitStone', { volume: Math.min(1, impact / MAX_SPEED), rate: 0.95 + Math.random() * 0.1 });
   }
+  // Fraction of a circle's area lying past a straight boundary, given how far the
+  // circle's center has crossed that boundary (depth, signed: negative = hasn't
+  // reached it yet). Exact circular-segment formula, not a center-crossing guess —
+  // STONE_LOSS_FRACTION needs to trip at a specific fraction past the halfway point.
+  function circleFractionPast(depth, r) {
+    const u = Math.max(-1, Math.min(1, depth / r));
+    return 0.5 + (u * Math.sqrt(1 - u * u) + Math.asin(u)) / Math.PI;
+  }
+  // Less per-tick speed loss inside a currently-committed sweep patch (see
+  // the `sweep` state comment) — scales the friction DEFICIT rather than fr
+  // itself, since fr sits so close to 1 already that scaling it directly
+  // would barely move the needle; this compounds into a clearly longer glide
+  // over the many ticks of an actual shot.
+  function withSweepBoost(fr) { return 1 - (1 - fr) * (1 - SWEEP_FRICTION_BONUS); }
   function physicsStep() {
     const list = allEntities();
+    const boostZones = [sweep.A, sweep.B].filter(s => s.committed);
+    let goalResult = null;
     for (const e of list) {
       if (e.falling) {
         // shrinking-into-the-void animation; frozen otherwise, no normal physics while it plays
@@ -412,7 +714,8 @@ export function startGame() {
         continue;
       }
       e.x += e.vx; e.y += e.vy;
-      const fr = e === entities.ball ? BALL_FRICTION : FRICTION;
+      let fr = e === entities.ball ? BALL_FRICTION : FRICTION;
+      if (boostZones.some(z => Math.hypot(e.x - z.x, e.y - z.y) <= z.r)) fr = withSweepBoost(fr);
       e.vx *= fr; e.vy *= fr;
       const spd0 = Math.hypot(e.vx, e.vy);
       if (spd0 < STOP_THRESHOLD) { e.vx = 0; e.vy = 0; }
@@ -435,16 +738,17 @@ export function startGame() {
         if (t >= 1) { e.squish = 0; e.squishPeak = 0; e.squishPhase = null; }
       }
       if (e.rotVel !== undefined) {
-        // globs: rotation is mostly a contact reaction (see triggerSquish), with
+        // stones: rotation is mostly a contact reaction (see triggerSquish), with
         // only a faint drift from rolling itself — otherwise near-static in flight,
         // unlike the ball's continuous spin below
         e.rot += e.rotVel + (e.vx * 0.0018 + e.vy * 0.00072);
-        e.rotVel *= 0.975; // was 0.96 (0.92 originally) — spin still dying a bit before the glob itself stops
+        e.rotVel *= 0.975; // was 0.96 (0.92 originally) — spin still dying a bit before the stone itself stops
       } else if (e.rot !== undefined) {
         // ball: continuous roll-spin, well under its real rolling speed so the
         // (mostly symmetric) disc face doesn't blur/spin distractingly fast
         e.rot += (e.vx * 0.008 + e.vy * 0.003);
       }
+      if (e._hitCooldown) e._hitCooldown--;
     }
     for (const e of list) {
       if (e.out || e.falling) continue; // fallen (or falling) into the goal: frozen until next round
@@ -454,22 +758,37 @@ export function startGame() {
       if (!inGoalMouthY) {
         if (e.x - e.r < FX0) { const spd = Math.abs(e.vx); e.x = FX0 + e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, -1, 0, spd); playWallHit(spd); }
         if (e.x + e.r > FX1) { const spd = Math.abs(e.vx); e.x = FX1 - e.r; e.vx = -e.vx * WALL_RESTITUTION; triggerSquish(e, 1, 0, spd); playWallHit(spd); }
-      } else if (e !== entities.ball) {
-        // a glob may now fall fully into the goal, instead of bouncing off the net;
-        // once it's gone deep enough, it starts shrinking away until the next round
-        if (e.x + e.r < FX0 - GOAL_NET_DEPTH || e.x - e.r > FX1 + GOAL_NET_DEPTH) {
+      } else {
+        // in the goal mouth: lost once enough of the circle has crossed the goal's
+        // physical boundary (FX0/FX1) instead of bouncing off the net. A stone just
+        // shrinks away until next round; the ball crossing its own (lower)
+        // BALL_GOAL_FRACTION threshold is what actually counts the goal — and gets
+        // the identical shrink-away treatment instead of vanishing outright.
+        const depthPast = Math.max(FX0 - e.x, e.x - FX1);
+        const lossFraction = e === entities.ball ? BALL_GOAL_FRACTION : STONE_LOSS_FRACTION;
+        if (circleFractionPast(depthPast, e.r) >= lossFraction) {
           e.falling = true; e.fallScale = 1; e.vx = 0; e.vy = 0;
+          if (e === entities.ball) goalResult = (FX0 - e.x > e.x - FX1) ? 'goalB' : 'goalA';
         }
+      }
+      // a knocked-dead stone (STONE_MAX_HITS, see registerStoneHit) plays the
+      // same shrink-into-the-void animation as a goal loss, but wherever it
+      // happens to finish its post-death slide instead of only at the goal
+      // mouth — triggered once its velocity has actually settled to 0 (set
+      // above once its speed drops under STOP_THRESHOLD), not the instant it
+      // dies, so it keeps sliding/colliding like a normal stone until then.
+      if (e.dead && e.vx === 0 && e.vy === 0) {
+        e.falling = true; e.fallScale = 1;
       }
     }
     const activeList = list.filter(e => !e.out && !e.falling);
     for (let i = 0; i < activeList.length; i++) for (let j = i + 1; j < activeList.length; j++) resolveCollision(activeList[i], activeList[j]);
-    const b = entities.ball;
-    if (b.x + b.r < FX0) return 'goalB';
-    if (b.x - b.r > FX1) return 'goalA';
-    // if an entire team has fallen into the goal, the other team scores the point
-    if (entities.A.every(g => g.out)) return 'wipeoutB';
-    if (entities.B.every(g => g.out)) return 'wipeoutA';
+    if (goalResult) return goalResult;
+    // if every one of a team's stones is out of play — fallen into the goal or
+    // knocked dead (STONE_MAX_HITS) — the other team scores the point, same as
+    // a real goal
+    if (entities.A.every(g => g.out || g.dead)) return 'wipeoutB';
+    if (entities.B.every(g => g.out || g.dead)) return 'wipeoutA';
     return null;
   }
   function resolveCollision(a, b2) {
@@ -484,8 +803,8 @@ export function startGame() {
     // On a near head-on hit that barely matters, but on a grazing hit it can
     // rotate the normal by several degrees. Fix: back-solve for the exact
     // moment this frame the circles were first exactly minDist apart (treating
-    // this frame's relative velocity as constant, same idea as the laser's
-    // raySegmentHitsCircle), and compute the normal from that reconstructed
+    // this frame's relative velocity as constant, same idea reused in the aim
+    // cascade's ghostResolveCollision below), and compute the normal from that reconstructed
     // position instead — the actual separation/impulse below still happens at
     // the real (overlapping) positions, only the normal's direction is
     // corrected. Ported from physics-lab/lab.js after verifying it there.
@@ -520,40 +839,174 @@ export function startGame() {
     triggerSquish(a, nx, ny, impact);
     triggerSquish(b2, -nx, -ny, impact);
     playBodyHit(impact);
+    // stone-vs-opposing-stone impact: each side takes one hit (see STONE_MAX_HITS)
+    if (a.team && b2.team && a.team !== b2.team) {
+      registerStoneHit(a);
+      registerStoneHit(b2);
+    }
+  }
+  // Knocks out the next LED (top first, then clockwise — see LED_RECTS) and
+  // kills the stone on the 4th hit. Cooldown-gated so one prolonged/grazing
+  // contact spanning several physics frames only ever counts as a single hit.
+  function registerStoneHit(g) {
+    if (g.dead || g._hitCooldown > 0) return;
+    g._hitCooldown = HIT_COOLDOWN_FRAMES;
+    g.hits = Math.min(STONE_MAX_HITS, g.hits + 1);
+    if (g.hits >= STONE_MAX_HITS) { g.dead = true; g.deadMix = 1; }
   }
   function allSettled() { return allEntities().every(e => e.vx === 0 && e.vy === 0 && !e.falling); }
 
+  // ---------- Post-shot straighten ----------
+  // Contact torque (see rotVel in physicsStep) leaves stones spun away from
+  // their upright rest orientation once a shot settles. Before the next aim
+  // phase they spin back upright via the shortest angular path, each on its
+  // own randomized start offset so the six stones don't snap back as one
+  // synchronized machine. Only runs between shots within a round — a fresh
+  // round's stones come from resetPositions() already upright (rot: 0), so
+  // the very first aim phase of a round skips this entirely.
+  // off for now — feature on hold, code kept in place for a later re-enable
+  const STRAIGHTEN_ENABLED = false;
+  const STRAIGHTEN_STAGGER_MS = 2000, STRAIGHTEN_DURATION_MS = 1000;
+  let straightenStart = 0;
+  function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+  function beginStraighten() {
+    if (!STRAIGHTEN_ENABLED) { beginAimPhase(); return; }
+    const stones = [...entities.A, ...entities.B].filter(g => !g.out);
+    let anyWork = false;
+    for (const g of stones) {
+      const from = g.rot || 0;
+      const to = Math.round(from / (Math.PI * 2)) * Math.PI * 2; // nearest upright = shortest path
+      g._straightenFrom = from;
+      g._straightenTo = to;
+      g._straightenDelay = Math.random() * STRAIGHTEN_STAGGER_MS;
+      g._straightenDuration = STRAIGHTEN_DURATION_MS;
+      if (Math.abs(to - from) > 1e-4) anyWork = true;
+    }
+    if (!anyWork) { beginAimPhase(); return; }
+    straightenStart = performance.now();
+    phase = 'straighten';
+  }
+  function updateStraighten() {
+    const elapsed = performance.now() - straightenStart;
+    let allDone = true;
+    for (const g of [...entities.A, ...entities.B]) {
+      if (g.out || g._straightenTo === undefined) continue;
+      const t = (elapsed - g._straightenDelay) / g._straightenDuration;
+      if (t <= 0) { g.rot = g._straightenFrom; allDone = false; }
+      else if (t < 1) { g.rot = g._straightenFrom + (g._straightenTo - g._straightenFrom) * easeInOutQuad(t); allDone = false; }
+      else { g.rot = g._straightenTo; }
+    }
+    if (allDone) {
+      for (const g of [...entities.A, ...entities.B]) {
+        g._straightenFrom = g._straightenTo = g._straightenDelay = g._straightenDuration = undefined;
+      }
+      beginAimPhase();
+    }
+  }
+
   // ---------- Round / goal flow ----------
+  // Held after a goal before the board resets, so the ball's still visible
+  // sitting in the net (and the goal/wipeout SFX has room to finish) instead
+  // of the stones immediately snapping into their slide-back animation.
+  const GOAL_PAUSE_MS = 3000;
   function onGoal(scoringTeam, isWipeout) {
     audio.play(isWipeout ? 'wipeout' : 'goal');
     if (scoringTeam === 'A') scoreA++; else scoreB++;
-    if (scoreA >= WIN_SCORE || scoreB >= WIN_SCORE) {
-      phase = 'gameover';
-      audio.play('win');
-      const winner = scoreA >= WIN_SCORE ? 'BLEUE' : 'ROUGE';
-      const cls = scoreA >= WIN_SCORE ? 'a' : 'b';
-      showOverlay(`
-        <span class="team-pill ${cls}">ÉQUIPE ${winner}</span>
-        <h2>Victoire !</h2>
-        <p>Score final ${scoreA} – ${scoreB}</p>
-        <button class="bigbtn" id="playAgainBtn">Rejouer</button>
-      `);
-      document.getElementById('playAgainBtn').onclick = () => {
-        scoreA = 0; scoreB = 0; round = 1;
-        resetPositions(); phase = 'aimA'; hideOverlay();
-      };
-      return;
-    }
-    round++;
-    const scored = scoringTeam === 'A' ? 'BLEUE' : 'ROUGE';
-    const cls = scoringTeam === 'A' ? 'a' : 'b';
+    const isMatchWin = scoreA >= WIN_SCORE || scoreB >= WIN_SCORE;
+    if (!isMatchWin) round++;
+    // Same GOAL_PAUSE_MS pause whether the round continues or the match just
+    // ended — even a winning goal/wipeout is instantly resolved as a state
+    // flip, but the shot's impact is still playing out (ball still sliding
+    // into the net, other stones bouncing/squishing) and phase stays 'goal'
+    // through this wait so physicsStep keeps running (see loop()) and lets
+    // that finish before we cut to either the next round or the victory screen.
+    setTimeout(isMatchWin ? showVictory : beginRoundReset, GOAL_PAUSE_MS);
+  }
+  function showVictory() {
+    phase = 'gameover';
+    audio.play('win');
+    const winner = scoreA >= WIN_SCORE ? 'BLEUE' : 'ROUGE';
+    const cls = scoreA >= WIN_SCORE ? 'a' : 'b';
     showOverlay(`
-      <span class="team-pill ${cls}">BUT ÉQUIPE ${scored}</span>
-      <h2>Manche ${round}</h2>
-      <p>Score : ${scoreA} – ${scoreB}</p>
-      <button class="bigbtn" id="nextRoundBtn">Manche suivante</button>
+      <span class="team-pill ${cls}">ÉQUIPE ${winner}</span>
+      <h2>Victoire !</h2>
+      <p>Score final ${scoreA} – ${scoreB}</p>
+      <button class="bigbtn" id="playAgainBtn">Rejouer</button>
     `);
-    document.getElementById('nextRoundBtn').onclick = () => { resetPositions(); phase = 'aimA'; hideOverlay(); };
+    document.getElementById('playAgainBtn').onclick = () => {
+      scoreA = 0; scoreB = 0; round = 1;
+      sweep.A.used = false; sweep.B.used = false;
+      resetPositions(); beginAimPhase(); hideOverlay();
+    };
+  }
+
+  // No more "ready" gate/button between rounds — the board resets itself:
+  // stones still on the ice slide back to their starting spots; stones that
+  // fell into the goal instead reappear directly at their spot and grow in
+  // place (fallScale 0 -> 1, the reverse of the shrink-into-the-void fall
+  // animation) — no slide, since they weren't anywhere sensible on the ice to
+  // slide from. Dead stones fade their color back in throughout either way.
+  const ROUND_RESET_MOVE_MS = 2000;
+  const ROUND_RESET_REVIVE_MS = 1000;
+  let roundResetStart = 0;
+  function beginRoundReset() {
+    // A real round boundary (goal/wipeout) — each team's single sweep
+    // placement for the round to come is available again.
+    sweep.A.used = false; sweep.B.used = false;
+    for (const g of [...entities.A, ...entities.B]) {
+      const idx = parseInt(g.id.slice(1), 10) || 0;
+      const target = startPositions[g.team][idx];
+      g._resetGrow = g.out;
+      // fell in: "from" == target, so the position lerp below is a no-op and
+      // it just grows in place; still on the ice: slides from where it is.
+      g._resetFromX = g._resetGrow ? target.x : g.x;
+      g._resetFromY = g._resetGrow ? target.y : g.y;
+      g._resetFromRot = g._resetGrow ? 0 : (g.rot || 0);
+      g._resetToX = target.x; g._resetToY = target.y;
+      g.out = false; g.falling = false;
+      g.fallScale = g._resetGrow ? 0 : 1;
+      g.vx = 0; g.vy = 0;
+      g.used = false; g.pendingVx = 0; g.pendingVy = 0;
+      g.hits = 0; g._hitCooldown = 0;
+      g.squish = 0; g.squishPhase = null; g.squishT = 0; g.squishPeak = 0;
+      g._reviveFrom = g.dead ? 1 : g.deadMix;
+      g.dead = false;
+    }
+    const b = entities.ball;
+    b._resetGrow = b.out;
+    b._resetFromX = b._resetGrow ? CENTER_X : b.x;
+    b._resetFromY = b._resetGrow ? CY : b.y;
+    b.out = false; b.falling = false;
+    b.fallScale = b._resetGrow ? 0 : 1;
+    b.vx = 0; b.vy = 0;
+    roundResetStart = performance.now();
+    phase = 'roundReset';
+  }
+  function updateRoundReset() {
+    const elapsed = performance.now() - roundResetStart;
+    const moveT = easeInOutQuad(Math.min(1, elapsed / ROUND_RESET_MOVE_MS));
+    const reviveT = easeInOutQuad(Math.min(1, elapsed / ROUND_RESET_REVIVE_MS));
+    for (const g of [...entities.A, ...entities.B]) {
+      g.x = g._resetFromX + (g._resetToX - g._resetFromX) * moveT;
+      g.y = g._resetFromY + (g._resetToY - g._resetFromY) * moveT;
+      g.rot = g._resetFromRot * (1 - moveT);
+      if (g._resetGrow) g.fallScale = moveT;
+      g.deadMix = g._reviveFrom * (1 - reviveT);
+    }
+    const b = entities.ball;
+    b.x = b._resetFromX + (CENTER_X - b._resetFromX) * moveT;
+    b.y = b._resetFromY + (CY - b._resetFromY) * moveT;
+    if (b._resetGrow) b.fallScale = moveT;
+    if (moveT >= 1) {
+      for (const g of [...entities.A, ...entities.B]) {
+        g.x = g._resetToX; g.y = g._resetToY; g.rot = 0; g.fallScale = 1; g.deadMix = 0;
+        g._resetFromX = g._resetFromY = g._resetToX = g._resetToY = undefined;
+        g._resetFromRot = g._resetGrow = g._reviveFrom = undefined;
+      }
+      b.x = CENTER_X; b.y = CY; b.fallScale = 1;
+      b._resetFromX = b._resetFromY = b._resetGrow = undefined;
+      beginAimPhase();
+    }
   }
 
   // ---------- Render: arena background is the user's original artwork, used as-is ----------
@@ -570,74 +1023,159 @@ export function startGame() {
     }
 
     drawScorePanel();
-    drawPlayButton();
   }
 
-  // Score lives inside the "NIM-BALL" panel — this version of the artwork ships with the
-  // "-" already baked in and no digits at all, so there's nothing to patch/inpaint; we just
-  // draw the two digits directly into the empty slot flanking the original dash.
-  // Screen interior (measured from the art): x:[323,437], y:[157,188]; dash center: (380,173.5).
-  const SCORE_SLOT_CX_A = 349, SCORE_SLOT_CX_B = 411, SCORE_SLOT_CY = 177;
+  // Score lives on the wood scoreboard plaque baked into arena/frame.webp (see
+  // scripts/bake_arena.py — plaque rect: x:[416,789], y:[73,194], center
+  // (602.5,133), same CENTER_X the pitch itself uses). Unlike the old V1
+  // panel art, this plaque ships blank (no baked dash) — digits, dash, team
+  // icons and the turn-timer bar are all drawn fresh into that empty rect.
+  const SCORE_SLOT_CY = 133;
+  const SCORE_DIGIT_CX_A = CENTER_X - 70, SCORE_DIGIT_CX_B = CENTER_X + 70;
+  const SCORE_ICON_D = 46;
+  const SCORE_ICON_CX_A = CENTER_X - 150, SCORE_ICON_CX_B = CENTER_X + 150;
+  // Font per Nimiq's brand guidelines (nimiq-style design system): Mulish, self-hosted
+  // via @fontsource/mulish (imported in main.js) rather than the never-actually-loaded
+  // 'Baloo 2' this used to reference (it was silently falling back to Arial).
+  const SCORE_FONT = `800 60px 'Mulish', Arial, sans-serif`;
   function drawScorePanel() {
     ctx.save();
-    ctx.font = `800 38px 'Baloo 2', Arial, sans-serif`;
+    ctx.font = SCORE_FONT;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(90,70,45,0.85)';
+    ctx.fillText('-', CENTER_X, SCORE_SLOT_CY);
     ctx.fillStyle = '#5ecbf5';
-    ctx.fillText(String(scoreA), SCORE_SLOT_CX_A, SCORE_SLOT_CY);
+    ctx.fillText(String(scoreA), SCORE_DIGIT_CX_A, SCORE_SLOT_CY);
     ctx.fillStyle = '#ffc94d';
-    ctx.fillText(String(scoreB), SCORE_SLOT_CX_B, SCORE_SLOT_CY);
+    ctx.fillText(String(scoreB), SCORE_DIGIT_CX_B, SCORE_SLOT_CY);
+    ctx.restore();
+
+    if (phase === 'lanWait') drawWaitingLabel();
+
+    drawScoreIcon('A', SCORE_ICON_CX_A);
+    drawScoreIcon('B', SCORE_ICON_CX_B);
+    drawTurnTimerBar();
+  }
+
+  // LAN mode, local shot already sent: used to be a full-screen overlay blocking
+  // the arena while waiting on the opponent's shot — now a small pulsing label
+  // tucked under the score digits so the board stays visible.
+  const WAITING_LABEL_FONT = `700 15px 'Mulish', Arial, sans-serif`;
+  function drawWaitingLabel() {
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * 2.4);
+    ctx.save();
+    ctx.font = WAITING_LABEL_FONT;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgba(255,255,255,${(0.55 + 0.35 * pulse).toFixed(3)})`;
+    ctx.fillText('en attente…', CENTER_X, SCORE_SLOT_CY + 40);
     ctx.restore();
   }
 
-  // PLAY cap: extracted from the artwork, drawn back on top of the socket that was
-  // patched into the background where it used to sit — see PLAY_CAP_X0..Y1 above.
-  // Pressing it squashes/dips it toward the socket and springs it back, like a real button.
-  const PLAY_PRESS_DURATION = 220;
-  let playPressAt = 0;
-  function playButtonBounds() {
-    return { x0: PLAY_CAP_X0, y0: PLAY_CAP_Y0, x1: PLAY_CAP_X1, y1: PLAY_CAP_Y1 };
+  function drawScoreIcon(team, cx) {
+    const sprite = scoreBubbleSprites[team];
+    if (!sprite) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(sprite, cx - SCORE_ICON_D / 2, SCORE_SLOT_CY - SCORE_ICON_D / 2, SCORE_ICON_D, SCORE_ICON_D);
+    ctx.restore();
   }
-  function isPlayButtonActive() {
-    return controlsEnabled && (phase === 'aimA' || phase === 'aimB');
+
+  // 0..1 while a team is actively aiming, null the rest of the time (hides the bar).
+  // lanWait keeps it showing too: the local shot is in but the round timer (and
+  // the laser tracking it) keeps running for the still-aiming opponent.
+  function turnTimerProgress() {
+    if (!isAimingPhase(phase) && phase !== 'lanWait') return null;
+    return Math.min(1, (performance.now() - turnTimerStart) / TURN_TIMER_MS);
   }
-  function pointInPlayButton(pos) {
-    const b = playButtonBounds();
-    return pos.x >= b.x0 && pos.x <= b.x1 && pos.y >= b.y0 && pos.y <= b.y1;
-  }
-  function pressPlayButton() {
-    playPressAt = performance.now();
-    audio.play('button');
-    onValidate();
-  }
-  function drawPlayButton() {
-    if (!playCapImage.complete || !playCapImage.naturalWidth) return;
-    const b = playButtonBounds();
-    const cw = b.x1 - b.x0, ch = b.y1 - b.y0;
-    const cx = b.x0 + cw / 2, cy = b.y0 + ch / 2;
-    let p = 0;
-    if (playPressAt) {
-      const t = performance.now() - playPressAt;
-      if (t >= PLAY_PRESS_DURATION) playPressAt = 0;
-      else p = t / PLAY_PRESS_DURATION;
-    }
-    // Sharp snap down, slower ease back — a linear tent (not a sine bell) reads as a
-    // crisp mechanical press instead of a soft/floaty squish.
-    const squash = p < 0.2 ? p / 0.2 : Math.max(0, 1 - (p - 0.2) / 0.8);
-    const scale = 1 - 0.04 * squash;
-    const dy = 1.5 * squash;
-    const dim = 1; // always reads full color once back to size, even while resolving/simulating
+
+  // Thin LED/laser strip along the top of the score screen: fills left-to-right over 30s,
+  // tinted to whichever team is currently aiming (same palette as their aim halo/digits).
+  const TIMER_BAR_X0 = CENTER_X - 150, TIMER_BAR_X1 = CENTER_X + 150, TIMER_BAR_Y = 96, TIMER_BAR_H = 3;
+  function drawTurnTimerBar() {
+    const t = turnTimerProgress();
+    if (t === null) return;
+    const rgb = HALO_RGB[net ? myTeam : (phase === 'aimB' ? 'B' : 'A')];
+    const barW = TIMER_BAR_X1 - TIMER_BAR_X0;
+    const filled = barW * t;
 
     ctx.save();
-    ctx.globalAlpha = dim;
-    ctx.translate(cx, cy + dy);
-    ctx.scale(scale, scale);
-    ctx.drawImage(playCapImage, -cw / 2, -ch / 2, cw, ch);
-    if (squash > 0) {
-      ctx.globalAlpha = dim * squash * 0.15;
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(-cw / 2, -ch / 2, cw, ch);
+    // dim track
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(TIMER_BAR_X0, TIMER_BAR_Y, barW, TIMER_BAR_H);
+
+    if (filled > 0.5) {
+      // glowing filled portion, like a laser/LED strip charging up
+      ctx.shadowColor = `rgba(${rgb},0.9)`;
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = `rgb(${rgb})`;
+      ctx.fillRect(TIMER_BAR_X0, TIMER_BAR_Y, filled, TIMER_BAR_H);
+
+      // bright leading edge, like a scanning laser head
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(TIMER_BAR_X0 + filled - 1.5, TIMER_BAR_Y - 0.5, 3, TIMER_BAR_H + 1);
     }
     ctx.restore();
+  }
+
+  // PLAY: the red toolbar button (index.html #tbtn-play, see src/style.css
+  // .tbtn-cap for the press animation) instead of a canvas-drawn cap — this
+  // just gates the click to the same "can actually launch" condition the old
+  // canvas button used, and replays the same press animation + click SFX.
+  function isPlayButtonActive() {
+    return controlsEnabled && isAimingPhase(phase);
+  }
+  const playBtn = document.getElementById('tbtn-play');
+  const playBtnCap = document.getElementById('tbtn-play-cap');
+  playBtn.addEventListener('click', () => {
+    if (!isPlayButtonActive()) return;
+    playBtnCap.classList.remove('pressed');
+    void playBtnCap.offsetWidth; // restart the animation if pressed again mid-tween
+    playBtnCap.classList.add('pressed');
+    audio.play('button');
+    onValidate();
+  });
+
+  // BALAI / "sweep": reuses the Effacer/"clear" toolbar slot (its broom art
+  // already fit) rather than a new 5th button — see index.html/main.js. Click
+  // toggles the aiming team's own patch on/off (freely, before PLAY — see
+  // commitSweep for what actually locks it in); the cap swaps to a hollow
+  // "engaged" variant while a not-yet-committed placement is active (same
+  // hollow-outline technique as the power button's off state, see
+  // scripts/make_sweep_active_icon.py), and an X overlay (see style.css
+  // .tbtn-used-cross) shows once that team's one placement for the round has
+  // actually been spent.
+  const SWEEP_CAP_SRC = { idle: `${ASSET_BASE}ui/btn-sweep-cap.png`, active: `${ASSET_BASE}ui/btn-sweep-cap-active.png` };
+  const sweepBtn = document.getElementById('tbtn-sweep');
+  const sweepBtnCap = document.getElementById('tbtn-sweep-cap');
+  const sweepBtnCross = document.getElementById('tbtn-sweep-cross');
+  sweepBtn.addEventListener('click', () => {
+    const team = aimingTeam();
+    if (!controlsEnabled || !team || sweep[team].used) return;
+    const sw = sweep[team];
+    sw.active = !sw.active;
+    if (sw.active) { sw.x = CENTER_X; sw.y = CY; }
+    sweepBtnCap.classList.remove('pressed');
+    void sweepBtnCap.offsetWidth; // restart the animation if pressed again mid-tween
+    sweepBtnCap.classList.add('pressed');
+    audio.play('button');
+  });
+  // Called every rendered frame (see render()) rather than only from the
+  // click handler above — the aiming team itself changes on its own as the
+  // phase machine advances (aimA -> aimB, LAN sync, round reset), with
+  // nothing routing back through this click handler to catch that.
+  function syncSweepButton() {
+    const team = aimingTeam();
+    const sw = team ? sweep[team] : null;
+    sweepBtnCap.src = (sw && sw.active && !sw.used) ? SWEEP_CAP_SRC.active : SWEEP_CAP_SRC.idle;
+    // Outside an actual aim phase (pending/sim/goal/roundReset/straighten —
+    // nobody's turn to place one right now) there's no specific team to read
+    // `used` off of, but the cross shouldn't blink off for that stretch just
+    // because aimingTeam() went null — keep it up through the reveal and
+    // beyond if EITHER team spent their round's placement, falling back to
+    // that once a real aim phase picks a specific team again.
+    const used = team ? sw.used : (sweep.A.used || sweep.B.used);
+    sweepBtnCross.classList.toggle('show', used);
   }
 
   // Splits the entity into two clipped halves along the line through its own
@@ -670,56 +1208,228 @@ export function startGame() {
     drawFn();
     ctx.restore();
   }
-  function withSquish(e, drawFn) { drawSquished(e, drawFn); }
   // tight contact shadow shared by the bubbles and the ball — matched to the
   // arena's own light direction but barely spilling past the entity's own
-  // footprint, like it's floating just above the grass rather than resting on it
-  function drawContactShadow(g, boost = 1) {
+  // footprint, like it's floating just above the grass rather than resting on it.
+  // Pre-baked once per entity size (see stoneShadowSprite/ballShadowSprite below)
+  // instead of re-running ctx.filter blur every frame — that per-frame blur was
+  // the actual cost the dpr cap comment near the top of this file warns about;
+  // only the squish deformation still has to happen live, applied to the baked
+  // bitmap exactly like it used to be applied to the fill.
+  // 0.7 (a full 30% cut) shrank the ellipse enough that it sat entirely under the
+  // opaque stone sprite (offset + shadow radius < stone radius, see drawContactShadow's
+  // cx/cy offset below) — nothing left poking out to actually see. Split the
+  // difference instead: still visibly tighter than the original 1.0, but the
+  // sliver that pokes past the stone's own silhouette survives.
+  const SHADOW_SIZE_SCALE = 0.85;
+  function bakeContactShadowSprite(r, boost) {
     // blur scales with the entity's own radius rather than a fixed pixel amount —
-    // a flat 3px blur reads as a subtle soft edge on a 38px glob, but on the much
+    // a flat 3px blur reads as a subtle soft edge on a 38px stone, but on the much
     // smaller 17px ball it was smearing away most of the shadow's density
-    const blur = Math.max(1.2, g.r * 0.08);
+    const blur = Math.max(1.2, r * 0.08);
+    const rx = r * boost * SHADOW_SIZE_SCALE, ry = r * 0.92 * boost * SHADOW_SIZE_SCALE;
+    const pad = blur * 3; // generous margin so the blurred edge never gets cropped
+    const w = Math.ceil((rx + pad) * 2), h = Math.ceil((ry + pad) * 2);
+    const sprite = document.createElement('canvas');
+    sprite.width = w; sprite.height = h;
+    const sctx = sprite.getContext('2d');
+    sctx.fillStyle = `rgba(0,0,0,${Math.min(0.85, 0.6 * boost)})`;
+    sctx.filter = `blur(${blur}px)`;
+    sctx.beginPath();
+    sctx.ellipse(w / 2, h / 2, rx, ry, 0, 0, Math.PI * 2);
+    sctx.fill();
+    return sprite;
+  }
+  const stoneShadowSprite = bakeContactShadowSprite(STONE_R, 1);
+  const ballShadowSprite = bakeContactShadowSprite(BALL_R, 1.05);
+  function drawContactShadow(g, sprite, boost = 1) {
     const cx = g.x + g.r * 0.1 * boost, cy = g.y + g.r * 0.16 * boost;
-    ctx.fillStyle = `rgba(0,0,0,${Math.min(0.85, 0.6 * boost)})`;
-    ctx.filter = `blur(${blur}px)`;
-    // pivoted on the shadow's OWN (light-offset) center rather than the glob's
+    // clip to the ice rect so the shadow tucks under the wood frame at wall
+    // contact instead of spilling over it — same trick as drawAimHalo below
+    // (the frame is baked into the background image and drawn first, so
+    // anything drawn after it, including this shadow, normally sits on top).
+    ctx.save();
+    ctx.beginPath(); ctx.rect(FX0, FY0, FX1 - FX0, FY1 - FY0); ctx.clip();
+    // pivoted on the shadow's OWN (light-offset) center rather than the stone's
     // physics center, so the retraction is symmetric on the shadow's own shape
     // instead of lopsided. The sprite is drawn on top and occludes most of the
-    // shadow near the glob's center, so this only becomes visible on whichever
-    // side the shadow actually pokes out past the glob — matching the bubble's
+    // shadow near the stone's center, so this only becomes visible on whichever
+    // side the shadow actually pokes out past the stone — matching the bubble's
     // own compression there — and stays invisible on the opposite side.
     const shadowEntity = { x: cx, y: cy, r: g.r, squish: g.squish || 0, squishNX: g.squishNX, squishNY: g.squishNY };
     drawSquished(shadowEntity, () => {
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, g.r * boost, g.r * 0.92 * boost, 0, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.drawImage(sprite, cx - sprite.width / 2, cy - sprite.height / 2);
     });
-    ctx.filter = 'none';
+    ctx.restore();
   }
 
-  // soft glow beneath the bubbles of the team that's currently aiming — an
-  // "on deck" cue readable at a glance, pulsing gently so it doesn't read as static
-  // decoration. Tinted with each team's own accent color (matches the score digits).
+  // soft glow beneath the bubbles, per-stone (not per-team-turn) — driven by
+  // whether THIS stone has actually been dragged to program a shot (g.used),
+  // not just whose turn it is:
+  //   off     — default: not yet clicked/dragged this round. A stone that's
+  //             never programmed stays off even once its team validates and
+  //             the round reaches reveal — only stones someone actually aimed
+  //             light up there.
+  //   'pulse' — this stone has a programmed shot pending launch (aiming or
+  //             waiting on the other side): soft on/off breathing, 2s period,
+  //             own unsynced phase per stone (no shared clock)
+  //   'on'    — shots are revealed/resolving (pending + sim), and this stone
+  //             was one of the ones actually launched: steady, no pulse
+  // Tinted with each team's own accent color (matches the score digits).
+  // g.used resets to false for every stone once a round settles (see the
+  // settleFrames block in the main loop), so the whole board is naturally
+  // back to 'off' for the next round without any extra bookkeeping here.
   const HALO_RGB = { A: '94,203,245', B: '255,201,77' };
-  function drawAimHalo(g) {
+  const HALO_PULSE_PERIOD = 2; // seconds
+  function haloMode(g) {
+    if (g.falling || g.out || !g.used) return 'off';
+    if (phase === 'pending' || phase === 'sim') return 'on';
+    if (isAimingPhase(phase) || phase === 'lanWait') return 'pulse';
+    return 'off';
+  }
+  // Shared 0..1 breathing curve for anything that pulses in sync with a stone's
+  // own aiming turn (the halo below, and the stone's own LED strips) — same
+  // deterministic per-stone phase offset (evenly spread by index) so the three
+  // stones on a team don't breathe in sync with each other.
+  function pulseStrength(g) {
+    if (g._haloOffset === undefined) {
+      // ids are "A0".."A2"/"B0".."B2" — the trailing digit is already a clean
+      // 0/1/2 index, spread evenly across the period (a char-code hash of ids
+      // this similar barely varies and left the 3 stones nearly in sync)
+      const idx = parseInt(g.id.slice(1), 10) || 0;
+      g._haloOffset = (idx / 3) * HALO_PULSE_PERIOD;
+    }
     const t = performance.now() / 1000;
-    const pulse = 0.5 + 0.5 * Math.sin(t * 2.4 + (g.team === 'A' ? 0 : Math.PI));
+    const cycle = ((t + g._haloOffset) % HALO_PULSE_PERIOD) / HALO_PULSE_PERIOD; // 0..1
+    return (1 - Math.cos(cycle * Math.PI * 2)) / 2; // smooth fade 0 -> 1 -> 0
+  }
+  function drawAimHalo(g, mode) {
     const rgb = HALO_RGB[g.team];
-    const R = g.r * 1.6;
+    const R = g.r * 1.4;
+    // remap the pulse's 0..1 breathing to a 20%-80% range instead of fading
+    // fully to black or full brightness — only the halo's own brightness, not
+    // pulseStrength() itself (shared with the stone's LED strips, which should
+    // keep their own full 0..1 breathing)
+    const strength = mode === 'pulse' ? 0.2 + 0.6 * pulseStrength(g) : 1;
     ctx.save();
+    // clip to the ice rect so the halo tucks under the wood frame at wall
+    // contact instead of glowing over it (frame is baked into the background
+    // image and drawn first, so anything drawn after it normally sits on top)
+    ctx.beginPath(); ctx.rect(FX0, FY0, FX1 - FX0, FY1 - FY0); ctx.clip();
     ctx.globalCompositeOperation = 'lighter';
     const grad = ctx.createRadialGradient(g.x, g.y, g.r * 0.4, g.x, g.y, R);
-    grad.addColorStop(0, `rgba(${rgb},${(0.38 + 0.17 * pulse).toFixed(3)})`);
-    grad.addColorStop(0.6, `rgba(${rgb},${(0.16 + 0.08 * pulse).toFixed(3)})`);
+    grad.addColorStop(0, `rgba(${rgb},${(0.55 * strength).toFixed(3)})`);
+    grad.addColorStop(0.6, `rgba(${rgb},${(0.24 * strength).toFixed(3)})`);
     grad.addColorStop(1, `rgba(${rgb},0)`);
     ctx.beginPath(); ctx.arc(g.x, g.y, R, 0, Math.PI * 2);
     ctx.fillStyle = grad; ctx.fill();
     ctx.restore();
   }
-  function isAimingTeamGlob(g) {
+  function isAimingTeamStone(g) {
+    if (net) return phase === 'lanAim' && g.team === myTeam && !g.falling;
     return ((phase === 'aimA' && g.team === 'A') || (phase === 'aimB' && g.team === 'B')) && !g.falling;
   }
-  function drawGlob(g) {
+  // The 4 LED strips baked into bubble-v4-navy/gold.webp's white tabs, in
+  // clockwise order starting at the top (N/E/S/W) — measured off the source
+  // art the same way as HEX above, as fractions of the module's own square
+  // canvas so they scale with whatever size the bubble is baked at. The art
+  // bakes them permanently lit; drawStoneLeds below dims each one to an "off"
+  // gray individually. Index i is knocked out for good once g.hits reaches
+  // (i+1) * STONE_HITS_PER_LED, so the top strip is the first to go dark
+  // (after 2 hits), then clockwise — see registerStoneHit/STONE_MAX_HITS.
+  // Still-alive LEDs breathe
+  // (smooth pulse, not a hard on/off blink — reads as "alive" rather than
+  // flickering/broken) so the damage state is still visible at a glance.
+  // Fully independent of the halo above (own state, not tied to
+  // haloMode/pulseStrength).
+  const LED_RECTS = [
+    { cxFrac: 0.4985, cyFrac: 0.0962, halfWFrac: 0.010, halfHFrac: 0.0347 }, // top
+    { cxFrac: 0.8813, cyFrac: 0.4917, halfWFrac: 0.0337, halfHFrac: 0.010 }, // right
+    { cxFrac: 0.4985, cyFrac: 0.8838, halfWFrac: 0.010, halfHFrac: 0.0352 }, // bottom
+    { cxFrac: 0.1147, cyFrac: 0.4917, halfWFrac: 0.0337, halfHFrac: 0.010 }, // left
+  ];
+  const LED_LIT_RGB = { A: '110,210,255', B: '255,205,90' };
+  const LED_OFF_GRAY = '#7d8489';
+  // The white/gray bezel ring itself, split into 4 quarters centered on each
+  // LED (same order/index as LED_RECTS: top, right, bottom, left, each
+  // spanning ±45° around its LED) — a much bigger "remaining life" indicator
+  // than the tiny LED strips alone. Inner/outer radius measured off the same
+  // source art as a fraction of the module's own diameter (same convention as
+  // the LED_RECTS fractions above — frac * d, not frac * radius). The ring is
+  // neutral gray/white in the baked art already, so a knocked-out quarter
+  // needs no extra "off" treatment — only the still-alive quarters get tinted.
+  const RING_INNER_FRAC = 0.365;
+  const RING_OUTER_FRAC = 0.445;
+  const RING_QUADRANT_ANGLES = [-Math.PI / 2, 0, Math.PI / 2, Math.PI]; // top, right, bottom, left
+  const RING_QUADRANT_HALF_SPAN = Math.PI / 4;
+  const LED_PULSE_PERIOD_MS = 1400;  // full breathe cycle, shared clock so a stone's live LEDs pulse in sync
+  const LED_PULSE_FLOOR = 0.35;      // never dims all the way to "off" gray, unlike a knocked-out LED
+  function ledPulseStrength() {
+    const cycle = (performance.now() % LED_PULSE_PERIOD_MS) / LED_PULSE_PERIOD_MS; // 0..1
+    const wave = (1 - Math.cos(cycle * Math.PI * 2)) / 2; // smooth 0 -> 1 -> 0
+    return LED_PULSE_FLOOR + (1 - LED_PULSE_FLOOR) * wave;
+  }
+  // how many of the 4 LEDs/quadrants (0..4) are knocked out so far — each
+  // takes STONE_HITS_PER_LED hits, top first then clockwise.
+  function stoneLedsOut(g) { return Math.floor(g.hits / STONE_HITS_PER_LED); }
+  // called from inside the same translate/rotate transform as the sprite draw
+  // (local (0,0) = stone's own center, d = on-screen diameter). 'overlay'
+  // blend (not a flat fill) so the ring's existing embossed shading still
+  // shows through the tint — same trick as BUBBLE_BLEND's identicon tinting.
+  function drawStoneRingQuadrants(g, d) {
+    const rgb = LED_LIT_RGB[g.team];
+    const outerR = d * RING_OUTER_FRAC, innerR = d * RING_INNER_FRAC;
+    const ledsOut = stoneLedsOut(g);
+    RING_QUADRANT_ANGLES.forEach((centerAngle, i) => {
+      if (i < ledsOut) return; // this quarter's LED is already out — ring stays neutral
+      const a0 = centerAngle - RING_QUADRANT_HALF_SPAN, a1 = centerAngle + RING_QUADRANT_HALF_SPAN;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, outerR, a0, a1, false);
+      ctx.arc(0, 0, innerR, a1, a0, true);
+      ctx.closePath();
+      ctx.globalCompositeOperation = 'overlay';
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = `rgb(${rgb})`;
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+  // called from inside the same translate/rotate(+squish) transform as the
+  // sprite draw, so local (0,0) is the stone's own center and d is the
+  // sprite's on-screen diameter — matches drawImage(sprite, -g.r, -g.r, d, d).
+  function drawStoneLeds(g, d) {
+    const rgb = LED_LIT_RGB[g.team];
+    const pulse = ledPulseStrength();
+    const ledsOut = stoneLedsOut(g);
+    LED_RECTS.forEach((led, i) => {
+      const alive = i >= ledsOut;
+      const strength = alive ? pulse : 0;
+      const lx = (led.cxFrac - 0.5) * d, ly = (led.cyFrac - 0.5) * d;
+      const hw = led.halfWFrac * d, hh = led.halfHFrac * d;
+      if (strength < 0.98) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'multiply';
+        ctx.globalAlpha = 1 - strength;
+        ctx.fillStyle = LED_OFF_GRAY;
+        ctx.beginPath(); ctx.roundRect(lx - hw, ly - hh, hw * 2, hh * 2, Math.min(hw, hh));
+        ctx.fill();
+        ctx.restore();
+      }
+      if (strength > 0.02) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = strength;
+        ctx.shadowColor = `rgba(${rgb},0.9)`;
+        ctx.shadowBlur = Math.max(hw, hh) * 1.4;
+        ctx.fillStyle = `rgba(${rgb},0.9)`;
+        ctx.beginPath(); ctx.roundRect(lx - hw, ly - hh, hw * 2, hh * 2, Math.min(hw, hh));
+        ctx.fill();
+        ctx.restore();
+      }
+    });
+  }
+  function drawStone(g) {
     const fs = (g.fallScale !== undefined) ? g.fallScale : 1;
     if (fs <= 0) return; // fully fallen: nothing left to draw
     ctx.save();
@@ -730,9 +1440,10 @@ export function startGame() {
       ctx.scale(fs, fs);
       ctx.translate(-g.x, -g.y);
     }
-    if (isAimingTeamGlob(g)) drawAimHalo(g);
-    drawContactShadow(g);
-    withSquish(g, () => {
+    const halo = haloMode(g);
+    if (halo !== 'off') drawAimHalo(g, halo);
+    drawContactShadow(g, stoneShadowSprite);
+    drawSquished(g, () => {
       const sprite = bubbleSprites[g.team];
       if (sprite) {
         // pre-baked (module ring + identicon) at load time, so this draw is
@@ -742,7 +1453,15 @@ export function startGame() {
         ctx.save();
         ctx.translate(g.x, g.y);
         ctx.rotate(g.rot || 0);
+        // dead stone: desaturated 80%, permanently marked out of play (see
+        // registerStoneHit/STONE_MAX_HITS) — still fully solid for collisions.
+        // deadMix (0..1) lets a revived stone fade its color back in gradually
+        // instead of snapping, see beginRoundReset/updateRoundReset.
+        if (g.deadMix > 0.001) ctx.filter = `saturate(${1 - g.deadMix * (1 - DEAD_SATURATION)})`;
         ctx.drawImage(sprite, -g.r, -g.r, d, d);
+        ctx.filter = 'none';
+        drawStoneRingQuadrants(g, d);
+        drawStoneLeds(g, d);
         ctx.restore();
       } else {
         drawFallbackBubble(g);
@@ -767,7 +1486,19 @@ export function startGame() {
     ctx.restore();
   }
   function drawBall(b) {
-    drawContactShadow(b, 1.05);
+    const fs = (b.fallScale !== undefined) ? b.fallScale : 1;
+    if (fs <= 0) return; // fully fallen: nothing left to draw (same rule as drawStone)
+    ctx.save();
+    if (fs < 1) {
+      // shrinks and fades into the goal exactly like a lost stone (see
+      // drawStone) — triggered by BALL_GOAL_FRACTION instead of
+      // STONE_LOSS_FRACTION, see physicsStep.
+      ctx.globalAlpha = fs;
+      ctx.translate(b.x, b.y);
+      ctx.scale(fs, fs);
+      ctx.translate(-b.x, -b.y);
+    }
+    drawContactShadow(b, ballShadowSprite, 1.05);
     ctx.save();
     ctx.translate(b.x, b.y); ctx.rotate(b.rot || 0);
 
@@ -779,6 +1510,7 @@ export function startGame() {
       // drawn after restoring the roll rotation, so the highlight stays put
       // relative to the arena's light instead of spinning with the disc
       drawBallHighlight(b);
+      ctx.restore(); // shrink transform
       return;
     }
 
@@ -808,7 +1540,8 @@ export function startGame() {
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.fill();
 
-    ctx.restore();
+    ctx.restore(); // rotation transform
+    ctx.restore(); // shrink transform
   }
   function drawPentagon(cx, cy, r, rot) {
     ctx.beginPath();
@@ -821,100 +1554,13 @@ export function startGame() {
   }
 
   // how much longer the aim laser reaches than the raw pull distance (the old
-  // arrow's length) — gives the shot a bit more presence without simulating
-  // all the way out to where friction would actually stop the glob
+  // arrow's length) — gives the shot a bit more presence than its literal
+  // pull distance. Still used as the reach-budget multiplier in the aim
+  // cascade's setGhostBudget below, even though that cascade now simulates
+  // with real friction — this factor just scales how much of that natural
+  // decay gets drawn, same visual intent as before.
   const LASER_LENGTH_FACTOR = 1.98;
 
-  // predicts the shot's path from the glob's own position, bouncing off the arena
-  // walls the same way physicsStep does (the goal mouth stays open on the x-walls,
-  // same GOAL_HALF_HEIGHT test as the real collision code). Starting exactly at the
-  // glob — rather than past some unclipped lead-in segment — keeps every bounce
-  // point honest against FX0..FY1, including for globs sitting close to a wall.
-  // Bounces are computed with the glob's real radius (GLOB_R passed in below),
-  // matching physicsStep's own FY0+r/FX1-r contact test — r=0 used to make the
-  // line kiss the rail, but for any non-perpendicular approach the true contact
-  // point (closest point on the circle to the wall, i.e. straight off the
-  // center) lands at a different x than a zero-radius ray does, so the
-  // predicted bounce angle didn't match the real one.
-  // The true (r-correct) point still drives the reflection math below — only
-  // the point pushed for drawing is snapped onto the wall line itself, so the
-  // line keeps kissing the rail without feeding a cosmetic position back into
-  // the angle calculation.
-  // smallest t in (0, maxT] where a point traveling from (ox,oy) along unit
-  // direction (ux,uy) first comes within `rad` of (cx,cy) — used to detect a
-  // bubble's laser reaching the ball (rad = glob radius + ball radius, so the
-  // moving point represents the glob's own center). Returns 0 if already
-  // inside (glob starting right on top of the ball), null if it never gets close.
-  function raySegmentHitsCircle(ox, oy, ux, uy, maxT, cx, cy, rad) {
-    const fx = ox - cx, fy = oy - cy;
-    const b = fx * ux + fy * uy;
-    const c = fx * fx + fy * fy - rad * rad;
-    if (c <= 0) return 0;
-    const disc = b * b - c;
-    if (disc < 0) return null;
-    const t = -b - Math.sqrt(disc);
-    return (t >= 0 && t <= maxT) ? t : null;
-  }
-  // target (optional): { x, y, r } — if the trail's path would reach this
-  // circle before it would next bounce off a wall (or run out of length), the
-  // trail stops right there instead of passing through it. Used to make a
-  // bubble's laser stop at the ball instead of ignoring it.
-  function computeBounceTrail(x, y, ux, uy, totalLen, r, target) {
-    const points = [{ x, y }];
-    let remaining = totalLen, cx = x, cy = y, bounces = 0;
-    while (remaining > 0.5 && bounces < 6) {
-      const candidates = [];
-      if (uy < 0) candidates.push({ t: (FY0 + r - cy) / uy, axis: 'y', wall: FY0 });
-      if (uy > 0) candidates.push({ t: (FY1 - r - cy) / uy, axis: 'y', wall: FY1 });
-      if (ux < 0) {
-        const t = (FX0 + r - cx) / ux;
-        if (t > 0 && Math.abs(cy + uy * t - CY) >= GOAL_HALF_HEIGHT) candidates.push({ t, axis: 'x', wall: FX0 });
-      }
-      if (ux > 0) {
-        const t = (FX1 - r - cx) / ux;
-        if (t > 0 && Math.abs(cy + uy * t - CY) >= GOAL_HALF_HEIGHT) candidates.push({ t, axis: 'x', wall: FX1 });
-      }
-      const hit = candidates.filter(c => c.t > 1e-6 && isFinite(c.t)).sort((a, b) => a.t - b.t)[0];
-      if (target) {
-        const segMax = Math.min(remaining, hit ? hit.t : remaining);
-        const combinedR = r + target.r;
-        const tHit = raySegmentHitsCircle(cx, cy, ux, uy, segMax, target.x, target.y, combinedR);
-        if (tHit !== null) {
-          // gx,gy: the glob's own center at the instant its edge first touches the
-          // target — drives the collision normal (nx,ny), same role as the r-correct
-          // wall contact point below. The point actually drawn/returned is snapped
-          // onto the target's surface itself (like wall bounces snap onto the wall
-          // line) so the trail visually reaches the ball instead of stopping a full
-          // glob-radius short of it.
-          const gx = cx + ux * tHit, gy = cy + uy * tHit;
-          const nx = (target.x - gx) / combinedR, ny = (target.y - gy) / combinedR;
-          const hx = target.x - nx * target.r, hy = target.y - ny * target.r;
-          points.push({ x: hx, y: hy });
-          return { points, hitTarget: true, contactX: hx, contactY: hy, nx, ny, ux, uy, remaining: remaining - tHit };
-        }
-      }
-      if (!hit || hit.t > remaining) {
-        cx += ux * remaining; cy += uy * remaining;
-        points.push({ x: cx, y: cy });
-        break;
-      }
-      cx += ux * hit.t; cy += uy * hit.t;
-      points.push(hit.axis === 'y' ? { x: cx, y: hit.wall } : { x: hit.wall, y: cy });
-      remaining -= hit.t;
-      // real wallCollide only damps the wall-normal velocity component by
-      // WALL_RESTITUTION (tangential is untouched) — a plain sign flip here
-      // predicts a perfectly elastic mirror bounce instead, which on steep
-      // incidence angles is off by a few degrees from the real post-bounce
-      // direction. Confirmed empirically: that few-degree miss then rotates the
-      // predicted contact point on an off-center target hit much further (~14°
-      // in one measured case) since a small approach-angle error shifts a lot
-      // on a grazing circle intersection. Fixed first in physics-lab/lab.js.
-      if (hit.axis === 'x') ux = -ux * WALL_RESTITUTION; else uy = -uy * WALL_RESTITUTION;
-      { const norm = Math.hypot(ux, uy); ux /= norm; uy /= norm; }
-      bounces++;
-    }
-    return { points, hitTarget: false };
-  }
   function drawLaserTrail(points, team, totalLen) {
     if (points.length < 2 || totalLen < 1) return;
     const rgb = HALO_RGB[team];
@@ -976,12 +1622,12 @@ export function startGame() {
   // Bounce points can jump a whole wall away for a tiny change in aim (grazing
   // angles, near a corner, crossing the goal-mouth edge), which reads as an
   // abrupt teleport when recomputed fresh every frame. Smoothing the aim
-  // direction/length that FEED computeBounceTrail — rather than the resulting
+  // direction/length that FEED the aim cascade below — rather than the resulting
   // points, whose count can change between frames — makes the trail visibly
-  // ease toward its new shape instead of snapping. State lives on the glob
+  // ease toward its new shape instead of snapping. State lives on the stone
   // itself so it persists frame to frame and across the live-drag -> committed
   // aim handoff.
-  const LASER_SMOOTHING = 0.1;
+  const LASER_SMOOTHING = 0.2; // was 0.1 — faster catch-up to cut the lag that gets amplified through the ball's contact-point sensitivity, feel test
   function smoothLaserAim(g, targetUx, targetUy, targetLen) {
     if (g._laserUx === undefined) {
       g._laserUx = targetUx; g._laserUy = targetUy; g._laserLen = targetLen;
@@ -994,54 +1640,303 @@ export function startGame() {
     return { ux: g._laserUx / norm, uy: g._laserUy / norm, len: g._laserLen };
   }
 
-  // when a bubble's projected laser would reach the ball before running out of
-  // reach (or bouncing off a wall first), its energy is treated as absorbed by
-  // the ball rather than passing through it: the bubble's own trail stops right
-  // at the point of contact, and a second, tricolor trail continues on from the
-  // ball along the direction/speed it would actually leave with. If the laser
-  // never reaches the ball, no energy is transmitted and no ball laser is drawn.
-  function renderGlobLaser(g, s) {
-    const ball = entities.ball;
-    const trail = computeBounceTrail(g.x, g.y, s.ux, s.uy, s.len, GLOB_R, { x: ball.x, y: ball.y, r: BALL_R });
-    drawLaserTrail(trail.points, g.team, s.len);
-    if (trail.hitTarget) drawBallHitLaser(trail, s.len);
-  }
-  // predicts the ball's post-impact velocity with the same impulse math as
-  // resolveCollision. Speed is derived from the bubble's current pull/shot
-  // length (bubbleLen), not g.pendingVx — pendingVx is only populated once the
-  // drag is released, but this needs to react live during the drag too, so the
-  // ball's laser appears the instant the bubble's laser is aimed at it rather
-  // than only after the pointer comes up. The ball's own reach (trail.remaining)
-  // is whatever laser power the bubble had left over at the point of contact —
-  // a graze near the end of the bubble's reach barely nudges the ball's preview,
-  // while a fresh hit carries on nearly as far as the bubble's laser would have.
-  function drawBallHitLaser(trail, bubbleLen) {
-    const ball = entities.ball;
-    const speed = (bubbleLen / LASER_LENGTH_FACTOR) * POWER_SCALE;
-    const gvx = trail.ux * speed, gvy = trail.uy * speed;
-    const rvx = ball.vx - gvx, rvy = ball.vy - gvy;
-    const velAlongNormal = rvx * trail.nx + rvy * trail.ny;
-    if (velAlongNormal > 0) return; // laser only grazes past, no real impact
-    let j = -(1 + BODY_RESTITUTION) * velAlongNormal;
-    j /= (1 / GLOB_MASS + 1 / BALL_MASS);
-    j *= BOUNCE_BOOST;
-    const bvx = ball.vx + (j * trail.nx) / BALL_MASS, bvy = ball.vy + (j * trail.ny) / BALL_MASS;
-    const bSpeed = Math.hypot(bvx, bvy);
-    const bLen = trail.remaining;
-    if (bSpeed < 0.01 || bLen < 1) return;
-    const bs = smoothLaserAim(ball, bvx / bSpeed, bvy / bSpeed, bLen);
-    drawBallLaserTrail(computeBounceTrail(ball.x, ball.y, bs.ux, bs.uy, bs.len, BALL_R).points, bs.len);
-  }
-  function drawAimLaser(g) {
+  // ---------- Aim cascade (multi-body predictive laser) ----------
+  // Composes all of the aiming team's 3 stones + the ball into one ghost
+  // simulation per frame, instead of predicting each stone's laser
+  // independently and only reacting to a single ball impact (the old
+  // renderStoneLaser/resolveBallLaser), and instead of the constant-velocity
+  // event-scheduler this itself replaced (raySegmentHitsCircle/nextWallEvent/
+  // nextBlockerEvent/nextPairEvent and friends — deleted, see git history for
+  // that version). That event scheduler deliberately ignored friction to keep
+  // "reach" a simple budget derived from pull strength — but that meant two
+  // stones with different travel times to a shared contact point compared
+  // their ORIGINAL launch speeds, never accounting for how much speed either
+  // would really have bled off by the time they actually meet. On a close
+  // finish that could even flip who wins the collision relative to the real
+  // sim, and a struck body's onward reach had no real relationship to the
+  // speed it was actually given. Both were surfaced by hand-testing the old
+  // system before switching to this.
+  //
+  // This version instead steps the same 4 bodies forward in fixed increments
+  // that are physically identical to one real physicsStep() tick — same
+  // FRICTION/BALL_FRICTION decay, same WALL_RESTITUTION bounce, same
+  // MAX_SPEED/STOP_THRESHOLD clamps, same goal-mouth loss-fraction test, same
+  // elastic impulse formula as resolveCollision (see ghostResolveCollision) —
+  // just run on lightweight clones with no squish/sound/score/hit-counter
+  // side effects. N ticks of this now means exactly what N real ticks of
+  // physicsStep would produce if the shots were validated as-is, so the
+  // ordering-sensitive cases above resolve identically to the real sim, and a
+  // struck body's own onward distance is simply whatever ITS speed decays
+  // over — proportional to the energy it was actually given, with no
+  // separate "inherited budget" bookkeeping needed at all.
+  //
+  // Only 4 bodies are ever dynamic here: the 3 stones of whichever team is
+  // aiming, plus the ball. The opposing team's 3 stones are static blockers —
+  // a path that reaches one just stops dead there (like a wall, but with no
+  // reflection), never treated as a 5th/6th/7th deflectable body (see the
+  // per-scope discussion this was agreed under).
+  //
+  // This is a full recompute from scratch every frame — nothing here is
+  // cached across frames except the smoothed starting aim (see
+  // smoothLaserAim), so a change to the actively-dragged stone can freely
+  // ripple into bends that were already showing on a previously-committed
+  // stone's own trail.
+  function getBodyAim(g) {
+    if (drag && drag.entity === g) {
+      let dx = drag.startX - drag.curX, dy = drag.startY - drag.curY;
+      let dist = Math.hypot(dx, dy);
+      if (dist > MAX_DRAG) { const s = MAX_DRAG / dist; dx *= s; dy *= s; dist = MAX_DRAG; }
+      if (dist <= 6) return null;
+      return { ux: dx / dist, uy: dy / dist, len: dist * LASER_LENGTH_FACTOR };
+    }
     const dx = g.pendingVx, dy = g.pendingVy;
-    if (!dx && !dy) { g._laserUx = g._laserUy = g._laserLen = undefined; return; }
+    if (!dx && !dy) return null;
     const scale = 1 / POWER_SCALE;
     const pullLen = Math.hypot(dx * scale, dy * scale);
-    if (pullLen < 1) return;
-    const targetUx = (dx * scale) / pullLen, targetUy = (dy * scale) / pullLen;
-    const targetLen = pullLen * LASER_LENGTH_FACTOR;
-    const s = smoothLaserAim(g, targetUx, targetUy, targetLen);
-    renderGlobLaser(g, s);
+    if (pullLen < 1) return null;
+    return { ux: (dx * scale) / pullLen, uy: (dy * scale) / pullLen, len: pullLen * LASER_LENGTH_FACTOR };
+  }
+  // Safety cap on ticks, well above the ~350 a full-power stone needs to
+  // decay from MAX_SPEED to STOP_THRESHOLD under FRICTION — real cascades
+  // stop long before this from their own moving/wall/blocker conditions; this
+  // just bounds the pathological worst case (e.g. a body re-launched by a
+  // late collision needing its own ~350-tick tail on top of however long the
+  // frame already ran).
+  const GHOST_MAX_TICKS = 600;
+  // (Re)assigns this body's onward reach budget from whatever speed it has
+  // RIGHT NOW — used both at creation (from the aimed pull strength) and
+  // after every collision (from the resulting post-impulse speed), which is
+  // what makes a struck body's laser length track the energy it received
+  // rather than some fraction handed down from the body that hit it.
+  function setGhostBudget(b) {
+    const speed = Math.hypot(b.vx, b.vy);
+    b.moving = speed > 1e-4;
+    if (b.moving) {
+      b.budget = (speed / POWER_SCALE) * LASER_LENGTH_FACTOR;
+      b.traveled = 0;
+      b.totalLen = b.budget;
+    }
+  }
+  function makeGhostBody(ref, kind, r, mass) {
+    const aim = getBodyAim(ref);
+    let vx = 0, vy = 0;
+    if (aim) {
+      const s = smoothLaserAim(ref, aim.ux, aim.uy, aim.len);
+      const speed = (s.len / LASER_LENGTH_FACTOR) * POWER_SCALE;
+      vx = s.ux * speed; vy = s.uy * speed;
+    } else {
+      ref._laserUx = ref._laserUy = ref._laserLen = undefined;
+    }
+    const body = {
+      ref, kind, r, mass, x: ref.x, y: ref.y, vx, vy,
+      moving: false, budget: 0, traveled: 0, totalLen: 0,
+      // Split into "legs" — one per budget assignment — rather than one flat
+      // points array: drawLaserTrail fades a segment based on cumulative
+      // distance from its OWN start divided by ONE totalLen, so feeding it a
+      // trail that spans a budget reset (a real collision, see
+      // ghostResolveCollision) made distance-so-far vastly exceed the new
+      // (much smaller) totalLen — alpha clamps to 0 for nearly the whole
+      // pre-collision stretch, which read as the laser vanishing well before
+      // it actually reached anything. Each leg gets its own fade instead.
+      legs: [{ points: [{ x: ref.x, y: ref.y }], totalLen: 0 }],
+    };
+    setGhostBudget(body);
+    body.legs[0].totalLen = body.totalLen;
+    return body;
+  }
+  function currentLeg(b) { return b.legs[b.legs.length - 1]; }
+  // Starts a fresh leg at the body's current position/budget — called after
+  // any real velocity change (a collision) so the NEXT leg's fade tracks its
+  // own distance, not distance already spent on the leg before it.
+  function startNewLeg(b) {
+    // close the outgoing leg at the contact point too, so it's drawn all the
+    // way up to here rather than stopping wherever it last happened to be —
+    // without this the leg being left behind ends with whatever point was
+    // last pushed before this collision (possibly none at all, if it hadn't
+    // bounced off anything yet), silently dropping its approach segment.
+    currentLeg(b).points.push({ x: b.x, y: b.y });
+    if (b.moving) b.legs.push({ points: [{ x: b.x, y: b.y }], totalLen: b.totalLen });
+  }
+  // Same elastic-impulse formula as resolveCollision (including its
+  // back-solved contact normal, for the same reason: positions here are only
+  // checked after each tick's move, so a fast pair can already overlap by a
+  // few px by the time this runs) applied to ghost clones only — no
+  // squish/sound/score/hit-counter side effects. Returns true if a real
+  // impulse was applied, so the caller knows whether to record a kink point.
+  function ghostResolveCollision(a, b2) {
+    const dx = b2.x - a.x, dy = b2.y - a.y;
+    const dist = Math.hypot(dx, dy);
+    const minDist = a.r + b2.r;
+    if (dist === 0 || dist >= minDist) return false;
+    const rvx = b2.vx - a.vx, rvy = b2.vy - a.vy;
+    let nx = dx / dist, ny = dy / dist;
+    const A = rvx * rvx + rvy * rvy;
+    if (A > 1e-6) {
+      const pv = dx * rvx + dy * rvy;
+      const C = dist * dist - minDist * minDist;
+      const D = pv * pv - A * C;
+      if (D >= 0) {
+        const t = Math.max(0, Math.min(1, (pv + Math.sqrt(D)) / A));
+        const cdx = dx - rvx * t, cdy = dy - rvy * t;
+        const cdist = Math.hypot(cdx, cdy);
+        if (cdist > 1e-6) { nx = cdx / cdist; ny = cdy / cdist; }
+      }
+    }
+    const overlap = (minDist - dist) / 2;
+    a.x -= nx * overlap; a.y -= ny * overlap;
+    b2.x += nx * overlap; b2.y += ny * overlap;
+    const velAlongNormal = rvx * nx + rvy * ny;
+    if (velAlongNormal > 0) return false;
+    let j = -(1 + BODY_RESTITUTION) * velAlongNormal;
+    j /= (1 / a.mass + 1 / b2.mass);
+    j *= BOUNCE_BOOST;
+    const impX = j * nx, impY = j * ny;
+    a.vx -= impX / a.mass; a.vy -= impY / a.mass;
+    b2.vx += impX / b2.mass; b2.vy += impY / b2.mass;
+    setGhostBudget(a); setGhostBudget(b2);
+    startNewLeg(a); startNewLeg(b2);
+    return true;
+  }
+  // Combined-radius proximity to any blocker — used only as a signal to
+  // defer an ally-pair resolution (see stepGhostBodies), not as the actual
+  // blocker stop condition (that uses bl.r alone, see below).
+  function nearAnyBlocker(b, blockers) {
+    for (const bl of blockers) if (Math.hypot(bl.x - b.x, bl.y - b.y) < b.r + bl.r) return true;
+    return false;
+  }
+  // One tick == one real physicsStep() call for these bodies: move, decay,
+  // clamp, wall/goal check, blocker check, own-pair check — same order
+  // physicsStep itself uses (move+friction+clamp for everyone first, then
+  // walls, then pairwise), so a shot's predicted path is what N real ticks
+  // would actually produce.
+  function stepGhostBodies(bodies, blockers, boostZone) {
+    for (const b of bodies) {
+      if (!b.moving) continue;
+      const moveDist = Math.hypot(b.vx, b.vy);
+      b.x += b.vx; b.y += b.vy;
+      b.traveled += moveDist;
+      let fr = b.kind === 'ball' ? BALL_FRICTION : FRICTION;
+      if (boostZone && Math.hypot(b.x - boostZone.x, b.y - boostZone.y) <= boostZone.r) fr = withSweepBoost(fr);
+      b.vx *= fr; b.vy *= fr;
+      const spd = Math.hypot(b.vx, b.vy);
+      if (spd < STOP_THRESHOLD || b.traveled >= b.budget) {
+        b.vx = 0; b.vy = 0; b.moving = false;
+        currentLeg(b).points.push({ x: b.x, y: b.y });
+        continue;
+      }
+      if (spd > MAX_SPEED) { const s = MAX_SPEED / spd; b.vx *= s; b.vy *= s; }
+      let hitWall = null; // {axis, wall} — cosmetic snap for the drawn point, see below
+      if (b.y - b.r < FY0) { b.y = FY0 + b.r; b.vy = -b.vy * WALL_RESTITUTION; hitWall = { axis: 'y', wall: FY0 }; }
+      if (b.y + b.r > FY1) { b.y = FY1 - b.r; b.vy = -b.vy * WALL_RESTITUTION; hitWall = { axis: 'y', wall: FY1 }; }
+      const inGoalMouthY = Math.abs(b.y - CY) < GOAL_HALF_HEIGHT;
+      if (!inGoalMouthY) {
+        if (b.x - b.r < FX0) { b.x = FX0 + b.r; b.vx = -b.vx * WALL_RESTITUTION; hitWall = { axis: 'x', wall: FX0 }; }
+        if (b.x + b.r > FX1) { b.x = FX1 - b.r; b.vx = -b.vx * WALL_RESTITUTION; hitWall = { axis: 'x', wall: FX1 }; }
+      } else {
+        // reaching well into the goal mouth is a terminal state for this
+        // prediction (mirrors physicsStep's falling-into-the-goal check,
+        // same loss-fraction threshold) — simplified to a hard stop rather
+        // than replicating the shrink animation, which has nothing to
+        // predict.
+        const depthPast = Math.max(FX0 - b.x, b.x - FX1);
+        const lossFraction = b.kind === 'ball' ? BALL_GOAL_FRACTION : STONE_LOSS_FRACTION;
+        if (circleFractionPast(depthPast, b.r) >= lossFraction) {
+          b.vx = 0; b.vy = 0; b.moving = false;
+          currentLeg(b).points.push({ x: b.x, y: b.y });
+          continue;
+        }
+      }
+      if (hitWall) {
+        // cosmetic only: the DRAWN point kisses the rail exactly. b.x/b.y
+        // themselves stay at the r-correct contact position set above —
+        // snapping them onto the rail line would shift the tracked center
+        // by a whole radius, corrupting every following tick's checks.
+        currentLeg(b).points.push(hitWall.axis === 'y' ? { x: b.x, y: hitWall.wall } : { x: hitWall.wall, y: b.y });
+      }
+    }
+    for (const b of bodies) {
+      if (!b.moving) continue;
+      for (const bl of blockers) {
+        // bl.r alone, not b.r+bl.r: opposing stone is a hard stop, no
+        // deflection (per the agreed scope), but the drawn line should only
+        // react once it actually enters the blocker's own visible circle —
+        // padding this out to the combined radius made the laser feel
+        // "magnetic", stopping well before it visibly touched anything.
+        if (Math.hypot(bl.x - b.x, bl.y - b.y) < bl.r) {
+          b.vx = 0; b.vy = 0; b.moving = false;
+          currentLeg(b).points.push({ x: b.x, y: b.y });
+          break;
+        }
+      }
+    }
+    for (let i = 0; i < bodies.length; i++) {
+      for (let j = i + 1; j < bodies.length; j++) {
+        const a = bodies[i], c = bodies[j];
+        if (!a.moving && !c.moving) continue; // two bodies both already at rest can't newly touch
+        // Two allies converging on the same opposing stone from different
+        // sides close in on EACH OTHER (their own combined radius) slightly
+        // before either is within its own combined radius of that stone —
+        // the thin-line blocker check above only reacts at the visible
+        // silhouette (bl.r), half that distance. Defer resolving an ally
+        // collision while either side is still within striking distance of
+        // an opponent (using the same combined-radius scale the ally check
+        // itself uses, for a fair comparison) — it'll either stop clean on
+        // the opponent a few ticks later, or, if it was never really headed
+        // there, the two will still be just as close next tick and collide
+        // then instead. A real but rare edge case this doesn't handle well:
+        // two allies genuinely colliding right next to an unrelated,
+        // uninvolved opponent stone could see their own collision delayed a
+        // few ticks by this same check.
+        if (nearAnyBlocker(a, blockers) || nearAnyBlocker(c, blockers)) continue;
+        // ghostResolveCollision itself starts a fresh leg (at the corrected
+        // post-overlap position) for each side that ends up moving — no
+        // extra point-push needed here.
+        ghostResolveCollision(a, c);
+      }
+    }
+  }
+  function runAimCascade(team) {
+    const opponentTeam = team === 'A' ? 'B' : 'A';
+    const blockers = entities[opponentTeam].filter(g => !g.out && !g.falling);
+    const bodies = entities[team].filter(g => !g.out && !g.falling)
+      .map(g => makeGhostBody(g, 'stone', STONE_R, STONE_MASS));
+    bodies.push(makeGhostBody(entities.ball, 'ball', BALL_R, BALL_MASS));
+
+    // Only the aiming team's own not-yet-committed patch can ever apply here
+    // (this cascade only ever renders for the currently-aiming team's own
+    // screen, never the opponent's — see render()), so there's no visibility
+    // leak in letting the prediction react to it live as it's dragged around.
+    const boostZone = sweep[team].active ? sweep[team] : null;
+    for (let tick = 0; tick < GHOST_MAX_TICKS && bodies.some(b => b.moving); tick++) {
+      stepGhostBodies(bodies, blockers, boostZone);
+    }
+    for (const b of bodies) {
+      if (b.moving) { currentLeg(b).points.push({ x: b.x, y: b.y }); b.moving = false; }
+    }
+    return bodies;
+  }
+  function renderAimCascade(team) {
+    const bodies = runAimCascade(team);
+    for (const b of bodies) for (const leg of b.legs) {
+      if (leg.totalLen < 1 || leg.points.length < 2) continue;
+      if (b.kind === 'ball') drawBallLaserTrail(leg.points, leg.totalLen);
+      else drawLaserTrail(leg.points, team, leg.totalLen);
+    }
+  }
+  // "Power" toolbar toggle, off-branch: a straight direction/energy readout
+  // per stone — no ghost simulation, no bounces, no ball trail. Each stone
+  // still eases via smoothLaserAim (shared with the cascade) so flipping the
+  // toggle mid-drag doesn't introduce a second, differently-behaved smoothing
+  // path; only the shape drawn from that smoothed aim changes.
+  function renderBasicLaser(team) {
+    for (const g of entities[team]) {
+      if (g.out || g.falling) continue;
+      const aim = getBodyAim(g);
+      if (!aim) { g._laserUx = g._laserUy = g._laserLen = undefined; continue; }
+      const s = smoothLaserAim(g, aim.ux, aim.uy, aim.len);
+      const points = [{ x: g.x, y: g.y }, { x: g.x + s.ux * s.len, y: g.y + s.uy * s.len }];
+      drawLaserTrail(points, team, s.len);
+    }
   }
   function drawDragPreview() {
     if (!drag) return;
@@ -1053,28 +1948,201 @@ export function startGame() {
     ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
     ctx.beginPath(); ctx.moveTo(g.x, g.y); ctx.lineTo(drag.curX, drag.curY); ctx.stroke();
     ctx.setLineDash([]); ctx.restore();
-    if (dist > 6) {
-      const targetLen = dist * LASER_LENGTH_FACTOR;
-      const s = smoothLaserAim(g, dx / dist, dy / dist, targetLen);
-      renderGlobLaser(g, s);
-    }
   }
+
+  // ---------- Atmosphere (suspended ice-dust) ----------
+  // Three parallax layers of slow-drifting dust motes, drawn last each frame
+  // so they read as floating in front of the whole scene at low alpha rather
+  // than as a gameplay element. Positions live in the same 1200x905 logical
+  // space as everything else in this file (see W/H above).
+  function createAtmosphere(w, h) {
+    const LAYERS = [
+      { count: 40, size: [0.4, 0.9], speed: 2, alpha: 0.10 }, // far
+      { count: 30, size: [0.6, 1.3], speed: 4, alpha: 0.16 }, // mid
+      { count: 20, size: [0.8, 1.8], speed: 7, alpha: 0.22 }, // near
+    ];
+    const rand = (a, b) => a + Math.random() * (b - a);
+    const TAU = Math.PI * 2;
+
+    function makeParticle(layer) {
+      return {
+        x: rand(0, w),
+        y: rand(0, h),
+        size: rand(layer.size[0], layer.size[1]),
+        baseAlpha: layer.alpha * rand(0.6, 1),
+        alpha: 0,
+        // slow, organic drift: each particle gets its own tiny wander phase
+        angle: rand(0, TAU),
+        angleDrift: rand(-0.15, 0.15),
+        speed: layer.speed * rand(0.5, 1.2),
+        wobblePhase: rand(0, TAU),
+        wobbleSpeed: rand(0.05, 0.15),
+        wobbleAmp: rand(2, 6),
+        // twinkle state
+        twinkle: 0,
+        twinkleTarget: 0,
+        nextTwinkleAt: rand(3, 12),
+      };
+    }
+
+    const particles = [];
+    LAYERS.forEach(layer => {
+      for (let i = 0; i < layer.count; i++) particles.push(makeParticle(layer));
+    });
+
+    function update(dt) {
+      for (const p of particles) {
+        // gentle heading change over time — no repeating loop
+        p.angle += p.angleDrift * dt * 0.2;
+        const dx = Math.cos(p.angle) * p.speed * dt;
+        const dy = Math.sin(p.angle) * p.speed * dt * 0.4; // mostly horizontal drift
+
+        // subtle perpendicular wobble for organic float
+        p.wobblePhase += p.wobbleSpeed * dt;
+        const wob = Math.sin(p.wobblePhase) * p.wobbleAmp * dt;
+
+        p.x += dx + wob;
+        p.y += dy;
+
+        // wrap around edges softly (respawn just outside opposite edge)
+        const m = 20;
+        if (p.x < -m) p.x = w + m;
+        if (p.x > w + m) p.x = -m;
+        if (p.y < -m) p.y = h + m;
+        if (p.y > h + m) p.y = -m;
+
+        // fade in on spawn/wrap
+        p.alpha += (p.baseAlpha - p.alpha) * Math.min(1, dt * 1.5);
+
+        // occasional delicate twinkle
+        p.nextTwinkleAt -= dt;
+        if (p.nextTwinkleAt <= 0 && p.twinkleTarget === 0) {
+          p.twinkleTarget = rand(0.4, 0.9);
+          p.nextTwinkleAt = rand(6, 16);
+        }
+        if (p.twinkleTarget > 0) {
+          p.twinkle += (p.twinkleTarget - p.twinkle) * Math.min(1, dt * 3);
+          if (Math.abs(p.twinkle - p.twinkleTarget) < 0.02) p.twinkleTarget = 0; // fade back down
+        } else if (p.twinkle > 0.001) {
+          p.twinkle += (0 - p.twinkle) * Math.min(1, dt * 2);
+        } else {
+          p.twinkle = 0;
+        }
+      }
+    }
+
+    function draw(g) {
+      g.save();
+      for (const p of particles) {
+        const a = Math.min(1, p.alpha + p.twinkle);
+        if (a <= 0.01) continue;
+        const r = p.size * (1 + p.twinkle * 0.8);
+        g.beginPath();
+        g.fillStyle = `rgba(230,240,255,${a.toFixed(3)})`;
+        g.arc(p.x, p.y, r, 0, TAU);
+        g.fill();
+        if (p.twinkle > 0.05) {
+          // soft glow halo only while twinkling
+          g.beginPath();
+          g.fillStyle = `rgba(230,240,255,${(p.twinkle * 0.15).toFixed(3)})`;
+          g.arc(p.x, p.y, r * 3, 0, TAU);
+          g.fill();
+        }
+      }
+      g.restore();
+    }
+
+    return { update, draw };
+  }
+  // Neutralized for perf (see perf audit): update()/draw() below are no longer
+  // called each frame — kept defined, not deleted, in case this survives the
+  // visual redesign. Re-enable by uncommenting the two call sites below.
+  const atmosphere = createAtmosphere(W, H);
 
   function render() {
     drawBackground();
     // laser drawn before the bubbles/identicons so it reads as coming from
-    // underneath the glob instead of overlapping its face
-    if (phase === 'aimA') entities.A.forEach(g => { if (!g.out) drawAimLaser(g); });
-    if (phase === 'aimB') entities.B.forEach(g => { if (!g.out) drawAimLaser(g); });
+    // underneath the stone instead of overlapping its face
+    const drawAimLaser = isBasicLaser() ? renderBasicLaser : renderAimCascade;
+    if (phase === 'aimA') drawAimLaser('A');
+    else if (phase === 'aimB') drawAimLaser('B');
+    // lanWait too: local shot is locked in but stays visible as feedback
+    // while waiting on the opponent, instead of vanishing the instant PLAY
+    // is pressed.
+    else if (phase === 'lanAim' || phase === 'lanWait') drawAimLaser(myTeam);
     drawDragPreview();
-    entities.A.forEach(g => { if (!g.out) drawGlob(g); });
-    entities.B.forEach(g => { if (!g.out) drawGlob(g); });
-    drawBall(entities.ball);
+    // under the stones/ball (painter's order) — see drawSweepZone's own comment
+    drawSweepOverlay();
+    entities.A.forEach(g => { if (!g.out) drawStone(g); });
+    entities.B.forEach(g => { if (!g.out) drawStone(g); });
+    if (!entities.ball.out) drawBall(entities.ball);
+    // atmosphere.draw(ctx); // neutralized for perf, see note at createAtmosphere()
+    syncSweepButton();
+    if (import.meta.env.DEV) drawPerfOverlay();
+  }
+
+  // ---------- Dev perf overlay (temporary — see perf audit, delete once done) ----------
+  // Reports raw (uncapped) frame time, not the atmosphere-safe clamped `dt`
+  // below, so real stalls/spikes over 100ms are visible instead of hidden by
+  // that clamp. "worst frame" is the max seen within the current 1s window,
+  // so a single spike doesn't get averaged away before you can read it.
+  let perfWindowStart = performance.now();
+  let perfFrameCount = 0;
+  let perfMaxFrameMs = 0;
+  let perfDisplayFps = 0;
+  let perfDisplayMaxMs = 0;
+  // Logged instead of just shown on-screen: reading a live counter while
+  // also playing/dragging is unworkable, so spikes get written to the
+  // console (with the game phase at that moment) to review after the fact.
+  const PERF_SPIKE_MS = 50; // ~20fps or worse
+  function updatePerfOverlay(rawMs) {
+    if (rawMs > 0) {
+      perfFrameCount++;
+      if (rawMs > perfMaxFrameMs) perfMaxFrameMs = rawMs;
+      if (rawMs > PERF_SPIKE_MS) {
+        console.warn(`[perf] slow frame: ${rawMs.toFixed(0)}ms  phase=${phase}  t=${(performance.now() / 1000).toFixed(1)}s`);
+      }
+    }
+    const elapsed = performance.now() - perfWindowStart;
+    if (elapsed >= 1000) {
+      perfDisplayFps = Math.round(perfFrameCount * 1000 / elapsed);
+      perfDisplayMaxMs = perfMaxFrameMs;
+      perfFrameCount = 0;
+      perfMaxFrameMs = 0;
+      perfWindowStart = performance.now();
+    }
+  }
+  function drawPerfOverlay() {
+    ctx.save();
+    ctx.font = '16px monospace';
+    const text = `${perfDisplayFps} fps  (worst frame: ${perfDisplayMaxMs.toFixed(0)}ms)`;
+    const w = ctx.measureText(text).width + 16;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(8, 8, w, 26);
+    ctx.fillStyle = perfDisplayMaxMs > 33 ? '#ff5566' : '#7CFC9A';
+    ctx.fillText(text, 16, 26);
+    ctx.restore();
   }
 
   // ---------- Main loop ----------
+  // One flag, one path each way — flip to false to fully restore the previous
+  // "one physicsStep() per rendered frame" behavior (see perf audit: without
+  // this, a whole shot plays in slow motion whenever the render framerate
+  // dips, since physicsStep()'s fixed per-call increment was previously tied
+  // 1:1 to however often rAF happened to fire instead of real elapsed time).
+  // Safe for LAN determinism: physicsStep() itself is unchanged, still called
+  // with the exact same fixed increment every time — this only changes HOW
+  // OFTEN it's called per rendered frame (via the accumulator below), not
+  // what each call does or how many total calls it takes to settle, so both
+  // clients still reach the identical settled state from identical shots.
+  const PHYSICS_FIXED_TIMESTEP = true;
+  const PHYSICS_STEP_MS = 1000 / 48.6; // was 1000/60 — ~19% slower playback for readability (two 10% passes), same distances/impacts (fixed-step trajectory unchanged, just spread over more real time), feel test
+  const PHYSICS_MAX_CATCHUP_STEPS = 6; // caps a stall's catch-up burst to ~100ms of ticks per frame, same order as the dt clamp below
+  let physicsAccumMs = 0;
   let settleFrames = 0;
-  function loop() {
+  let lastFrameTime = null;
+
+  function runSimTick() {
     if (phase === 'sim') {
       const result = physicsStep();
       if (result === 'goalA' || result === 'goalB' || result === 'wipeoutA' || result === 'wipeoutB') {
@@ -1083,11 +2151,64 @@ export function startGame() {
       } else if (allSettled()) {
         settleFrames++;
         if (settleFrames > 6) {
-          settleFrames = 0; phase = 'aimA';
+          settleFrames = 0;
           entities.A.forEach(g => { g.used = false; g.pendingVx = 0; g.pendingVy = 0; });
           entities.B.forEach(g => { g.used = false; g.pendingVx = 0; g.pendingVy = 0; });
+          beginStraighten();
         }
       } else settleFrames = 0;
+    } else if (phase === 'goal') {
+      // Scoring is already resolved (see onGoal) — keep stepping physics
+      // through the GOAL_PAUSE_MS pause purely so any stones/ball still
+      // gliding from the shot finish decelerating naturally instead of
+      // freezing mid-slide the instant the goal was detected. Return value
+      // (another goalA/goalB/wipeout*) is ignored on purpose.
+      physicsStep();
+    }
+  }
+
+  function loop() {
+    const now = performance.now();
+    if (import.meta.env.DEV) updatePerfOverlay(lastFrameTime === null ? 0 : now - lastFrameTime);
+    // Capped so a backgrounded-tab reflow doesn't fling every particle across
+    // the board in one giant jump when the frame comes back.
+    const dt = lastFrameTime === null ? 1 / 60 : Math.min((now - lastFrameTime) / 1000, 0.1);
+    lastFrameTime = now;
+    // atmosphere.update(dt); // neutralized for perf, see note at createAtmosphere()
+    if (phase !== turnTimerPhase) {
+      if (isAimingPhase(phase)) turnTimerStart = performance.now();
+      turnTimerPhase = phase;
+    }
+    // LAN: each client enforces its own local 30s clock independently (no
+    // arbiter-side timer) — see "timer nimball" design note. Solo vs IA: same
+    // 30s cap on the human's own turn (aiTeam's shots are already decided in
+    // prepareAiShots(), so only the human side can ever be the one stalling).
+    // Local pass-and-play has no cap — both players are already looking at
+    // the same screen, so there's no "someone might not be paying attention"
+    // case to guard against. A stone whose drag hasn't been released yet
+    // still has pendingVx/Vy reset to 0 from onPointerDown, so cancelling the
+    // in-flight drag and reusing the normal PLAY submission path naturally
+    // sends "no shot" for it.
+    if (((net && phase === 'lanAim') || (aiTeam && phase === 'aimA')) && turnTimerProgress() >= 1) {
+      drag = null;
+      onValidate();
+    }
+    if (phase === 'sim' || phase === 'goal') {
+      if (PHYSICS_FIXED_TIMESTEP) {
+        physicsAccumMs += dt * 1000;
+        let steps = 0;
+        while (physicsAccumMs >= PHYSICS_STEP_MS && steps < PHYSICS_MAX_CATCHUP_STEPS && (phase === 'sim' || phase === 'goal')) {
+          runSimTick();
+          physicsAccumMs -= PHYSICS_STEP_MS;
+          steps++;
+        }
+      } else {
+        runSimTick();
+      }
+    } else if (phase === 'straighten') {
+      updateStraighten();
+    } else if (phase === 'roundReset') {
+      updateRoundReset();
     }
     render();
     requestAnimationFrame(loop);
@@ -1095,5 +2216,5 @@ export function startGame() {
   loop();
 
   // dev-only handle for physics-tuning scripts (position/phase readback)
-  if (import.meta.env.DEV) window.__nb = { entities: () => entities, phase: () => phase, step: () => physicsStep() };
+  if (import.meta.env.DEV) window.__nb = { entities: () => entities, phase: () => phase, step: () => physicsStep(), render: () => render(), sweep: () => sweep, aimingTeam: () => aimingTeam(), controlsEnabled: () => controlsEnabled };
 }
