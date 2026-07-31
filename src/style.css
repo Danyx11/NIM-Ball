@@ -38,12 +38,18 @@ html, body {
      between the viewport edge and the card's actual left edge, whatever
      that edge ends up being at a given viewport size. */
   --card-w: min(82vw, 1300px, calc(90vh * 2400 / 1450));
+  /* Card's own aspect ratio (2400/1450) as a height, so anything anchored
+     above the card (the connect button below) can stay clear of its actual
+     top edge instead of a hardcoded offset that only works at one
+     viewport size. */
+  --card-h: calc(var(--card-w) * 1450 / 2400);
 }
 
 #bg-logo {
   position: fixed;
   z-index: 2;
   top: 16px;
+  cursor: pointer;
   /* Centered in the margin strip left of the card: that margin spans from
      the viewport edge (0) to the card's left edge ((100vw - card-w)/2), so
      the logo's own center sits at a quarter of (100vw - card-w). */
@@ -51,6 +57,141 @@ html, body {
   width: 170px;
   height: auto;
 }
+
+/* Wallet-connect CTA, mirrors #bg-logo's placement in the margin outside the
+   card but on the right. Nimiq's own light-blue brand color (#0582CA, the
+   color their Wallet/Hub use for login/connect actions) rather than a team
+   color, since this isn't team-specific — Mulish to match the rest of the
+   Nimiq-branded chrome (see game.js's SCORE_FONT). */
+.nq-connect-btn {
+  position: fixed;
+  z-index: 3;
+  /* #bg-logo is a fixed 170px-wide image with a lot of transparent padding
+     baked in (natural 450x230, but the hex+wordmark only actually occupies
+     rows 76-149 — measured by scanning the image's alpha channel), so its
+     visual center sits at top:16px + 42.5px ≈ 58.5px from the viewport top,
+     not at the box's own top:16px. This button is 26px tall, so top:45.5px
+     (rounded to 46px) centers it on that same 58.5px line. A previous
+     version clamped this down via min() against the card's computed top
+     edge to avoid overlapping it on short viewports, but that clamp
+     triggered even at ordinary window heights (any window where the vh-vs-
+     vw card-width cap kicks in), yanking the button back up to ~8px and
+     breaking the alignment it was supposed to protect. #bg-logo has never
+     had this clamp and still never overlaps the card in practice, so drop
+     it here too instead of fighting the two constraints against each
+     other. */
+  top: 46px;
+  right: calc((100vw - var(--card-w)) / 4 - 50px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border: none;
+  border-radius: 999px;
+  background: #0582CA;
+  color: #fff;
+  font-family: 'Mulish', -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 6px 18px -6px rgba(5,130,202,0.6);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.nq-connect-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px -6px rgba(5,130,202,0.7); }
+.nq-connect-btn:active { transform: translateY(0); }
+.nq-connect-btn.connected { background: #1F2348; }
+.nq-connect-icon { width: 12px; height: 12px; flex: none; }
+
+/* Master VU meter — sits directly under the connect button, same right
+   alignment. dB scale is linear top(0dB)-to-bottom(VU_FLOOR_DB, see main.js),
+   not perceptual, which is the standard/simplest convention for this kind of
+   meter. Track shows a fixed green/yellow/red gradient (safe / -6..-3dB
+   margin / into the last 3dB before clipping); #vuFill is a dark mask that
+   covers the track from the top down to the current level, so only the
+   "lit" portion below it shows through. */
+#vuMeter {
+  position: fixed;
+  z-index: 3;
+  top: 84px;
+  right: calc((100vw - var(--card-w)) / 4 - 50px);
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+#vuTrack {
+  position: relative;
+  width: 14px;
+  height: 150px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: linear-gradient(to top,
+    #2ecc71 0%, #2ecc71 70%,
+    #f1c40f 70%, #f1c40f 90%,
+    #e74c3c 90%, #e74c3c 100%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+#vuFill {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 100%;
+  background: #0b1020;
+  transition: height 60ms linear;
+}
+#vuPeakHold {
+  position: absolute;
+  left: 0; right: 0;
+  height: 2px;
+  background: #fff;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.vu-labels { display: flex; flex-direction: column; gap: 4px; }
+.vu-readout {
+  min-width: 34px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: #10182e;
+  border: 1px solid #33447a;
+  color: #dbe6ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  text-align: center;
+}
+/* Max-peak-ever readout — never decays on its own (see main.js), click to
+   reset. Slightly dimmer border so it reads as the secondary/reference value
+   next to the live peak-hold above it. */
+.vu-readout-max { cursor: pointer; border-color: #6a7799; color: #8fb4ff; }
+
+/* Sound trigger log — fixed rows under the VU meter, each one independently
+   fading in/out as main.js's onPlay() listener fills/clears it (see
+   .sound-log-row.show below), not a scrolling list. */
+#soundLog {
+  position: fixed;
+  z-index: 3;
+  top: 250px;
+  right: calc((100vw - var(--card-w)) / 4 - 50px);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 150px;
+}
+.sound-log-row {
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: #10182e;
+  border: 1px solid #263259;
+  color: #8fb4ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+.sound-log-row.show { opacity: 1; }
 
 #game-card {
   position: fixed;
@@ -197,6 +338,20 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 .tbtn-used-cross::before { transform: translate(-50%, -50%) rotate(45deg); }
 .tbtn-used-cross::after { transform: translate(-50%, -50%) rotate(-45deg); }
+/* "Son" mute indicator: a single CSS-drawn diagonal slash pinned over the cap
+   while audio.isMuted() — same technique as .tbtn-used-cross above, no
+   second baked art asset needed per toggle state. */
+.tbtn-muted-slash {
+  position: absolute; inset: 20%; pointer-events: none;
+  opacity: 0; transition: opacity 120ms ease-out;
+}
+.tbtn-muted-slash.show { opacity: 1; }
+.tbtn-muted-slash::before {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 130%; height: 13%;
+  background: rgba(20, 20, 20, 0.9); border-radius: 999px;
+  box-shadow: 0 0 3px rgba(255,255,255,0.4);
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
 #overlay {
   position: absolute; inset: 0; background: rgba(6,16,20,0.92); border-radius: 18px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; padding: 30px;
@@ -233,6 +388,11 @@ button:disabled { opacity: 0.35; cursor: default; }
 .goal-score-b { color: var(--teamB); }
 .goal-score-sep { color: var(--ink-dim); padding: 0 8px; }
 .goal-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+
+/* Match-win ticket (see src/ticket.js/showVictory) — a single portrait PNG
+   (drawn on an offscreen canvas, dropped in here as a data-URL <img>) doubling
+   as both this in-game panel and the "Partager" share image, per design brief. */
+.ticket-img { max-width: 100%; max-height: 64vh; width: auto; border-radius: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
 
 /* Inset to the physics/ice rect only (FX0/FY0/FX1/FY1 in game.js — as % of the
    1200x905 canvas: 13.25%/22.76%/12.83%/22.87%), not the full board — the wood
@@ -494,3 +654,100 @@ button:disabled { opacity: 0.35; cursor: default; }
     mix-blend-mode: multiply;
     opacity: 0.35;
   }
+
+/* ---------- Replay mode (see CLAUDE.md replay section) ---------- */
+.half.d { background: rgba(45,140,130,0.55); }
+
+/* Ticket point-QR tiles are also directly clickable on the same device that's
+   displaying the ticket (see game.js showVictory) — invisible hit regions
+   layered over the baked-in QR pixels, positioned as percentages of the
+   ticket canvas so they track .ticket-img regardless of its displayed size. */
+.ticket-wrap { position: relative; display: inline-block; }
+.ticket-point-hit { position: absolute; display: block; border-radius: 12px; }
+.ticket-point-hit:hover { background: rgba(255,255,255,0.08); }
+
+#replayUploadOverlay {
+  position: absolute; inset: 0; background: rgba(6,16,20,0.92); border-radius: 18px;
+  display: flex; align-items: center; justify-content: center; z-index: 10;
+}
+#replayUploadOverlay.hidden { display: none; }
+#replayUploadBox {
+  display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center;
+  padding: 30px; max-width: 380px; border: 2px dashed rgba(255,255,255,0.25); border-radius: 18px;
+  transition: border-color .2s ease, background .2s ease;
+}
+#replayUploadBox.dragover { border-color: var(--accent); background: rgba(255,209,102,0.08); }
+#replayUploadBox .tag { font-weight: 800; font-size: 18px; letter-spacing: 0.5px; }
+#replayUploadBox .sub { font-size: 13px; color: var(--ink-dim); }
+#replayUploadStatus { font-size: 13px; color: var(--ink-dim); min-height: 18px; margin: 0; }
+
+/* Custom replay playback chrome — deliberately not the arcade #toolbar (see
+   CLAUDE.md). Three pieces, all absolutely positioned over the board:
+   a small corner exit button, a YouTube-style vertical rail of real point
+   thumbnails (see captureThumbnails in game.js) on the right, and a bottom
+   bar with a point-segmented scrubber + a centered prev/play-pause/next
+   transport pill (manche-level navigation — see jumpToManche). */
+#replayBar { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+#replayBar.hidden { display: none; }
+#replayBar > * { pointer-events: auto; }
+
+#replayExitBtn {
+  position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: none; background: rgba(6,16,20,0.7); color: var(--ink);
+  cursor: pointer;
+}
+#replayExitBtn svg { width: 15px; height: 15px; display: block; }
+
+/* Sits outside the board itself (#stage-wrap is only 70% of #app's width,
+   see style.css's own #stage-wrap rule) rather than over the ice — left:
+   calc(100% + ...) starts right at the board's own right edge and extends
+   into the margin #game-card already reserves around it, instead of a
+   right: value that would anchor inside the board and overlap it. */
+#replayRail {
+  position: absolute; top: 58px; left: calc(100% + 18px); bottom: 96px; width: 128px;
+  display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+}
+.replay-rail-thumb {
+  flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px;
+  background: var(--panel); border: 2px solid transparent; border-radius: 10px;
+  overflow: hidden; color: var(--ink); font-size: 11px; cursor: pointer; text-align: left;
+  padding: 0;
+}
+.replay-rail-thumb.current { border-color: var(--accent); }
+.replay-rail-thumb img { display: block; width: 100%; aspect-ratio: 1200 / 905; object-fit: cover; background: var(--bg-mid); }
+.replay-rail-thumb-meta { display: flex; align-items: center; gap: 6px; padding: 4px 8px 6px; }
+.replay-rail-thumb-team { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+.replay-rail-thumb-team.a { background: var(--teamA); }
+.replay-rail-thumb-team.b { background: var(--teamB); }
+.replay-rail-thumb-label { font-weight: 700; flex: 1; }
+.replay-rail-thumb-icon { font-size: 13px; }
+
+#replayBottomBar {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 10px 16px 14px;
+  background: linear-gradient(0deg, rgba(6,16,20,0.92), rgba(6,16,20,0));
+}
+#replaySegments { display: flex; width: 100%; max-width: 520px; gap: 4px; }
+.replay-segment {
+  flex: 1; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.15); cursor: pointer;
+}
+.replay-segment.done { background: rgba(255,209,102,0.4); }
+.replay-segment.current { background: var(--accent); }
+#replayTransport { display: flex; align-items: center; gap: 22px; }
+#replaySoundBtn, #replayPrevBtn, #replayNextBtn {
+  flex: 0 0 auto; width: 36px; height: 36px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: none;
+  background: rgba(255,255,255,0.12); color: var(--ink); cursor: pointer;
+}
+#replaySoundBtn svg, #replayPrevBtn svg, #replayNextBtn svg { width: 18px; height: 18px; display: block; }
+#replaySoundBtn.muted { color: var(--ink-dim); }
+#replayPlayBtn {
+  flex: 0 0 auto; width: 54px; height: 54px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: none;
+  background: var(--accent); color: #3a2900; cursor: pointer;
+}
+#replayPlayBtn svg { width: 24px; height: 24px; display: block; }

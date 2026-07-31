@@ -55,6 +55,18 @@ The playing field bounds (`FX0/FY0/FX1/FY1`, goal mouth `GY0/GY1`) are pixel coo
 
 Team avatars are composited once at load time, not per frame: `downscaleToFit()` does a proper box-filtered halving-step shrink (avoiding the aliasing/fringing `drawImage`'s bilinear scaler produces on a big downscale), and `bakeBubble()` draws the team's bubble art (`bubble-v4-navy/gold.webp` — a solid embossed ring + hex floor baked into the art, no punched-out alpha window) then draws the identicon on top, clipped to that hex (`HEX` fractions, measured off the art). A subtle cool-tint blend (desaturate/contrast/brightness filter + soft-light overlay, `BUBBLE_BLEND`) is baked in on top so the glossy identicon render sits inside the flatter, painted ice scene instead of reading as a pasted-on sticker — ported from design-lab's "intégration" slider. Team B's identicon is mirrored at load so it faces the ball at kickoff. All sprites are baked at 2x their on-screen draw size for crisp rotation.
 
+### Replay / ticket points
+
+Vocabulary: a **manche** is one aim+reveal exchange (both teams drag & release, then `physicsStep()` plays it out); a **point** is every manche that leads up to one scored point, whether by goal or wipeout (what the phase machine's `round` counter already tracked before this feature existed); a **match** is the whole game. This maps directly onto the existing state machine (see "Turn/phase state machine" above) — no new gameplay concept, just a name for what was already there.
+
+Because physics is fully deterministic given the same input velocities (already relied on by LAN mode — see `net.onLaunch` above), a point is replayable from nothing more than the `{vx,vy,used}×3` shot vectors both teams committed each manche, plus any sweep placement. `src/recorder.js` captures exactly that during a live match — `recordManche()` at each `launchSimulation()`/LAN `onLaunch`, `finishPoint()` at each `onGoal()` — building up a `points[]` array with zero effect on gameplay itself (purely a side-channel tally, same spirit as the existing ticket stats in `showVictory()`).
+
+`src/replay.js` packs a point into a small binary blob (int16-quantized velocities/sweep, well within the precision a drag gesture has anyway) and base64url-encodes it — a whole point is typically under 100 bytes, comfortably inside a single QR code even with a few manches. `src/ticket.js`'s `renderTicket()` bakes up to `MAX_POINTS_ON_TICKET` (5) of these as clickable QR tiles directly onto the ticket image, in a fixed-position layout (`pointTileRect()`) — fixed so that `decodePointsFromTicketImage()` can later normalize any uploaded ticket to the same canvas size and crop+decode each tile individually. This sidesteps needing general multi-QR-in-one-image detection (most lightweight QR readers, jsQR included, only find one code per scan): since the layout is ours and known in advance, cropping known rects and decoding each is enough. A full match (potentially dozens of points) doesn't fit reliably in one QR — the ticket intentionally shows only its most recent points (or all of them, if ≤5), not a "whole match" QR.
+
+Two ways into a replay, both bypassing `#modeOverlay` (see `main.js`'s `?duel` magic link for the existing precedent this follows): clicking/scanning a single point's QR (`?replay=<point>` in the URL) jumps straight into replaying that one point; the "Replay" mode tile instead opens a file-drop/upload dialog for a saved ticket image, decodes however many of its point QR tiles are present, and replays them all in sequence.
+
+Playback itself is `startGame({ replayPoints })`: `beginAimPhase()` branches to a `'replayAim'` phase (deliberately excluded from `isAimingPhase()` — no drag ever applies) that auto-fills `pendingVx/Vy` from the next recorded manche and falls through the exact same `pending`→`sim` path a human shot would, via `maybeAdvanceReplay()`. Pausing only holds back the *next* manche from auto-starting — a shot already mid-flight always finishes normally. `onGoal()` gets one small branch for replay mode: instead of the live `WIN_SCORE` check, "end of replay" is simply "we've played through the last recorded point," advancing to `showReplayEndTicket()` (same ticket visual as a live win, but "Revoir" instead of "Rejouer", no save/share action). A custom bottom playback bar (`#replayBar` — play/pause, a scrubber with a marker per point, an exit icon, plus a YouTube-style thumbnail per point) drives which point plays via `jumpToPoint()`; it's deliberately not the arcade `#toolbar`, which stays hidden throughout replay.
+
 ## Project structure
 
 ```
@@ -79,6 +91,9 @@ src/
   audio.js        WebAudio SFX + background ambience loop manager
   identicons.js   thin wrapper around @nimiq/identicons
   nimiq.js        thin wrapper around @nimiq/mini-app-sdk
+  ticket.js       renders the shareable end-of-match "ticket" image (see showVictory in game.js)
+  recorder.js     records manche/point shot data during a live match (see Replay section above)
+  replay.js       replay point encode/decode, ticket QR layout, ?replay= link/image parsing
   style.css       game styles + the ported constellation background animation
 public/           only assets actually loaded by the game (kept lean — this ships)
   identicons/     team bubble avatar art, baked into bubble sprites at load
@@ -86,6 +101,7 @@ public/           only assets actually loaded by the game (kept lean — this sh
                   + PLAY button cap sprite
   bg/             animated constellation background images + logo (see src/background.js)
   ball/           ball sprite
+  ticket/         static hero-band art baked into every ticket (see src/ticket.js)
   sfx/            SFX clips + background ambience loop (see src/audio.js)
 design/           source art not wired into the game (drafts, superseded versions,
                   raw generations) — never imported by code, safe to ignore for gameplay work.
