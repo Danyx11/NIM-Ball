@@ -5,16 +5,20 @@
 // Prefixed with BASE_URL (not a bare leading slash) so these public/ assets
 // still resolve when the app is served from a subpath, e.g. GitHub Pages at
 // https://danyx11.github.io/NIM-Ball/.
-import { createAudio } from './audio.js';
+import { audio } from './audio.js';
 import { getIdenticonCanvas, getIdenticonPngDataUrl } from './identicons.js';
 import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
 import { isBasicLaser } from './settings.js';
+import { preloadTicketAssets, renderTicket } from './ticket.js';
+import * as recorder from './recorder.js';
+import { MAX_POINTS_ON_TICKET, pointTileRect, buildReplayUrl, POINTS_SECTION_Y, POINTS_SECTION_H, TICKET_W, TICKET_H } from './replay.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
-// Placeholder demo addresses (real per-player wallet addresses aren't wired
-// up yet — see src/nimiq.js). Swap these once that flow exists; the identicon
-// pipeline below doesn't care where the address string comes from.
-const IDENTICON_ADDRESS = {
+// Placeholder demo addresses, used unless opts.identiconAddress overrides a
+// team (see src/nimiq.js's chooseAddress() — main.js's Hub test button wires
+// a real chosen address in for team A). The identicon pipeline below doesn't
+// care where the address string comes from.
+const DEFAULT_IDENTICON_ADDRESS = {
   A: 'NQ16 2SSN 82TL SMQS KXT3 Q01V CMAL NU6F 1LJG',
   B: 'NQ19 AXEU PPQ9 5610 YF48 VLTJ QR6Y 0HS1 UH89',
 };
@@ -22,9 +26,37 @@ const MODULE_SRC = { A: `${ASSET_BASE}identicons/bubble-v4-navy.webp`, B: `${ASS
 const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
 const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
 
+// Replay bar icons (see CLAUDE.md replay section) — plain inline SVG rather
+// than emoji glyphs, same convention as index.html's #connectBtn icon:
+// currentColor fill/stroke so each button's own CSS color applies, and a
+// fixed viewBox so they center reliably inside their round buttons instead
+// of an emoji's inconsistent per-font metrics.
+const ICON_PLAY = `<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="6,4 20,12 6,20" fill="currentColor"/></svg>`;
+const ICON_PAUSE = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="4" width="4" height="16" fill="currentColor"/><rect x="14" y="4" width="4" height="16" fill="currentColor"/></svg>`;
+const ICON_SOUND_ON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9 L8 9 L13 4 L13 20 L8 15 L4 15 Z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M16 9a4.2 4.2 0 0 1 0 6"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M18.5 6.5a7.8 7.8 0 0 1 0 11"/></svg>`;
+const ICON_SOUND_OFF = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9 L8 9 L13 4 L13 20 L8 15 L4 15 Z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M16 8l5 8M21 8l-5 8"/></svg>`;
+
 export function startGame(opts = {}) {
-  const { net = null, myTeam = null, aiTeam = null, aiConfig = {} } = opts;
+  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, replayPoints = null } = opts;
+  // Replay mode: replayPoints is an array of previously-recorded points (see
+  // src/recorder.js + src/replay.js) — one if opened from a single-point QR
+  // link, several if assembled from an uploaded ticket. Mutually exclusive
+  // with `net`/`aiTeam`, both of which are live-input modes; replay instead
+  // auto-feeds recorded shots through the exact same aim->pending->sim path
+  // (see beginAimPhase/maybeAdvanceReplay below), so physics/rendering/goal
+  // detection are all the same code as a live match.
+  const isReplay = Array.isArray(replayPoints) && replayPoints.length > 0;
+  const replayAllPoints = isReplay ? replayPoints : [];
+  let replayCursor = { pointIdx: 0, mancheIdx: 0 };
+  let replayPlaying = false;
+  // Set by onGoal() the instant a point (not the whole replay) finishes,
+  // consumed by beginAimPhase() once the repositioning animation is done and
+  // the next point's first manche is about to actually launch — see the
+  // comment on this flag's use site in onGoal for why the advance itself is
+  // deferred that long.
+  let replayPointAdvancePending = false;
   const AI_CONFIG = { ...DEFAULT_AI_CONFIG, ...aiConfig };
+  const IDENTICON_ADDRESS = { ...DEFAULT_IDENTICON_ADDRESS, ...identiconAddress };
   const canvas = document.getElementById('stage');
   // Guards against startGame() ever running twice on the same canvas (e.g. a
   // stray reconnect/reload race) — canvas.width/height below are reflected
@@ -56,11 +88,9 @@ export function startGame(opts = {}) {
   ctx.scale(dpr, dpr);
 
   // ---------- Audio ----------
-  // Decoding starts immediately (harmless before a user gesture); actual
-  // playback stays silent until unlock() runs from a real pointer/click, per
-  // browser autoplay rules. See src/audio.js for the clip list + folder.
-  const audio = createAudio();
-  audio.load();
+  // Shared singleton (src/audio.js) — loading, muting, and ambience are all
+  // driven from main.js so they persist across mode switches; this closure
+  // only ever calls audio.play()/unlock() for in-match SFX.
 
   // ---------- Identicons ----------
   // Official identicons (src/identicons.js, @nimiq/identicons) render straight
@@ -256,6 +286,7 @@ export function startGame(opts = {}) {
   const BOUNCE_BOOST = 1.0;                   // >1 re-adds the old arcade kick on impacts
   const MAX_DRAG = 130 * SCALE;                // ~173
   const POWER_SCALE = 0.054;
+  const DRAG_TICK_STEP = 8 * SCALE;            // px of drag distance between each dragTick retrigger, see onPointerMove
   const MAX_SPEED = 8;
   const STOP_THRESHOLD = 0.08;
   const WIN_SCORE = 3;
@@ -278,6 +309,27 @@ export function startGame(opts = {}) {
     A: [{ x: FX0 + 0.16 * PW, y: FY0 + 0.267 * PH }, { x: FX0 + 0.13 * PW, y: FY0 + 0.5 * PH }, { x: FX0 + 0.16 * PW, y: FY0 + 0.733 * PH }],
     B: [{ x: FX1 - 0.16 * PW, y: FY0 + 0.267 * PH }, { x: FX1 - 0.13 * PW, y: FY0 + 0.5 * PH }, { x: FX1 - 0.16 * PW, y: FY0 + 0.733 * PH }],
   };
+
+  // Match-start intro (see beginMatchIntro further below): both teams' 3
+  // stones start stacked vertically right in front of their own goal —
+  // same x, centered on CY, spaced just enough apart to not overlap — then
+  // slide out to their real rack spot. Shared by beginMatchIntro() and, for
+  // local pass-and-play, the very first resetPositions() call below (so the
+  // ready-tap screen already shows the stack, not the spread rack).
+  const MATCH_INTRO_START_INSET = 65;  // stack's distance from the wall, right in front of the goal mouth
+  const MATCH_INTRO_STACK_GAP = 4;     // gap between adjacent stones' edges, so they touch without overlapping
+  // beginMatchIntro()'s own slide duration — declared up here (not next to
+  // beginMatchIntro() itself, further below) since aiTeam/net's own entry
+  // branches call beginMatchIntro() synchronously earlier in this same
+  // top-to-bottom closure than that function is defined; a `const` declared
+  // down there would still be in its temporal dead zone at that call time
+  // (see matchIntroStart above for the same reasoning/bug, hit for real).
+  const MATCH_INTRO_MOVE_MS = 1500;
+  function matchIntroHuddlePos(team, idx) {
+    const x = team === 'A' ? FX0 + MATCH_INTRO_START_INSET : FX1 - MATCH_INTRO_START_INSET;
+    const spacing = 2 * STONE_R + MATCH_INTRO_STACK_GAP;
+    return { x, y: CY + (idx - 1) * spacing };
+  }
 
   // "Balai" (curling-style sweep): one placeable-then-removable slippery ice
   // patch per team per round (see beginRoundReset for the `used` reset), a
@@ -320,19 +372,73 @@ export function startGame(opts = {}) {
     sctx.lineWidth = Math.max(1, S * 0.006);
     sctx.beginPath(); sctx.arc(cx, cy, r * 0.94, 0, Math.PI * 2); sctx.stroke();
   })();
+  // Appear animation: "givre qui cristallise" (scale-in with a slight
+  // overshoot, like the patch pops into frost) + "reflet" (a dim band
+  // sweeping left-to-right across it, echoing the broom motion itself).
+  // Driven off sw.appearedAt, stamped by updateSweepAppear below the instant
+  // .active flips false->true — covers manual placement (sweepBtn), replay/
+  // LAN reveal, and re-placement after a toggle-off, all from one spot
+  // instead of stamping at every call site that sets .active.
+  const SWEEP_APPEAR_MS = 380;
+  // Shine runs on its own, longer clock than the scale-in (slower/subtler
+  // per feedback — smaller, dimmer, and not tied to the pop's own timing).
+  const SWEEP_SHINE_MS = 480;
+  function easeOutBack(t) {
+    const c1 = 1.70158, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+  function updateSweepAppear(sw) {
+    if (sw.active && !sw._wasActive) sw.appearedAt = performance.now();
+    sw._wasActive = sw.active;
+  }
   // Clipped to the ice rect so a patch placed near an edge has its overflow
   // cropped away instead of spilling onto the wood frame art — cosmetic only,
   // physics itself never needs cropping (the in-circle test in
   // physicsStep/stepGhostBodies already only ever looks at whichever part of
   // the pitch entities can actually occupy).
   function drawSweepZone(sw) {
+    const t = Math.min(1, (performance.now() - sw.appearedAt) / SWEEP_APPEAR_MS);
     ctx.save();
     ctx.beginPath();
     ctx.rect(FX0, FY0, FX1 - FX0, FY1 - FY0);
     ctx.clip();
     ctx.globalCompositeOperation = 'soft-light';
     const d = sw.r * 2;
-    ctx.drawImage(sweepSprite, sw.x - sw.r, sw.y - sw.r, d, d);
+    if (t < 1) {
+      const dd = d * Math.max(0, easeOutBack(t));
+      ctx.drawImage(sweepSprite, sw.x - dd / 2, sw.y - dd / 2, dd, dd);
+    } else {
+      ctx.drawImage(sweepSprite, sw.x - sw.r, sw.y - sw.r, d, d);
+    }
+    ctx.restore();
+    const shineT = (performance.now() - sw.appearedAt) / SWEEP_SHINE_MS;
+    if (shineT < 1) drawSweepShine(sw, Math.max(0, shineT));
+  }
+  // The reflet itself: a dim vertical band, clipped to the patch's own
+  // circle (plus the ice rect, same as drawSweepZone), translated from just
+  // past the left edge to just past the right edge over its own (slower)
+  // window — mirrors the broom's natural left-to-right stroke. 'screen'
+  // rather than 'soft-light' here — this is meant to read as a faint glint
+  // of light passing over the ice, not a wash blended into it.
+  function drawSweepShine(sw, t) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.rect(FX0, FY0, FX1 - FX0, FY1 - FY0);
+    ctx.clip();
+    const bandW = sw.r * 0.6;
+    // t=0: band sits just past the left edge; t=1: just past the right edge.
+    const travel = sw.r * 2 + bandW * 2;
+    const bandCx = (sw.x - sw.r - bandW) + t * travel;
+    const grad = ctx.createLinearGradient(bandCx - bandW / 2, 0, bandCx + bandW / 2, 0);
+    grad.addColorStop(0, 'rgba(255,255,255,0)');
+    grad.addColorStop(0.5, 'rgba(255,255,255,0.6)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = grad;
+    ctx.fillRect(sw.x - sw.r - bandW, sw.y - sw.r - bandW, sw.r * 2 + bandW * 2, sw.r * 2 + bandW * 2);
     ctx.restore();
   }
   // Own patch while still being placed/dragged (pre-commit) is visible only
@@ -340,7 +446,12 @@ export function startGame(opts = {}) {
   // laser itself stays visible through, so it vanishes at the same moment.
   // Once committed, both patches are drawn during 'sim'/'goal' regardless of
   // sweepViewTeam: the shared "reveal" moment both players see together.
+  // updateSweepAppear runs unconditionally on both, every frame, regardless
+  // of which (if either) actually gets drawn below — it only needs to see
+  // the active->true edge once to stamp appearedAt, not be drawn itself.
   function drawSweepOverlay() {
+    updateSweepAppear(sweep.A);
+    updateSweepAppear(sweep.B);
     const ownTeam = sweepViewTeam();
     if (ownTeam && sweep[ownTeam].active && !sweep[ownTeam].committed) drawSweepZone(sweep[ownTeam]);
     if (phase === 'sim' || phase === 'goal') {
@@ -351,12 +462,46 @@ export function startGame(opts = {}) {
 
   let scoreA = 0, scoreB = 0;
   let round = 1;
+  // Match-ticket stats (see src/ticket.js) — not gameplay state, just tallies
+  // for the shareable end-of-match ticket. Reset alongside score/round on Rejouer.
+  let matchStartTime = performance.now();
+  let totalCollisions = 0;
+  let bestShotSpeed = 0;
+  let stonesDestroyed = 0;
+  // Which entity's glide whoosh (see audio.js's GLIDE_* — single voice only)
+  // gets to sound for the round currently in flight: since every stone
+  // launches on the same physics frame, picked once at launchSimulation()
+  // time as whichever stone has the fastest launch speed, rather than
+  // whichever entity happens to iterate first in physicsStep()'s loop. Null
+  // when nothing launched with any speed this round (or before the first
+  // round starts) — physicsStep() then just skips calling setGlide() entirely.
+  let glideLeaderId = null;
+  // Which team's aim laser/halo is mid-retract right now, and when that
+  // retraction started — set by playLaunchEngine(team) at the exact moment
+  // the reveal begins (see LASER_RETRACT_MS/laserRetractProgress below).
+  // null/0 means "not retracting" (render()/haloMode fall back to their
+  // normal phase-gated visibility).
+  let retractTeam = null;
+  let retractStart = 0;
+  preloadTicketAssets();
   let phase = 'start';
   // Visual-only 30s turn timer for the score panel LED bar — resets whenever aiming
   // starts for either team, has no effect on the phase state machine (see turnTimerProgress).
   const TURN_TIMER_MS = 30000;
   let turnTimerStart = 0;
   let turnTimerPhase = null;
+  // beginMatchIntro()'s own animation clock + done-flag (see that function,
+  // defined further below near beginRoundReset) — declared up here since
+  // they're read by call sites that run earlier in this closure than that
+  // definition. matchIntroAnimDone guards updateMatchIntro() against being
+  // re-entered after it already finalized (its own safety-net setTimeout
+  // fires again while phase is still 'matchIntro', which is the normal case
+  // here since aiming only unlocks once the matchStart clip ends, later than
+  // the tween itself) — without the guard, a second finalize pass reads its
+  // own already-cleared _resetFromX/_resetToX fields, i.e. undefined
+  // arithmetic, and every stone silently goes to NaN,NaN (invisible).
+  let matchIntroStart = 0;
+  let matchIntroAnimDone = false;
   let entities = { A: [], B: [], ball: null };
   let drag = null;
   let readyA = false, readyB = false;
@@ -369,9 +514,13 @@ export function startGame(opts = {}) {
   // this team's one placement for the round has been spent — persists across
   // exchanges until beginRoundReset (see CLAUDE.md: a "round"/manche can span
   // many aimA/aimB/sim cycles, only ending on a goal/wipeout).
+  // appearedAt/_wasActive: appear-animation bookkeeping for drawSweepZone,
+  // stamped by updateSweepAppear (see comment above that function). -Infinity
+  // so a patch that's never been (re)placed this session reads as long past
+  // its animation window rather than NaN.
   let sweep = {
-    A: { active: false, committed: false, used: false, x: CENTER_X, y: CY, r: SWEEP_R },
-    B: { active: false, committed: false, used: false, x: CENTER_X, y: CY, r: SWEEP_R },
+    A: { active: false, committed: false, used: false, x: CENTER_X, y: CY, r: SWEEP_R, appearedAt: -Infinity, _wasActive: false },
+    B: { active: false, committed: false, used: false, x: CENTER_X, y: CY, r: SWEEP_R, appearedAt: -Infinity, _wasActive: false },
   };
   let sweepDrag = null;
   // LAN mode: both teams aim simultaneously ('lanAim'), each client only
@@ -403,16 +552,254 @@ export function startGame(opts = {}) {
   // presses PLAY the AI's move is already decided and just needs applying
   // (see onValidate). Its own laser trajectory is never rendered either way:
   // render() only calls renderAimCascade() for the human's own aiming team.
-  function beginAimPhase() {
+  function beginAimPhase(fromMatchIntro = false) {
     // Retire whichever patch(es) were committed into the sim that just
     // finished — the effect and its shared reveal were only ever meant for
     // that one exchange (see the comment on the `sweep` state above); `used`
     // is untouched here, it only clears on a real round reset.
     sweep.A.active = false; sweep.A.committed = false;
     sweep.B.active = false; sweep.B.committed = false;
+    if (isReplay) {
+      // This is the actual "point N+1 starts here" moment (see onGoal) —
+      // the repositioning animation that just finished belonged to the
+      // previous point's own scoring beat, not to this one.
+      if (replayPointAdvancePending) {
+        replayPointAdvancePending = false;
+        replayCursor.pointIdx++; replayCursor.mancheIdx = 0;
+        renderReplaySegments();
+      }
+      phase = 'replayAim';
+      maybeAdvanceReplay();
+      return;
+    }
+    // Whistle cues every turn timer about to start, except the match's very
+    // first one — that moment already has its own "match start" SFX (see
+    // beginMatchIntro) and doesn't need a second cue stacked on top.
+    if (!fromMatchIntro) audio.play('whistle', { volume: 0.6 });
     phase = firstAimPhase();
     if (aiTeam) prepareAiShots();
   }
+  // ---------- Replay playback (auto-feeds recorded shots, see src/recorder.js
+  // and src/replay.js) ----------
+  // 'replayAim' is deliberately excluded from isAimingPhase()'s list — no
+  // human drag ever applies here, both teams' shots are already decided.
+  // Pausing only holds back the *next* manche from auto-starting; a shot
+  // already mid-flight (phase 'sim') always finishes normally, same as the
+  // "scrubber snaps to point boundaries, not mid-shot" call made for the UI.
+  function maybeAdvanceReplay() {
+    if (phase !== 'replayAim' || !replayPlaying) return;
+    const point = replayAllPoints[replayCursor.pointIdx];
+    const manche = point && point.manches[replayCursor.mancheIdx];
+    if (!manche) { if (phase !== 'gameover') showReplayEndTicket(); return; }
+    entities.A.forEach((g, i) => {
+      const s = manche.stonesA[i];
+      g.pendingVx = s ? s.vx : 0; g.pendingVy = s ? s.vy : 0; g.used = !!(s && s.used);
+    });
+    entities.B.forEach((g, i) => {
+      const s = manche.stonesB[i];
+      g.pendingVx = s ? s.vx : 0; g.pendingVy = s ? s.vy : 0; g.used = !!(s && s.used);
+    });
+    if (manche.sweepA) { sweep.A.active = true; sweep.A.committed = true; sweep.A.used = true; sweep.A.x = manche.sweepA.x; sweep.A.y = manche.sweepA.y; sweep.A.r = manche.sweepA.r; }
+    if (manche.sweepB) { sweep.B.active = true; sweep.B.committed = true; sweep.B.used = true; sweep.B.x = manche.sweepB.x; sweep.B.y = manche.sweepB.y; sweep.B.r = manche.sweepB.r; }
+    // replayCursor.mancheIdx is NOT bumped here — it stays pointing at the
+    // manche that's actually playing right now (aim → pending → sim →
+    // settle), so the segment bar shows the right one lit for that manche's
+    // entire lifetime. It only advances in beginStraighten(), right as the
+    // *next* manche is about to start — see that function's own comment.
+    phase = 'pending';
+    playLaunchEngine();
+    scheduleGlideLeadIn(PRE_SIM_DELAY);
+    setTimeout(launchSimulation, PRE_SIM_DELAY);
+  }
+  // Jump straight to the start of a given point (rail thumbnail / segment
+  // click) — resets the board to the fixed rack position every point starts
+  // from, recomputes the score tally up to (not including) that point purely
+  // for display continuity, and resumes auto-play from its first manche.
+  function jumpToPoint(pointIdx) { jumpToManche(pointIdx, 0); }
+  // Jump to an arbitrary manche within a point (prev/next transport). Unlike
+  // a point boundary, a manche doesn't start from a known fixed position —
+  // the board is wherever the point's earlier manches left it (only a
+  // goal/wipeout resets to the rack) — so getting there means silently
+  // fast-forwarding through manches [0, mancheIdx) first (see
+  // fastForwardManche), then playing the requested manche normally.
+  function jumpToManche(pointIdx, mancheIdx) {
+    if (!isReplay || pointIdx < 0 || pointIdx >= replayAllPoints.length) return;
+    const point = replayAllPoints[pointIdx];
+    if (mancheIdx < 0 || mancheIdx >= point.manches.length) return;
+    // A manual jump always fully decides the cursor itself — any pending
+    // "advance to the next point" from a goal that just fired (see onGoal)
+    // is superseded, not layered on top of it.
+    replayPointAdvancePending = false;
+    scoreA = 0; scoreB = 0;
+    for (let i = 0; i < pointIdx; i++) {
+      const p = replayAllPoints[i];
+      if (p.scoringTeam === 'A') scoreA++; else scoreB++;
+    }
+    resetPositions();
+    sweep.A.used = false; sweep.B.used = false;
+    for (let m = 0; m < mancheIdx; m++) fastForwardManche(point.manches[m]);
+    replayCursor = { pointIdx, mancheIdx };
+    hideOverlay();
+    renderReplaySegments();
+    updateReplayBar();
+    beginAimPhase();
+  }
+  // Applies a manche's recorded shots directly (no pending/aim delay) and
+  // runs physicsStep() to completion without rendering — same physics as a
+  // normal replay manche, just silent/instant, purely to reconstruct the
+  // board state a later manche of the same point depends on.
+  function fastForwardManche(manche) {
+    entities.A.forEach((g, i) => {
+      const s = manche.stonesA[i];
+      g.vx = s ? s.vx : 0; g.vy = s ? s.vy : 0; g.pendingVx = 0; g.pendingVy = 0; g.used = !!(s && s.used);
+    });
+    entities.B.forEach((g, i) => {
+      const s = manche.stonesB[i];
+      g.vx = s ? s.vx : 0; g.vy = s ? s.vy : 0; g.pendingVx = 0; g.pendingVy = 0; g.used = !!(s && s.used);
+    });
+    if (manche.sweepA) { sweep.A.active = true; sweep.A.committed = true; sweep.A.used = true; sweep.A.x = manche.sweepA.x; sweep.A.y = manche.sweepA.y; sweep.A.r = manche.sweepA.r; }
+    if (manche.sweepB) { sweep.B.active = true; sweep.B.committed = true; sweep.B.used = true; sweep.B.x = manche.sweepB.x; sweep.B.y = manche.sweepB.y; sweep.B.r = manche.sweepB.r; }
+    for (let i = 0; i < 4000; i++) {
+      // A goal/wipeout shouldn't fire on any manche but a point's last one by
+      // definition — bail out early if it somehow does, rather than loop on.
+      if (physicsStep()) break;
+      if (allSettled()) break;
+    }
+  }
+
+  // ---------- Replay playback bar (custom, distinct from the arcade toolbar
+  // — see CLAUDE.md replay section) ----------
+  const replayBar = document.getElementById('replayBar');
+  const replayRailEl = document.getElementById('replayRail');
+  const replaySegmentsEl = document.getElementById('replaySegments');
+  const replaySoundBtn = document.getElementById('replaySoundBtn');
+  const replayPlayBtn = document.getElementById('replayPlayBtn');
+  const replayPrevBtn = document.getElementById('replayPrevBtn');
+  const replayNextBtn = document.getElementById('replayNextBtn');
+  const replayExitBtn = document.getElementById('replayExitBtn');
+
+  // Real per-point preview frames (not fake art): fast-forwards each point
+  // to its final settled frame (reusing fastForwardManche) and snapshots the
+  // actual board at that instant, since the shared match data never carries
+  // images itself (see src/replay.js) — cheap to regenerate given how fast
+  // fastForwardManche already proved to be. Runs once, before real playback
+  // starts, then restores a clean board so the real replay begins from
+  // point 1 exactly as if this never happened.
+  let replayThumbDataUrls = null;
+  function captureThumbnails() {
+    if (replayThumbDataUrls) return;
+    replayThumbDataUrls = replayAllPoints.map((point) => {
+      resetPositions();
+      sweep.A.used = false; sweep.B.used = false;
+      point.manches.forEach(fastForwardManche);
+      render();
+      const thumbCanvas = document.createElement('canvas');
+      thumbCanvas.width = 220;
+      thumbCanvas.height = Math.round(220 * 905 / 1200);
+      thumbCanvas.getContext('2d').drawImage(canvas, 0, 0, thumbCanvas.width, thumbCanvas.height);
+      return thumbCanvas.toDataURL('image/webp', 0.7);
+    });
+    resetPositions();
+    sweep.A.used = false; sweep.B.used = false;
+    scoreA = 0; scoreB = 0;
+  }
+  function renderReplayRail() {
+    if (!isReplay) return;
+    replayRailEl.innerHTML = '';
+    replayAllPoints.forEach((point, i) => {
+      const thumb = document.createElement('button');
+      thumb.type = 'button';
+      thumb.className = 'replay-rail-thumb';
+      thumb.innerHTML = `
+        <img src="${replayThumbDataUrls[i]}" alt="">
+        <div class="replay-rail-thumb-meta">
+          <span class="replay-rail-thumb-team ${point.scoringTeam === 'A' ? 'a' : 'b'}"></span>
+          <span class="replay-rail-thumb-label">Point ${point.index + 1}</span>
+          <span class="replay-rail-thumb-icon">${point.isWipeout ? '💥' : '⚽'}</span>
+        </div>
+      `;
+      thumb.addEventListener('click', () => jumpToPoint(i));
+      replayRailEl.appendChild(thumb);
+    });
+  }
+  // One segment per manche of whichever point is currently selected on the
+  // rail (not the whole match — points already have their own index there),
+  // rebuilt every time the active point changes so the group always matches
+  // what's showing. i is a plain manche index within that one point, so
+  // updateReplayBar can compare it straight against replayCursor.mancheIdx —
+  // no cross-point index math to get subtly wrong.
+  function renderReplaySegments() {
+    if (!isReplay) return;
+    replaySegmentsEl.innerHTML = '';
+    const point = replayAllPoints[replayCursor.pointIdx];
+    if (!point) return;
+    point.manches.forEach((_, mancheIdx) => {
+      const seg = document.createElement('div');
+      seg.className = 'replay-segment';
+      seg.title = `Manche ${mancheIdx + 1}`;
+      seg.addEventListener('click', () => jumpToManche(replayCursor.pointIdx, mancheIdx));
+      replaySegmentsEl.appendChild(seg);
+    });
+  }
+  function showReplayBar() {
+    if (!isReplay) return;
+    captureThumbnails();
+    replayBar.classList.remove('hidden');
+    renderReplayRail();
+    renderReplaySegments();
+    updateReplayBar();
+  }
+  function hideReplayBar() {
+    replayBar.classList.add('hidden');
+  }
+  function updateReplayBar() {
+    if (!isReplay) return;
+    replayPlayBtn.innerHTML = replayPlaying ? ICON_PAUSE : ICON_PLAY;
+    replaySoundBtn.innerHTML = audio.isMuted() ? ICON_SOUND_OFF : ICON_SOUND_ON;
+    replaySoundBtn.classList.toggle('muted', audio.isMuted());
+    [...replayRailEl.children].forEach((el, i) => el.classList.toggle('current', i === replayCursor.pointIdx));
+    [...replaySegmentsEl.children].forEach((el, i) => {
+      el.classList.toggle('current', i === replayCursor.mancheIdx);
+      el.classList.toggle('done', i < replayCursor.mancheIdx);
+    });
+  }
+  // Shared audio.js instance (see its own header comment) — toggling here
+  // also mutes the arcade toolbar's sound state, same as it already would
+  // from a live match, since there's only ever one audio singleton.
+  // audio.play() is called before setMuted() flips the flag, so pressing
+  // "unmute" stays silent (still muted at the moment play() checks) while
+  // every other toggle direction/press gets the usual click.
+  replaySoundBtn.addEventListener('click', () => {
+    audio.play('button');
+    audio.setMuted(!audio.isMuted());
+    updateReplayBar();
+  });
+  replayPlayBtn.addEventListener('click', () => {
+    audio.play('button');
+    replayPlaying = !replayPlaying;
+    updateReplayBar();
+    if (replayPlaying) maybeAdvanceReplay();
+  });
+  // Manche-level transport — crosses point boundaries at either end (last
+  // manche of the previous point / first manche of the next one) so it reads
+  // as one continuous timeline, not one that resets at every point.
+  replayPrevBtn.addEventListener('click', () => {
+    audio.play('button');
+    const { pointIdx, mancheIdx } = replayCursor;
+    if (mancheIdx > 0) { jumpToManche(pointIdx, mancheIdx - 1); return; }
+    if (pointIdx > 0) jumpToManche(pointIdx - 1, replayAllPoints[pointIdx - 1].manches.length - 1);
+  });
+  replayNextBtn.addEventListener('click', () => {
+    audio.play('button');
+    const { pointIdx, mancheIdx } = replayCursor;
+    const point = replayAllPoints[pointIdx];
+    if (point && mancheIdx < point.manches.length - 1) { jumpToManche(pointIdx, mancheIdx + 1); return; }
+    if (pointIdx < replayAllPoints.length - 1) jumpToManche(pointIdx + 1, 0);
+  });
+  // Plain reload() would re-read a still-present ?replay= param and jump
+  // straight back into this same replay — strip the query string first so
+  // "exit" actually lands back on the real mode-select screen.
+  replayExitBtn.addEventListener('click', () => { audio.play('button'); audio.stopAmbience(); location.href = location.pathname; });
   function prepareAiShots() {
     const opponentTeam = aiTeam === 'A' ? 'B' : 'A';
     const stones = entities[aiTeam].filter(g => !g.out && !g.dead);
@@ -454,6 +841,22 @@ export function startGame(opts = {}) {
     };
   }
   resetPositions();
+  // Local pass-and-play only: both teams' stones are already visible on the
+  // board during the ready-tap screen (#startOverlay), well before
+  // beginMatchIntro() itself runs (see maybeStart()) — stack them in front of
+  // their own goal from that very first frame (see matchIntroHuddlePos) so
+  // there's no jump into place once both players tap ready. Solo/LAN/replay
+  // skip straight past that screen (or, for replay, never show the stack at
+  // all — see beginAimPhase's own isReplay branch), so there's no visible
+  // gap for them to fix.
+  if (!net && !aiTeam && !isReplay) {
+    for (const g of [...entities.A, ...entities.B]) {
+      const idx = parseInt(g.id.slice(1), 10) || 0;
+      const p = matchIntroHuddlePos(g.team, idx);
+      g.x = p.x; g.y = p.y;
+    }
+  }
+  if (!isReplay) recorder.reset();
   function allEntities() { return [...entities.A, ...entities.B, entities.ball]; }
 
   // team tint shown for the brief window before the module+identicon sprite has baked
@@ -491,7 +894,12 @@ export function startGame(opts = {}) {
       // picked up, not only once released — onPointerUp still reverts this to
       // false if the drag turns out too short to count as an actual shot.
       g.used = true;
-      drag = { entity: g, startX: g.x, startY: g.y, curX: pos.x, curY: pos.y };
+      drag = { entity: g, startX: g.x, startY: g.y, curX: pos.x, curY: pos.y, lastTickDist: 0 };
+      audio.play('stoneSelect', { volume: 0.316 }); // -10dB
+      // aim-laser loop, runs for the whole drag until onPointerUp's stopLaser() — phase offset
+      // syncs its filter sweep to this specific stone's own halo pulse, see pulseStrength()
+      const haloIdx = parseInt(g.id.slice(1), 10) || 0;
+      audio.startLaser((haloIdx / 3) * HALO_PULSE_PERIOD);
       return;
     }
     // No stone at this point — check for a grab on the aiming team's own
@@ -509,6 +917,26 @@ export function startGame(opts = {}) {
       evt.preventDefault();
       const pos = getPointerPos(evt);
       drag.curX = pos.x; drag.curY = pos.y;
+      // Ratchet/"machine-gun" drag feedback: retrigger a short tick every
+      // DRAG_TICK_STEP px of pull distance covered, only while stretching
+      // further out (never while easing back in, per feedback) — so the tick
+      // rate rises and falls with how fast the player is actually pulling
+      // without any timer — a fast pull crosses more step boundaries per real
+      // second than a slow one, for free. Stops once the drag is maxed out
+      // (dist clamped to MAX_DRAG); the tick itself never fires on release —
+      // onPointerUp plays 'stoneSelect'/'shot' instead.
+      const dist = Math.min(MAX_DRAG, Math.hypot(drag.startX - drag.curX, drag.startY - drag.curY));
+      audio.setLaserIntensity(dist / MAX_DRAG);
+      if (dist < MAX_DRAG) {
+        if (dist - drag.lastTickDist >= DRAG_TICK_STEP) {
+          drag.lastTickDist = dist;
+          audio.play('dragTick', { volume: 0.316, rate: 0.95 + Math.random() * 0.1 }); // -10dB
+        } else if (dist < drag.lastTickDist) {
+          // shortening: track silently so the next stretch resumes ticking
+          // right away instead of first re-crossing the old high-water mark
+          drag.lastTickDist = dist;
+        }
+      }
       return;
     }
     if (sweepDrag) {
@@ -528,6 +956,8 @@ export function startGame(opts = {}) {
     let dist = Math.hypot(dx, dy);
     if (dist > MAX_DRAG) { const s = MAX_DRAG / dist; dx *= s; dy *= s; dist = MAX_DRAG; }
     const g = drag.entity;
+    audio.play('stoneSelect', { volume: 0.316 }); // -10dB, echoes the pickup cue on release too
+    audio.stopLaser(); // aim-laser loop ends exactly when the release cue plays, whether or not this drag turns into a shot
     if (dist > 6) {
       g.pendingVx = dx * POWER_SCALE;
       g.pendingVy = dy * POWER_SCALE;
@@ -556,22 +986,194 @@ export function startGame(opts = {}) {
 
   let controlsEnabled = false;
 
-  halfA.addEventListener('click', () => { audio.unlock(); readyA = true; halfA.classList.add('ready'); checkA.textContent = '✓'; maybeStart(); });
-  halfB.addEventListener('click', () => { audio.unlock(); readyB = true; halfB.classList.add('ready'); checkB.textContent = '✓'; maybeStart(); });
+  halfA.addEventListener('click', () => { audio.unlock(); audio.play('button'); readyA = true; halfA.classList.add('ready'); checkA.textContent = '✓'; maybeStart(); });
+  halfB.addEventListener('click', () => { audio.unlock(); audio.play('button'); readyB = true; halfB.classList.add('ready'); checkB.textContent = '✓'; maybeStart(); });
   function maybeStart() {
     if (readyA && readyB) {
       startOverlay.classList.add('hidden');
       controlsEnabled = true;
-      beginAimPhase();
+      beginMatchIntro();
       // ambience disabled for now — audio.playAmbience() to re-enable
     }
+  }
+
+  // ---- Duel LAN chat (see server/arbiter.js's per-team cooldown + CLAUDE.md
+  // "chat" notes). Two windows, one per team, each showing that team's
+  // current displayed state, persisting until either a newer message or a
+  // mute toggle replaces it — no history, nothing recorded/replayed, just
+  // "what's on screen right now". Only ever wired up when net is set.
+  const chatBar = document.getElementById('chatBar');
+  const chatTextA = document.getElementById('chatTextA');
+  const chatTextB = document.getElementById('chatTextB');
+  const chatFormA = document.getElementById('chatFormA');
+  const chatFormB = document.getElementById('chatFormB');
+  const chatInputA = document.getElementById('chatInputA');
+  const chatInputB = document.getElementById('chatInputB');
+  const chatSendBtnA = document.getElementById('chatSendBtnA');
+  const chatSendBtnB = document.getElementById('chatSendBtnB');
+  const chatEmojiBtnA = document.getElementById('chatEmojiBtnA');
+  const chatEmojiBtnB = document.getElementById('chatEmojiBtnB');
+  const chatEmojiPickerA = document.getElementById('chatEmojiPickerA');
+  const chatEmojiPickerB = document.getElementById('chatEmojiPickerB');
+  const chatTimerFillA = document.getElementById('chatTimerFillA');
+  const chatTimerFillB = document.getElementById('chatTimerFillB');
+  // The local player only ever controls their own team's window — the
+  // opponent's is read-only (see chatOppForm.classList.add(...) below).
+  const chatOwnForm = myTeam === 'B' ? chatFormB : chatFormA;
+  const chatOwnInput = myTeam === 'B' ? chatInputB : chatInputA;
+  const chatOwnSendBtn = myTeam === 'B' ? chatSendBtnB : chatSendBtnA;
+  const chatOwnEmojiBtn = myTeam === 'B' ? chatEmojiBtnB : chatEmojiBtnA;
+  const chatOwnEmojiPicker = myTeam === 'B' ? chatEmojiPickerB : chatEmojiPickerA;
+  const chatOwnTimerFill = myTeam === 'B' ? chatTimerFillB : chatTimerFillA;
+  const chatOppForm = myTeam === 'B' ? chatFormA : chatFormB;
+  // Unlimited sends, but at most one every CHAT_COOLDOWN_MS — a flat, real-
+  // time cooldown instead of the old "2 slots tied to aim/reveal phase"
+  // quota. Simpler to reason about ("wait 30s between messages"), simpler to
+  // enforce (one timestamp per team, no per-manche reset to keep in sync
+  // with the game's own phase machine), and 30s already matches
+  // TURN_TIMER_MS — this is deliberately the same pace as one aiming turn,
+  // not an arbitrary number. Composing is never blocked by the cooldown,
+  // only the actual send — see syncChatCompose below.
+  const CHAT_COOLDOWN_MS = 30000;
+  const CHAT_TIMER_C = 2 * Math.PI * 8; // matches the r=8 circle in index.html
+  let chatLastSentAt = 0; // far enough in the past that the very first send is never blocked
+  function chatCooldownRemaining() { return Math.max(0, CHAT_COOLDOWN_MS - (Date.now() - chatLastSentAt)); }
+  let chatInputEnabledCache = null;
+  let chatSendEnabledCache = null;
+  function syncChatCompose() {
+    const inputEnabled = !!net && !chatMuted;
+    const sendEnabled = inputEnabled && chatCooldownRemaining() === 0;
+    if (inputEnabled !== chatInputEnabledCache) {
+      chatInputEnabledCache = inputEnabled;
+      chatOwnInput.disabled = !inputEnabled;
+      chatOwnEmojiBtn.disabled = !inputEnabled;
+      if (!inputEnabled) chatOwnEmojiPicker.classList.add('hidden');
+    }
+    if (sendEnabled !== chatSendEnabledCache) {
+      chatSendEnabledCache = sendEnabled;
+      chatOwnSendBtn.disabled = !sendEnabled;
+    }
+    // Ring fill goes from empty (just sent) to full (ready) — updated every
+    // frame while cooling down, cheap enough not to need its own dirty-check.
+    const progress = 1 - chatCooldownRemaining() / CHAT_COOLDOWN_MS;
+    chatOwnTimerFill.style.strokeDashoffset = String(CHAT_TIMER_C * (1 - progress));
+    chatOwnTimerFill.classList.toggle('ready', sendEnabled);
+  }
+  // team here is whichever side the message came from (from the arbiter's
+  // echo, see net.onChat below) — always drawn on that team's fixed board
+  // side, same for both players' screens (the board itself isn't mirrored).
+  function showChatMessage(team, text) {
+    const el = team === 'A' ? chatTextA : chatTextB;
+    if (el.textContent === text) return; // nothing actually changed
+    el.textContent = text;
+    el.classList.remove('chat-pop');
+    if (text) {
+      void el.offsetWidth; // restart the CSS transition even if the window is already showing something
+      el.classList.add('chat-pop');
+    }
+  }
+  // A small fixed set rather than a full system emoji grid — quick reactions,
+  // not a general-purpose keyboard (see design brief: "sober, simple").
+  const CHAT_EMOJI = ['🔥', '🎯', '👏', '😅', '💪', '🙌'];
+  function buildEmojiPicker(picker, input) {
+    for (const emoji of CHAT_EMOJI) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = emoji;
+      btn.addEventListener('click', () => {
+        input.value = Array.from(input.value + emoji).slice(0, 30).join('');
+        picker.classList.add('hidden');
+        input.focus();
+      });
+      picker.appendChild(btn);
+    }
+  }
+  buildEmojiPicker(chatEmojiPickerA, chatInputA);
+  buildEmojiPicker(chatEmojiPickerB, chatInputB);
+  // tbtn-chat: mutes/unmutes the LOCAL player's own side of the chat (see
+  // CLAUDE.md-worthy design note — this is a moderation switch, not a
+  // regular message, so it rides its own net.sendChatMute channel instead of
+  // the chat cooldown above (see src/net.js) — always instant, unlimited.
+  // Clicking updates this player's own window immediately, no network round
+  // trip — maybeAutoSyncMute() below is what actually tells the other
+  // player, as soon as possible. If toggled back before that fires,
+  // chatMuted just equals chatLastSentMuted again and nothing ever gets
+  // sent — no separate "cancel" bookkeeping needed.
+  const chatBtn = document.getElementById('tbtn-chat');
+  const chatBtnCap = document.getElementById('tbtn-chat-cap');
+  const chatBtnSlash = document.getElementById('tbtn-chat-slash');
+  let chatMuted = false;
+  let chatLastSentMuted = false; // what the opponent currently believes, as far as we've told them
+  function pressChatBtn() {
+    chatBtnCap.classList.remove('pressed');
+    void chatBtnCap.offsetWidth; // restart the animation if pressed again mid-tween
+    chatBtnCap.classList.add('pressed');
+    audio.play('button');
+  }
+  if (net) {
+    chatOppForm.classList.add('chat-window-form-hidden');
+    chatBtn.addEventListener('click', () => {
+      pressChatBtn();
+      chatMuted = !chatMuted;
+      chatBtnSlash.classList.toggle('show', chatMuted);
+      showChatMessage(myTeam, chatMuted ? 'Chat OFF' : '');
+      chatOwnInput.value = '';
+      syncChatCompose();
+    });
+    chatOwnEmojiBtn.addEventListener('click', () => {
+      chatOwnEmojiPicker.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+      if (chatOwnEmojiPicker.classList.contains('hidden')) return;
+      // contains(), not === — a click on the emoji button's own SVG icon has
+      // e.target set to the SVG (or one of its inner shapes), never the
+      // <button> element itself, so the old strict-equality check missed it:
+      // this same click bubbled up to here and immediately re-hid the picker
+      // the button's own handler (above) had just shown, in one event.
+      if (chatOwnEmojiBtn.contains(e.target) || chatOwnEmojiPicker.contains(e.target)) return;
+      chatOwnEmojiPicker.classList.add('hidden');
+    });
+    chatOwnForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (chatMuted || chatCooldownRemaining() > 0) return;
+      const text = Array.from(chatOwnInput.value.trim()).slice(0, 30).join('');
+      if (!text) return;
+      net.sendChat(text);
+      chatLastSentAt = Date.now();
+      audio.play('chatOut', { volume: 0.251 }); // -12dB
+      // Shown locally right away rather than waiting on the arbiter's own
+      // echo of this same send (net.onChat below) — same "own screen updates
+      // instantly, network catches up" pattern as the mute toggle above.
+      showChatMessage(myTeam, text);
+      chatOwnInput.value = '';
+      chatOwnEmojiPicker.classList.add('hidden');
+      syncChatCompose();
+    });
+  } else {
+    // Outside a LAN match there's no chat to mute — same click-SFX-only stub
+    // the whole toolbar used to have for this button (see main.js).
+    chatBtn.addEventListener('click', () => {
+      pressChatBtn();
+      console.log('[toolbar] chat pressed — no LAN match in progress');
+    });
+  }
+  // Sends the local mute toggle's current state to the opponent as soon as
+  // it's actually out of sync with what they were last told — so un-muting
+  // before the "Chat OFF" ever went out just silently cancels. Unlike a real
+  // chat send, this never touches the cooldown above — it has none of its own.
+  function maybeAutoSyncMute() {
+    if (!net || chatMuted === chatLastSentMuted) return;
+    net.sendChatMute(chatMuted);
+    chatLastSentMuted = chatMuted;
   }
 
   function showOverlay(html) { overlay.classList.remove('hidden'); ovContent.innerHTML = html; }
   function hideOverlay() { overlay.classList.add('hidden'); }
   // J1->J2: no "pass the device" screen, straight into the other team's aim phase.
-  // J2->sim: a fixed 2s beat after the PLAY press before the shots actually launch.
-  const PRE_SIM_DELAY = 1000;
+  // J2->sim: a fixed beat after the PLAY press before the shots actually launch —
+  // long enough for the launchEngine cue (played instantly at reveal start,
+  // see playLaunchEngine()) to run its course before the whoosh/departure follow.
+  const PRE_SIM_DELAY = 1700; // was 1000, +700ms so launchEngine finishes before the whoosh/stones
   // Locks in whichever patch a team had placed for the sim about to run —
   // `committed` is what physicsStep/the reveal actually key off; `used` is
   // the round-scoped "spent" flag the toolbar button crosses out.
@@ -605,19 +1207,96 @@ export function startGame(opts = {}) {
       // never places a sweep patch of its own (out of scope for now).
       commitSweep('A');
       phase = 'pending';
+      playLaunchEngine('A');
       // Extra "thinking" pause on top of the usual pre-launch beat — purely a
       // feel beat (see reactionDelay in ai.js), not real computation time.
       const think = AI_CONFIG.reactionDelay[0] + Math.random() * (AI_CONFIG.reactionDelay[1] - AI_CONFIG.reactionDelay[0]);
+      scheduleGlideLeadIn(PRE_SIM_DELAY + think);
       setTimeout(launchSimulation, PRE_SIM_DELAY + think);
       return;
     }
     if (phase === 'aimA') { commitSweep('A'); phase = 'aimB'; }
-    else if (phase === 'aimB') { commitSweep('B'); phase = 'pending'; setTimeout(launchSimulation, PRE_SIM_DELAY); }
+    else if (phase === 'aimB') { commitSweep('B'); phase = 'pending'; playLaunchEngine('B'); scheduleGlideLeadIn(PRE_SIM_DELAY); setTimeout(launchSimulation, PRE_SIM_DELAY); }
+  }
+  // Ticket stat (see src/ticket.js) — fastest stone launched all match, in the
+  // same physics units as vx/vy (converted to a % of MAX_DRAG*POWER_SCALE for display).
+  function trackShotSpeed(g) {
+    const spd = Math.hypot(g.vx, g.vy);
+    if (spd > bestShotSpeed) bestShotSpeed = spd;
+  }
+  // See glideLeaderId above: whichever of this round's 6 stones launches
+  // fastest owns the round's single glide whoosh. Only stones, not the ball —
+  // the ball never launches on its own, only gets hit mid-sim, which stays
+  // outside this round-start pick by design. vxKey/vyKey let the same pick
+  // run either off committed velocities (vx/vy, at the real launch instant)
+  // or off pendingVx/pendingVy (already locked in by commit time, well
+  // before launch) — see scheduleGlideLeadIn() below for why the latter matters.
+  function pickGlideLeader(vxKey = 'vx', vyKey = 'vy') {
+    let best = null, bestSpd = 0;
+    for (const g of entities.A) { const spd = Math.hypot(g[vxKey] || 0, g[vyKey] || 0); if (spd > bestSpd) { bestSpd = spd; best = g; } }
+    for (const g of entities.B) { const spd = Math.hypot(g[vxKey] || 0, g[vyKey] || 0); if (spd > bestSpd) { bestSpd = spd; best = g; } }
+    return { entity: best, spd: bestSpd };
+  }
+  // How far ahead of the real physics launch the glide whoosh should start —
+  // it read as starting late relative to the stones' visual motion, so the
+  // cue now leads the movement by a fixed beat instead of starting exactly
+  // when physicsStep first sees the stones move.
+  const GLIDE_LEAD_MS = 200; // was 500, too far ahead of the stones' visual motion
+  // How long the just-committed team's laser takes to retract into its
+  // stones once the reveal starts (see retractTeam/laserRetractProgress) —
+  // still inside PRE_SIM_DELAY (1700ms) so it's fully finished before the
+  // glide whoosh (PRE_SIM_DELAY - GLIDE_LEAD_MS = 1500ms) and the stones'
+  // actual departure at PRE_SIM_DELAY itself, just with a tighter margin
+  // than a shorter retract would leave.
+  const LASER_RETRACT_MS = 1200;
+  // 0 (just started) -> 1 (fully retracted / nothing left to draw). 1 whenever
+  // no retraction is in flight, so callers can just check `< 1`.
+  function laserRetractProgress() {
+    if (!retractTeam) return 1;
+    return Math.min(1, (performance.now() - retractStart) / LASER_RETRACT_MS);
+  }
+  // First sound in the reveal, fired the instant phase flips to 'pending' —
+  // ahead of both the glide whoosh (scheduleGlideLeadIn, GLIDE_LEAD_MS before
+  // launch) and the stones' actual departure (launchSimulation, PRE_SIM_DELAY
+  // later). Called from every path that starts a reveal (local, AI, LAN, replay).
+  // `team`, when given, is whichever team's laser/halo was on screen right
+  // before this reveal began — starts that team's retract animation in sync
+  // with this same cue. Omitted for the replay path, which never shows a
+  // laser during 'replayAim' in the first place (see isAimingPhase).
+  function playLaunchEngine(team) {
+    audio.play('launchEngine', { volume: 0.178 }); // -10dB, then another -5dB, ~-15dB total
+    if (team) { retractTeam = team; retractStart = performance.now(); }
+  }
+  // Called right alongside every setTimeout(launchSimulation, delayMs) below:
+  // pendingVx/Vy for every stone are already final by the time each of those
+  // is scheduled (aim/reveal has fully committed), so the round's leader and
+  // its launch speed are already knowable — this just fires audio.setGlide()
+  // GLIDE_LEAD_MS earlier than physicsStep otherwise would.
+  function scheduleGlideLeadIn(delayMs) {
+    const { entity, spd } = pickGlideLeader('pendingVx', 'pendingVy');
+    if (!entity || spd <= 0) return;
+    glideLeaderId = entity.id;
+    setTimeout(() => {
+      audio.setGlide(entity.id, spd / MAX_SPEED, xToPan(entity.x));
+    }, Math.max(0, delayMs - GLIDE_LEAD_MS));
   }
   function launchSimulation() {
-    entities.A.forEach(g => { g.vx = g.pendingVx || 0; g.vy = g.pendingVy || 0; });
-    entities.B.forEach(g => { g.vx = g.pendingVx || 0; g.vy = g.pendingVy || 0; });
+    entities.A.forEach(g => { g.vx = g.pendingVx || 0; g.vy = g.pendingVy || 0; trackShotSpeed(g); });
+    entities.B.forEach(g => { g.vx = g.pendingVx || 0; g.vy = g.pendingVy || 0; trackShotSpeed(g); });
+    glideLeaderId = pickGlideLeader('vx', 'vy').entity?.id || null;
+    if (!isReplay) recordCurrentManche();
     phase = 'sim';
+  }
+  // Shared by the local-commit path above and the LAN net.onLaunch handler
+  // below — both are "apply this {vx,vy,used}x3 per team" moments, just fed
+  // from a different source (pendingVx/Vy vs. the arbiter's wire payload).
+  function recordCurrentManche() {
+    recorder.recordManche({
+      stonesA: entities.A.map(g => ({ vx: g.vx, vy: g.vy, used: g.used })),
+      stonesB: entities.B.map(g => ({ vx: g.vx, vy: g.vy, used: g.used })),
+      sweepA: sweep.A.committed ? { x: sweep.A.x, y: sweep.A.y, r: sweep.A.r } : null,
+      sweepB: sweep.B.committed ? { x: sweep.B.x, y: sweep.B.y, r: sweep.B.r } : null,
+    });
   }
 
   // Lobby (index.html) already confirms both players are connected before
@@ -625,10 +1304,32 @@ export function startGame(opts = {}) {
   if (net) {
     startOverlay.classList.add('hidden');
     controlsEnabled = true;
-    phase = 'lanAim';
+    beginMatchIntro();
+    chatBar.classList.remove('hidden');
+    // While self-muted, the opponent's updates are simply dropped — they
+    // keep chatting into a void without knowing it (see the design note on
+    // tbtn-chat above). Our own echoed sends (team === myTeam) still apply
+    // normally, since that's how our own message actually gets displayed
+    // (see the optimistic showChatMessage call at send time too).
+    net.onChat(({ team, text }) => {
+      if (chatMuted && team !== myTeam) return;
+      // Only the opponent's messages get the "IN" cue — our own echo of the
+      // send we just made (already cued with "OUT" above) shouldn't chime
+      // twice.
+      if (team !== myTeam) audio.play('chatIn', { volume: 0.251 }); // -12dB
+      showChatMessage(team, text);
+    });
+    // Separate channel from onChat above (see net.sendChatMute) — same
+    // self-mute filter, since it's still "ignore everything from the other
+    // side while I'm off".
+    net.onChatMute(({ team, muted }) => {
+      if (chatMuted && team !== myTeam) return;
+      showChatMessage(team, muted ? 'Chat OFF' : '');
+    });
     net.onLaunch(({ shotsA, shotsB, sweepA, sweepB }) => {
       hideOverlay();
       phase = 'pending';
+      playLaunchEngine(myTeam);
       // Own patch is already active/committed locally from commitSweep() at
       // send time — this overwrites both sides fully from what the arbiter
       // actually relayed (same pattern as the `used` flag below) so both
@@ -638,25 +1339,73 @@ export function startGame(opts = {}) {
       if (sweepA) { sweep.A.x = sweepA.x; sweep.A.y = sweepA.y; sweep.A.r = sweepA.r; sweep.A.used = true; }
       sweep.B.active = !!sweepB; sweep.B.committed = !!sweepB;
       if (sweepB) { sweep.B.x = sweepB.x; sweep.B.y = sweepB.y; sweep.B.r = sweepB.r; sweep.B.used = true; }
+      // Both sides' shots are already fully known here (the arbiter only
+      // sends this once it has both) — same "already committed ahead of the
+      // delayed launch" situation as scheduleGlideLeadIn() handles for the
+      // local/AI/replay paths above, just reading shotsA/shotsB (this
+      // client's own entities.A/B never got real pendingVx/Vy for the
+      // opponent's stones) instead of pendingVx/Vy directly.
+      let leadEntity = null, leadSpd = 0;
+      entities.A.forEach((g, i) => { const s = shotsA[i]; if (!s) return; const spd = Math.hypot(s.vx || 0, s.vy || 0); if (spd > leadSpd) { leadSpd = spd; leadEntity = g; } });
+      entities.B.forEach((g, i) => { const s = shotsB[i]; if (!s) return; const spd = Math.hypot(s.vx || 0, s.vy || 0); if (spd > leadSpd) { leadSpd = spd; leadEntity = g; } });
+      if (leadEntity && leadSpd > 0) {
+        glideLeaderId = leadEntity.id;
+        setTimeout(() => {
+          audio.setGlide(leadEntity.id, leadSpd / MAX_SPEED, xToPan(leadEntity.x));
+        }, Math.max(0, PRE_SIM_DELAY - GLIDE_LEAD_MS));
+      }
       setTimeout(() => {
         // used flag comes from the network too, not just local drags — on this
         // client the opponent's own stones were never dragged locally, so their
         // g.used would otherwise stay permanently false and their halo would
         // never show 'on' during the reveal (see haloMode above).
-        entities.A.forEach((g, i) => { g.vx = shotsA[i]?.vx || 0; g.vy = shotsA[i]?.vy || 0; g.used = !!shotsA[i]?.used; });
-        entities.B.forEach((g, i) => { g.vx = shotsB[i]?.vx || 0; g.vy = shotsB[i]?.vy || 0; g.used = !!shotsB[i]?.used; });
+        entities.A.forEach((g, i) => { g.vx = shotsA[i]?.vx || 0; g.vy = shotsA[i]?.vy || 0; g.used = !!shotsA[i]?.used; trackShotSpeed(g); });
+        entities.B.forEach((g, i) => { g.vx = shotsB[i]?.vx || 0; g.vy = shotsB[i]?.vy || 0; g.used = !!shotsB[i]?.used; trackShotSpeed(g); });
+        glideLeaderId = pickGlideLeader('vx', 'vy').entity?.id || null;
+        recordCurrentManche();
         phase = 'sim';
       }, PRE_SIM_DELAY);
     });
     net.onDisconnect(() => {
+      // Dead-end screen (no button, no way back into aim/reveal) — leaving
+      // ambience running behind it would mean it plays forever with no
+      // in-game state left to ever stop it.
+      audio.stopAmbience();
+      audio.stopAllGlides();
       showOverlay(`<h2>Connexion perdue</h2><p>L'autre joueur s'est déconnecté.</p>`);
+      chatOwnInput.disabled = true; chatOwnSendBtn.disabled = true; chatOwnEmojiBtn.disabled = true;
+      chatInputEnabledCache = false; chatSendEnabledCache = false;
     });
   } else if (aiTeam) {
     // Solo vs IA: no lobby/ready-tap step needed (only one human) — straight
     // into the human's aim phase, same as LAN skips the local ready screen.
     startOverlay.classList.add('hidden');
     controlsEnabled = true;
-    beginAimPhase();
+    beginMatchIntro();
+  } else if (isReplay) {
+    // Click-to-start gate before any auto-play begins — not just UX, this is
+    // the user gesture WebAudio needs to unlock (see audio.js) before any SFX
+    // can play during the replay.
+    startOverlay.classList.add('hidden');
+    controlsEnabled = true;
+    showOverlay(`
+      <h2>Replay prêt</h2>
+      <p>${replayAllPoints.length} point${replayAllPoints.length > 1 ? 's' : ''} à revoir</p>
+      <div class="goal-actions">
+        <button class="bigbtn" id="replayStartBtn">▶ Lancer le replay</button>
+      </div>
+    `);
+    document.getElementById('replayStartBtn').onclick = () => {
+      audio.unlock();
+      audio.play('button');
+      hideOverlay();
+      // Board is shown ready (rack position, first point's rail/segments
+      // built) but paused — beginAimPhase() is safe to call while paused,
+      // maybeAdvanceReplay() no-ops until the user actually presses play in
+      // the bar below (see replayPlayBtn's own handler).
+      showReplayBar();
+      beginAimPhase();
+    };
   }
 
   // ---------- Physics ----------
@@ -692,15 +1441,34 @@ export function startGame(opts = {}) {
     }
   }
   // volume/pitch scale with impact speed so a graze and a full-power slam
-  // don't sound the same; MAX_SPEED is the natural upper bound for spd/impact
+  // don't sound the same; MAX_SPEED is the natural upper bound for spd/impact.
+  // Volume rides a sqrt(t) curve rather than linear t — linear made hard hits
+  // slam up to full volume far too fast/loud, sqrt compresses the top of the
+  // range while still keeping soft/medium hits clearly differentiated.
+  // IMPACT_VOLUME_TRIM: -6dB, then another -5dB, then +10dB — net ~-1dB
+  // under the original unity level.
   const MIN_AUDIBLE_IMPACT = 0.06; // below this, jitter during settling would spam near-silent plays
-  function playWallHit(spd) {
-    if (spd < MIN_AUDIBLE_IMPACT) return;
-    audio.play('hitWall', { volume: Math.min(1, spd / MAX_SPEED) * 0.8, rate: 0.95 + Math.random() * 0.1 });
+  const IMPACT_VOLUME_TRIM = 0.885; // was 0.28, +10dB
+  const GOLF_LAYER_TRIM = 0.2; // -8dB, then another -6dB (-14dB total), testing the golf-layer impact clips
+  // Partial stereo pan from the impact's x position on the board — PAN_MAX
+  // caps it well short of a hard left/right pan (a stone hitting the far
+  // wall shouldn't vanish into one speaker), just enough to give impacts a
+  // sense of where on the ice they actually happened.
+  const PAN_MAX = 0.35;
+  function xToPan(x) {
+    const t = Math.max(0, Math.min(1, (x - FX0) / (FX1 - FX0)));
+    return (t * 2 - 1) * PAN_MAX;
   }
-  function playBodyHit(impact) {
+  function playWallHit(spd, x) {
+    if (spd < MIN_AUDIBLE_IMPACT) return;
+    const t = Math.min(1, spd / MAX_SPEED);
+    audio.play('hitWall', { volume: Math.sqrt(t) * IMPACT_VOLUME_TRIM * 0.8 * GOLF_LAYER_TRIM, rate: 0.9 + t * 0.2 + Math.random() * 0.08, group: 'impact', pan: xToPan(x) });
+  }
+  function playBodyHit(impact, isBallHit, x) {
     if (impact < MIN_AUDIBLE_IMPACT) return;
-    audio.play('hitStone', { volume: Math.min(1, impact / MAX_SPEED), rate: 0.95 + Math.random() * 0.1 });
+    const t = Math.min(1, impact / MAX_SPEED);
+    // same volume/reverb formula as stone-stone — only the clip differs
+    audio.play(isBallHit ? 'hitStoneBall' : 'hitStone', { volume: Math.sqrt(t) * IMPACT_VOLUME_TRIM * GOLF_LAYER_TRIM, rate: 0.9 + t * 0.2 + Math.random() * 0.08, group: 'impact', pan: xToPan(x) });
   }
   // Fraction of a circle's area lying past a straight boundary, given how far the
   // circle's center has crossed that boundary (depth, signed: negative = hasn't
@@ -742,7 +1510,7 @@ export function startGame(opts = {}) {
     e.vx -= (1 + WALL_RESTITUTION) * vDotN * nx;
     e.vy -= (1 + WALL_RESTITUTION) * vDotN * ny;
     triggerSquish(e, nx, ny, spd);
-    playWallHit(spd);
+    playWallHit(spd, e.x);
     return true;
   }
   // Less per-tick speed loss inside a currently-committed sweep patch (see
@@ -758,6 +1526,7 @@ export function startGame(opts = {}) {
     for (const e of list) {
       if (e.falling) {
         // shrinking-into-the-void animation; frozen otherwise, no normal physics while it plays
+        audio.setGlide(e.id || 'ball', 0);
         e.fallScale -= 0.045;
         if (e.fallScale <= 0) { e.fallScale = 0; e.falling = false; e.out = true; }
         continue;
@@ -769,6 +1538,10 @@ export function startGame(opts = {}) {
       const spd0 = Math.hypot(e.vx, e.vy);
       if (spd0 < STOP_THRESHOLD) { e.vx = 0; e.vy = 0; }
       else if (spd0 > MAX_SPEED) { const s = MAX_SPEED / spd0; e.vx *= s; e.vy *= s; }
+      // Only the round's picked leader (see glideLeaderId) drives the single
+      // glide voice — every other stone/the ball stays silent here even while
+      // still sliding, so exactly one whoosh plays per round.
+      if ((e.id || 'ball') === glideLeaderId) audio.setGlide(e.id || 'ball', spd0 / MAX_SPEED, xToPan(e.x));
       if (e.squishPhase === 'in') {
         e.squishT += 1 / SQUISH_IN_FRAMES;
         const t = Math.min(1, e.squishT);
@@ -801,8 +1574,8 @@ export function startGame(opts = {}) {
     }
     for (const e of list) {
       if (e.out || e.falling) continue; // fallen (or falling) into the goal: frozen until next round
-      if (e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, -1, spd); playWallHit(spd); }
-      if (e.y + e.r > FY1) { const spd = Math.abs(e.vy); e.y = FY1 - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); playWallHit(spd); }
+      if (e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, -1, spd); playWallHit(spd, e.x); }
+      if (e.y + e.r > FY1) { const spd = Math.abs(e.vy); e.y = FY1 - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); playWallHit(spd, e.x); }
       // See collideGoalSide above: posts are the corners of the two wall
       // segments flanking the open mouth, so a stone grazing one bounces off
       // the post tip cleanly instead of the mouth/wall branches fighting over
@@ -821,16 +1594,8 @@ export function startGame(opts = {}) {
         if (circleFractionPast(depthPast, e.r) >= lossFraction) {
           e.falling = true; e.fallScale = 1; e.vx = 0; e.vy = 0;
           if (e === entities.ball) goalResult = (FX0 - e.x > e.x - FX1) ? 'goalB' : 'goalA';
+          else audio.play('stoneFall', { volume: 0.178, pan: xToPan(e.x) }); // -10dB, then another -5dB, ~-15dB total
         }
-      }
-      // a knocked-dead stone (STONE_MAX_HITS, see registerStoneHit) plays the
-      // same shrink-into-the-void animation as a goal loss, but wherever it
-      // happens to finish its post-death slide instead of only at the goal
-      // mouth — triggered once its velocity has actually settled to 0 (set
-      // above once its speed drops under STOP_THRESHOLD), not the instant it
-      // dies, so it keeps sliding/colliding like a normal stone until then.
-      if (e.dead && e.vx === 0 && e.vy === 0) {
-        e.falling = true; e.fallScale = 1;
       }
     }
     const activeList = list.filter(e => !e.out && !e.falling);
@@ -841,6 +1606,19 @@ export function startGame(opts = {}) {
     // a real goal
     if (entities.A.every(g => g.out || g.dead)) return 'wipeoutB';
     if (entities.B.every(g => g.out || g.dead)) return 'wipeoutA';
+    // A knocked-dead stone (STONE_MAX_HITS, see registerStoneHit) doesn't play
+    // its shrink-into-the-void animation the instant its own slide stops —
+    // the ball or other stones are often still gliding at that point, and
+    // triggering per-stone would vanish them one at a time as each happened
+    // to settle. Instead hold every dead stone, still visible and
+    // desaturating, until the whole manche has actually come to rest, then
+    // trigger them all together and play the death cue once for the group.
+    const deadPending = activeList.filter(e => e.dead);
+    if (deadPending.length && activeList.every(e => e.vx === 0 && e.vy === 0)) {
+      for (const g of deadPending) { g.falling = true; g.fallScale = 1; }
+      const deadPanX = deadPending.reduce((sum, g) => sum + g.x, 0) / deadPending.length;
+      audio.play('stoneDead', { volume: 0.159, pan: xToPan(deadPanX) }); // -5dB, -6dB, then another -5dB, ~-16dB total
+    }
     return null;
   }
   function resolveCollision(a, b2) {
@@ -878,6 +1656,7 @@ export function startGame(opts = {}) {
     b2.x += nx * overlap; b2.y += ny * overlap;
     const velAlongNormal = rvx * nx + rvy * ny;
     if (velAlongNormal > 0) return;
+    totalCollisions++;
     const invMassA = 1 / a.mass, invMassB = 1 / b2.mass;
     let j = -(1 + BODY_RESTITUTION) * velAlongNormal;
     j /= (invMassA + invMassB);
@@ -890,7 +1669,7 @@ export function startGame(opts = {}) {
     // point (toward the other body), so the "far" side can be anchored in place
     triggerSquish(a, nx, ny, impact);
     triggerSquish(b2, -nx, -ny, impact);
-    playBodyHit(impact);
+    playBodyHit(impact, a === entities.ball || b2 === entities.ball, (a.x + b2.x) / 2);
     // stone-vs-opposing-stone impact: each side takes one hit (see STONE_MAX_HITS)
     if (a.team && b2.team && a.team !== b2.team) {
       registerStoneHit(a);
@@ -904,7 +1683,7 @@ export function startGame(opts = {}) {
     if (g.dead || g._hitCooldown > 0) return;
     g._hitCooldown = HIT_COOLDOWN_FRAMES;
     g.hits = Math.min(STONE_MAX_HITS, g.hits + 1);
-    if (g.hits >= STONE_MAX_HITS) { g.dead = true; g.deadMix = 1; }
+    if (g.hits >= STONE_MAX_HITS) { g.dead = true; g.deadMix = 1; stonesDestroyed++; }
   }
   function allSettled() { return allEntities().every(e => e.vx === 0 && e.vy === 0 && !e.falling); }
 
@@ -922,6 +1701,14 @@ export function startGame(opts = {}) {
   let straightenStart = 0;
   function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
   function beginStraighten() {
+    // This function only ever runs when a manche settles *without* scoring
+    // (see runSimTick) — i.e. "continue to the next manche of the same
+    // point", the manche-level counterpart to onGoal's replayPointAdvancePending
+    // for point boundaries. Bumping the cursor here, right before
+    // beginAimPhase() shows/plays that next manche, is what keeps it
+    // pointing at "the manche actually on screen" for that manche's whole
+    // lifetime instead of jumping ahead the instant it launches.
+    if (isReplay) replayCursor.mancheIdx++;
     if (!STRAIGHTEN_ENABLED) { beginAimPhase(); return; }
     const stones = [...entities.A, ...entities.B].filter(g => !g.out);
     let anyWork = false;
@@ -962,7 +1749,8 @@ export function startGame(opts = {}) {
   // of the stones immediately snapping into their slide-back animation.
   const GOAL_PAUSE_MS = 3000;
   function onGoal(scoringTeam, isWipeout) {
-    audio.play(isWipeout ? 'wipeout' : 'goal');
+    if (isWipeout) audio.play('wipeout');
+    else audio.play('goal', { volume: 0.447 }); // -7dB
     // Same GOAL_PAUSE_MS pause whether the round continues or the match just
     // ended — even a winning goal/wipeout is instantly resolved as a state
     // flip, but the shot's impact is still playing out (ball still sliding
@@ -974,7 +1762,33 @@ export function startGame(opts = {}) {
     // incrementing them here immediately would flash the new score on the
     // board a full GOAL_PAUSE_MS before the result panel shows it.
     setTimeout(() => {
+      if (!isReplay) recorder.finishPoint(scoringTeam, isWipeout);
       if (scoringTeam === 'A') scoreA++; else scoreB++;
+      if (isReplay) {
+        // "End of replay" is "we've played through the last recorded point",
+        // never the live WIN_SCORE check — a single shared point, or a
+        // ticket's handful of highlighted points, won't generally reach it.
+        const isLastPoint = replayCursor.pointIdx >= replayAllPoints.length - 1;
+        if (isLastPoint) {
+          showReplayEndTicket();
+        } else {
+          // Don't advance replayCursor/rebuild the segments yet — the
+          // repositioning animation about to play (beginRoundReset) is still
+          // this point's own scoring moment finishing out, not the next
+          // point starting. The segment bar should keep showing this point's
+          // last segment lit through all of that; only beginAimPhase(),
+          // right as the next point's first manche is about to launch, is
+          // the real "point 2 starts here" moment (see the flag below).
+          replayPointAdvancePending = true;
+          // No goal panel to click through between points in replay mode —
+          // the playback bar already conveys progress; just clear the flag
+          // beginRoundReset() sets so maybeAdvanceRound() isn't stuck waiting
+          // on a dismiss that will never come.
+          beginRoundReset();
+          goalPanelDismissed = true;
+        }
+        return;
+      }
       const isMatchWin = scoreA >= WIN_SCORE || scoreB >= WIN_SCORE;
       if (isMatchWin) {
         showVictory();
@@ -1027,6 +1841,10 @@ export function startGame(opts = {}) {
   }
   function showGoalPanel(scoringTeam) {
     const cls = scoringTeam === 'A' ? 'a' : 'b';
+    // Nature ambience pauses under the +1 panel — restarts the instant the
+    // player dismisses it below, back into the next round.
+    audio.stopAmbience();
+    audio.play('pointOk', { volume: 0.45 }); // -7dB, clip is hot at full level
     showOverlay(resultPanelHtml(scoringTeam, cls, '+1'));
     fillResultIdenticon(scoringTeam);
     // Click-anywhere dismiss (no buttons here) — closing early doesn't rush
@@ -1034,45 +1852,109 @@ export function startGame(opts = {}) {
     // if that hasn't finished yet.
     overlay.addEventListener('click', () => {
       hideOverlay();
+      audio.playAmbience();
       goalPanelDismissed = true;
       maybeAdvanceRound();
     }, { once: true });
   }
-  function showVictory() {
+  // Match-win panel: the shareable "ticket" (see src/ticket.js) doubles as
+  // this panel itself, per design brief — shows both teams' objective result
+  // (score + winner), not a personalized "gagné/perdu" like the old panel, so
+  // LAN opponents can look at the exact same ticket without inconsistency.
+  async function showVictory() {
     phase = 'gameover';
-    audio.play('win');
+    // Same rule as showGoalPanel()'s +1 panel: the winning goal is also a
+    // point panel, just the last one — ambience must not keep humming behind
+    // the ticket screen (it previously only ever got silenced by clicking
+    // "Menu", which explicitly called stopAmbience() itself; "Rejouer" below
+    // resumes it for the fresh match).
+    audio.stopAmbience();
+    audio.stopAllGlides();
+    audio.play('pointOk', { volume: 0.45, onEnded: () => audio.play('ticket2', { volume: 0.45 }) }); // -7dB, point-ding then ticket fanfare, back to back
     const winningTeam = scoreA >= WIN_SCORE ? 'A' : 'B';
-    // LAN: each client only ever sees its own result (gagné/perdu), never both
-    // sides at once. Local pass-and-play has no "own team" to speak of (both
-    // players share the screen) — kept dev-only, see CLAUDE.md — so it just
-    // always features the winner, same as before this panel existed.
-    const featuredTeam = net ? myTeam : winningTeam;
-    const featuredWon = featuredTeam === winningTeam;
-    const cls = featuredTeam === 'A' ? 'a' : 'b';
-    const label = featuredWon ? 'GAGNÉ' : 'PERDU';
-    showOverlay(resultPanelHtml(featuredTeam, cls, label, `
-      <div class="goal-actions">
-        <button class="bigbtn" id="goalReplayBtn">Rejouer</button>
-        <button class="bigbtn" id="goalShareBtn">Partager</button>
-        <button class="bigbtn" id="goalMenuBtn">Menu</button>
+    showOverlay(`<p>Génération du ticket…</p>`);
+    const stats = {
+      durationMs: performance.now() - matchStartTime,
+      goals: scoreA + scoreB,
+      collisions: totalCollisions,
+      bestShotPercent: Math.min(100, (bestShotSpeed / (MAX_DRAG * POWER_SCALE)) * 100),
+      stonesDestroyed,
+    };
+    // Up to MAX_POINTS_ON_TICKET points get a clickable replay QR baked onto
+    // the ticket (see src/ticket.js + src/replay.js) — a full 50-point match
+    // doesn't fit reliably in a QR (see CLAUDE.md), so a long match shows its
+    // most recent points rather than all of them; short matches show every point.
+    const allPoints = recorder.getPoints();
+    const ticketPoints = allPoints.length <= MAX_POINTS_ON_TICKET ? allPoints : allPoints.slice(-MAX_POINTS_ON_TICKET);
+    const ticketCanvas = await renderTicket({
+      scoreA, scoreB,
+      teamA: { address: IDENTICON_ADDRESS.A },
+      teamB: { address: IDENTICON_ADDRESS.B },
+      winner: winningTeam,
+      stats,
+      points: ticketPoints,
+    });
+    // Rejouer/Menu (or a LAN disconnect) may have already moved the overlay on
+    // by the time this async render resolves — don't stomp on it.
+    if (phase !== 'gameover') return;
+    showOverlay(`
+      <div class="ticket-wrap" id="ticketWrap">
+        <img class="ticket-img" id="ticketImg" alt="Ticket de match Nim-Curl">
       </div>
-    `));
-    fillResultIdenticon(featuredTeam);
+      <div class="goal-actions">
+        <button class="bigbtn" id="goalReplayBtn">▶ Rejouer</button>
+        <button class="bigbtn" id="goalShareBtn">📤 Partager</button>
+        <button class="bigbtn" id="goalMenuBtn">🚪 Menu</button>
+      </div>
+    `);
+    document.getElementById('ticketImg').src = ticketCanvas.toDataURL('image/png');
+    // Each point QR baked onto the ticket is also directly clickable on the
+    // same device (no second phone needed to scan it) — see CLAUDE.md replay
+    // section. Covers the whole tile column (QR + label), not just the QR
+    // pixels, for a comfortable hit target.
+    const ticketWrap = document.getElementById('ticketWrap');
+    ticketPoints.forEach((point, i) => {
+      const rect = pointTileRect(i);
+      const a = document.createElement('a');
+      a.className = 'ticket-point-hit';
+      a.href = buildReplayUrl(point);
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.style.left = `${(rect.tileX / TICKET_W) * 100}%`;
+      a.style.width = `${(rect.tileW / TICKET_W) * 100}%`;
+      a.style.top = `${(POINTS_SECTION_Y / TICKET_H) * 100}%`;
+      a.style.height = `${(POINTS_SECTION_H / TICKET_H) * 100}%`;
+      ticketWrap.appendChild(a);
+    });
     document.getElementById('goalReplayBtn').onclick = () => {
+      audio.play('button');
       scoreA = 0; scoreB = 0; round = 1;
       sweep.A.used = false; sweep.B.used = false;
+      matchStartTime = performance.now();
+      totalCollisions = 0; bestShotSpeed = 0; stonesDestroyed = 0;
+      recorder.reset();
       resetPositions(); beginAimPhase(); hideOverlay();
+      // showVictory() above stopped it for the ticket screen — resume for
+      // this fresh match (no matchIntro replay here, so no onEnded to do it).
+      audio.playAmbience();
     };
-    document.getElementById('goalMenuBtn').onclick = () => location.reload();
+    document.getElementById('goalMenuBtn').onclick = () => { audio.play('button'); audio.stopAmbience(); location.reload(); };
     document.getElementById('goalShareBtn').onclick = async () => {
-      // Content/mechanism kept intentionally simple for now (native share
-      // sheet, clipboard fallback) — to be reworked once there's more to
-      // share than just the final score.
-      const resultText = `J'ai ${featuredWon ? 'gagné' : 'perdu'} sur Nim-Curl ! Score final : ${scoreA}–${scoreB}`;
+      audio.play('button');
       const shareBtn = document.getElementById('goalShareBtn');
-      if (navigator.share) {
-        try { await navigator.share({ title: 'Nim-Curl', text: resultText, url: location.href }); }
+      const resultText = `Score final sur Nim-Curl : ${scoreA}–${scoreB}`;
+      const blob = await new Promise((resolve) => ticketCanvas.toBlob(resolve, 'image/png'));
+      const file = blob && new File([blob], 'nimcurl-ticket.png', { type: 'image/png' });
+      if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: 'Nim-Curl', text: resultText }); }
         catch { /* user cancelled the native share sheet — nothing to do */ }
+      } else if (blob) {
+        // Desktop browsers mostly can't share files yet — download the ticket instead.
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'nimcurl-ticket.png';
+        a.click();
+        URL.revokeObjectURL(url);
       } else if (navigator.clipboard) {
         try {
           await navigator.clipboard.writeText(`${resultText} ${location.href}`);
@@ -1082,6 +1964,53 @@ export function startGame(opts = {}) {
         } catch { /* e.g. document lost focus right as this fired — nothing to do */ }
       }
     };
+  }
+
+  // Replay-variant end screen — same ticket visual as a live match's victory
+  // panel, but no "Partager"/save action (this is already a replay of a
+  // saved match, see CLAUDE.md replay vocabulary) and "Revoir" restarts the
+  // same assembled points from the top instead of a brand-new match.
+  async function showReplayEndTicket() {
+    phase = 'gameover';
+    audio.play('win');
+    hideReplayBar();
+    const winningTeam = scoreA >= scoreB ? 'A' : 'B';
+    showOverlay(`<p>Chargement…</p>`);
+    const stats = {
+      durationMs: performance.now() - matchStartTime,
+      goals: scoreA + scoreB,
+      collisions: totalCollisions,
+      bestShotPercent: Math.min(100, (bestShotSpeed / (MAX_DRAG * POWER_SCALE)) * 100),
+      stonesDestroyed,
+    };
+    const ticketCanvas = await renderTicket({
+      scoreA, scoreB,
+      teamA: { address: IDENTICON_ADDRESS.A },
+      teamB: { address: IDENTICON_ADDRESS.B },
+      winner: winningTeam,
+      stats,
+      points: [], // a replay of a replay doesn't offer further point QRs
+    });
+    if (phase !== 'gameover') return;
+    showOverlay(`
+      <img class="ticket-img" id="ticketImg" alt="Ticket de replay">
+      <div class="goal-actions">
+        <button class="bigbtn" id="goalReplayAgainBtn">🔁 Revoir</button>
+        <button class="bigbtn" id="goalMenuBtn">🚪 Menu</button>
+      </div>
+    `);
+    document.getElementById('ticketImg').src = ticketCanvas.toDataURL('image/png');
+    document.getElementById('goalReplayAgainBtn').onclick = () => {
+      audio.play('button');
+      scoreA = 0; scoreB = 0;
+      replayCursor = { pointIdx: 0, mancheIdx: 0 };
+      replayPlaying = true;
+      sweep.A.used = false; sweep.B.used = false;
+      resetPositions(); hideOverlay(); showReplayBar(); beginAimPhase();
+    };
+    // Not a plain reload() — see replayExitBtn's own comment above: a
+    // still-present ?replay= param would just relaunch this same replay.
+    document.getElementById('goalMenuBtn').onclick = () => { audio.play('button'); audio.stopAmbience(); location.href = location.pathname; };
   }
 
   // No more "ready" gate/button between rounds — the board resets itself:
@@ -1177,6 +2106,69 @@ export function startGame(opts = {}) {
       // phase/turn timer should only start once that's been dismissed too.
       roundResetAnimDone = true;
       maybeAdvanceRound();
+    }
+  }
+
+  // ---------- Match-start intro: "match start" SFX + stones sliding in from
+  // their own goal ----------
+  // Only for a live match's very first entry into aiming — not each round's
+  // own beginRoundReset (a scored point resets mid-match, it doesn't restart
+  // it) and not replay playback. Both teams' 3 stones start stacked right in
+  // front of their own goal (see matchIntroHuddlePos above), then slide out
+  // to their real rack spot — same plain position lerp updateRoundReset()
+  // uses for a stone that's still on the ice (no grow/fade, these stones
+  // were never "dead").
+  function beginMatchIntro() {
+    matchIntroAnimDone = false;
+    for (const g of [...entities.A, ...entities.B]) {
+      const idx = parseInt(g.id.slice(1), 10) || 0;
+      const target = startPositions[g.team][idx];
+      const from = matchIntroHuddlePos(g.team, idx);
+      g._resetFromX = from.x; g._resetFromY = from.y;
+      g._resetToX = target.x; g._resetToY = target.y;
+      g.x = g._resetFromX; g.y = g._resetFromY;
+    }
+    matchIntroStart = performance.now();
+    phase = 'matchIntro';
+    audio.playAmbience(); // starts together with matchStart below, fades in under it
+    audio.play('matchStart', {
+      volume: 0.562, // was 1 (default), -5dB
+      onEnded: () => {
+        if (phase === 'matchIntro') beginAimPhase(true);
+      },
+    });
+    // Safety net mirroring beginRoundReset's own: updateMatchIntro() only
+    // ever runs from inside loop()'s own requestAnimationFrame, which a
+    // backgrounded/hidden tab can starve of frames for the whole animation —
+    // without this, a tab that comes back mid-intro (audio keeps playing on
+    // its own clock regardless, so beginAimPhase() can already have fired by
+    // then) would leave every stone stuck at its stacked starting spot. This
+    // normally fires *after* the tween has already finished on its own
+    // (phase stays 'matchIntro' until the longer matchStart clip ends, not
+    // just until the slide is done) — matchIntroAnimDone below is what makes
+    // that redundant call a no-op instead of corrupting positions.
+    setTimeout(() => { if (phase === 'matchIntro') updateMatchIntro(); }, MATCH_INTRO_MOVE_MS + 150);
+  }
+  function updateMatchIntro() {
+    // Without this guard, a call after the tween already finalized (its
+    // fields below are cleared to undefined right when that happens) would
+    // compute undefined arithmetic and send every stone to NaN,NaN — silently
+    // invisible, since a NaN-centered arc just doesn't draw. See beginMatchIntro's
+    // safety-net setTimeout for the call site that actually hits this in the
+    // normal (non-backgrounded-tab) case.
+    if (matchIntroAnimDone) return;
+    const elapsed = performance.now() - matchIntroStart;
+    const moveT = easeInOutQuad(Math.min(1, elapsed / MATCH_INTRO_MOVE_MS));
+    for (const g of [...entities.A, ...entities.B]) {
+      g.x = g._resetFromX + (g._resetToX - g._resetFromX) * moveT;
+      g.y = g._resetFromY + (g._resetToY - g._resetFromY) * moveT;
+    }
+    if (moveT >= 1) {
+      for (const g of [...entities.A, ...entities.B]) {
+        g.x = g._resetToX; g.y = g._resetToY;
+        g._resetFromX = g._resetFromY = g._resetToX = g._resetToY = undefined;
+      }
+      matchIntroAnimDone = true;
     }
   }
 
@@ -1330,6 +2322,7 @@ export function startGame(opts = {}) {
     void sweepBtnCap.offsetWidth; // restart the animation if pressed again mid-tween
     sweepBtnCap.classList.add('pressed');
     audio.play('button');
+    if (sw.active) audio.play('sweepAppear', { volume: 0.251 }); // -12dB, right after button.wav
   });
   // Called every rendered frame (see render()) rather than only from the
   // click handler above — the aiming team itself changes on its own as the
@@ -1453,10 +2446,37 @@ export function startGame(opts = {}) {
   const HALO_RGB = { A: '94,203,245', B: '255,201,77' };
   const HALO_PULSE_PERIOD = 2; // seconds
   function haloMode(g) {
-    if (g.falling || g.out || !g.used) return 'off';
-    if (phase === 'pending' || phase === 'sim') return 'on';
-    if (isAimingPhase(phase) || phase === 'lanWait') return 'pulse';
-    return 'off';
+    if (g.falling || g.out) return 'off';
+    // reveal: halos cut entirely once the sim actually starts moving things —
+    // the LEDs (fully independent, see below) carry the damage/"alive" read
+    // from there. 'pending' itself is handled below: the just-committed
+    // team's halo keeps fading out through the laser's own retract window
+    // instead of popping off the instant PLAY is pressed.
+    if (phase === 'pending') {
+      if (!g.used || g.team !== retractTeam) return 'off';
+      if (aiTeam && g.team === aiTeam) return 'off';
+      return laserRetractProgress() < 1 ? 'retract' : 'off';
+    }
+    // Whitelist, not a blacklist: only the phases where a validated shot's
+    // halo is actually meant to show. Everything else (sim, goal,
+    // roundReset, gameover, matchIntro, straighten, start...) must be off
+    // even though g.used can still read true there — it isn't cleared until
+    // beginRoundReset() runs, which for a scored point only happens AFTER
+    // the GOAL_PAUSE_MS celebration pause (see onGoal), so without this
+    // whitelist the scoring team's halos stayed lit fixed through that
+    // entire pause instead of cutting the instant the reveal ended.
+    if (!isAimingPhase(phase) && phase !== 'lanWait' && phase !== 'replayAim') return 'off';
+    if (!g.used) return 'off';
+    // vs-IA: the AI's shots are precomputed silently in one shot at the start
+    // of the round (see prepareAiShots) — g.used flips true for all 3 of its
+    // stones instantly, with no drag the player ever sees, unlike a human's
+    // own turn. Showing that halo would just leak "the AI already decided"
+    // from frame one, so its stones never get one.
+    if (aiTeam && g.team === aiTeam) return 'off';
+    // pulses only while this exact stone is the one currently being dragged;
+    // once released with a valid shot it snaps to steady 'on' right away,
+    // regardless of whose turn it is or how long until the round launches.
+    return (drag && drag.entity === g) ? 'pulse' : 'on';
   }
   // Shared 0..1 breathing curve for anything that pulses in sync with a stone's
   // own aiming turn (the halo below, and the stone's own LED strips) — same
@@ -1480,7 +2500,9 @@ export function startGame(opts = {}) {
     // remap the pulse's 0..1 breathing to a 20%-80% range instead of fading
     // fully to black or full brightness — only the halo's own brightness, not
     // pulseStrength() itself (shared with the stone's LED strips, which should
-    // keep their own full 0..1 breathing)
+    // keep their own full 0..1 breathing). 'retract' stays at full strength,
+    // same as 'on' — haloMode() below is what cuts it to 'off' outright the
+    // instant the laser finishes retracting, no fade of its own.
     const strength = mode === 'pulse' ? 0.2 + 0.6 * pulseStrength(g) : 1;
     ctx.save();
     // clip to the ice rect so the halo tucks under the wood frame at wall
@@ -1533,12 +2555,21 @@ export function startGame(opts = {}) {
   const RING_OUTER_FRAC = 0.445;
   const RING_QUADRANT_ANGLES = [-Math.PI / 2, 0, Math.PI / 2, Math.PI]; // top, right, bottom, left
   const RING_QUADRANT_HALF_SPAN = Math.PI / 4;
-  const LED_PULSE_PERIOD_MS = 1400;  // full breathe cycle, shared clock so a stone's live LEDs pulse in sync
-  const LED_PULSE_FLOOR = 0.35;      // never dims all the way to "off" gray, unlike a knocked-out LED
-  function ledPulseStrength() {
-    const cycle = (performance.now() % LED_PULSE_PERIOD_MS) / LED_PULSE_PERIOD_MS; // 0..1
-    const wave = (1 - Math.cos(cycle * Math.PI * 2)) / 2; // smooth 0 -> 1 -> 0
-    return LED_PULSE_FLOOR + (1 - LED_PULSE_FLOOR) * wave;
+  // LEDs are steady/fixed for the whole match (strength 1, no breathing) —
+  // the ONLY LED animation is the "last life" warning pulse below, right
+  // before the stone's final hit. A steady baseline is what makes that pulse
+  // read as a distinct signal instead of blending into constant motion.
+  //
+  // "last life" warning pulse: at g.hits === STONE_MAX_HITS - 1 the stone has
+  // exactly one hit left before it dies, and by construction only its last
+  // LED is still alive (stoneLedsOut(g) is already 3/4) — so no need to pick
+  // out "the last one" explicitly, this just overrides the steady strength=1
+  // for that stone's one alive LED. Full 2s on/off cycle, smooth cosine fade
+  // 0 -> 1 -> 0 (not a hard blink).
+  const LAST_LED_PULSE_PERIOD_MS = 2000;
+  function lastLedPulseStrength() {
+    const cycle = (performance.now() % LAST_LED_PULSE_PERIOD_MS) / LAST_LED_PULSE_PERIOD_MS; // 0..1
+    return (1 - Math.cos(cycle * Math.PI * 2)) / 2; // smooth 0 -> 1 -> 0
   }
   // how many of the 4 LEDs/quadrants (0..4) are knocked out so far — each
   // takes STONE_HITS_PER_LED hits, top first then clockwise.
@@ -1571,7 +2602,14 @@ export function startGame(opts = {}) {
   // sprite's on-screen diameter — matches drawImage(sprite, -g.r, -g.r, d, d).
   function drawStoneLeds(g, d) {
     const rgb = LED_LIT_RGB[g.team];
-    const pulse = ledPulseStrength();
+    // last-life warning takes over only during aim/reveal (programming a shot
+    // or watching shots resolve) — outside of active play (start/goal/gameover/
+    // roundReset overlays) it's not worth drawing attention to. It stops on
+    // its own the instant a final hit kills the stone: g.hits then no longer
+    // equals STONE_MAX_HITS - 1, and by then no LED is alive anyway.
+    const critical = g.hits === STONE_MAX_HITS - 1 &&
+      (isAimingPhase(phase) || phase === 'lanWait' || phase === 'pending' || phase === 'sim');
+    const pulse = critical ? lastLedPulseStrength() : 1;
     const ledsOut = stoneLedsOut(g);
     LED_RECTS.forEach((led, i) => {
       const alive = i >= ledsOut;
@@ -1732,7 +2770,12 @@ export function startGame(opts = {}) {
   // decay gets drawn, same visual intent as before.
   const LASER_LENGTH_FACTOR = 1.98;
 
-  function drawLaserTrail(points, team, totalLen) {
+  // strength: 1 = fixed/full (the default — a stone's already-committed aim,
+  // shown from its held pendingVx/Vy once the drag is released), or a 0..1
+  // breathing value from pulseStrength(g) while that exact stone is still
+  // being actively dragged — same on/off split as the stone's own halo
+  // (haloMode), reusing its pulse curve so the two read as one thing.
+  function drawLaserTrail(points, team, totalLen, strength = 1) {
     if (points.length < 2 || totalLen < 1) return;
     const rgb = HALO_RGB[team];
     ctx.save();
@@ -1740,10 +2783,23 @@ export function startGame(opts = {}) {
     ctx.lineCap = 'round';
     let cum = 0;
     for (let i = 0; i < points.length - 1; i++) {
-      const p0 = points[i], p1 = points[i + 1];
-      const segLen = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-      const a0 = Math.max(0, 1 - cum / totalLen);
-      const a1 = Math.max(0, 1 - (cum + segLen) / totalLen);
+      if (cum >= totalLen) break; // already fully faded — nothing further is visible
+      const p0 = points[i], p1raw = points[i + 1];
+      const segLen = Math.hypot(p1raw.x - p0.x, p1raw.y - p0.y);
+      // A body simulated well past its own visual reach (see SIM_REACH_FACTOR
+      // vs LASER_LENGTH_FACTOR) can end in one long final segment far longer
+      // than totalLen — stretching the gradient across all of it (the old
+      // behavior) spread the fade over the full geometric segment instead of
+      // over totalLen, making the drawn line look much longer than intended.
+      // Clamp the drawn endpoint to exactly where alpha reaches 0 instead.
+      const remaining = totalLen - cum;
+      const p1 = segLen > remaining ? {
+        x: p0.x + (p1raw.x - p0.x) * (remaining / segLen),
+        y: p0.y + (p1raw.y - p0.y) * (remaining / segLen),
+      } : p1raw;
+      const drawSegLen = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+      const a0 = Math.max(0, 1 - cum / totalLen) * strength;
+      const a1 = Math.max(0, 1 - (cum + drawSegLen) / totalLen) * strength;
       const grad = ctx.createLinearGradient(p0.x, p0.y, p1.x, p1.y);
       grad.addColorStop(0, `rgba(255,255,255,${(0.8 * a0).toFixed(3)})`);
       grad.addColorStop(1, `rgba(${rgb},${(0.65 * a1).toFixed(3)})`);
@@ -1771,10 +2827,20 @@ export function startGame(opts = {}) {
     ctx.lineCap = 'round';
     let cum = 0;
     for (let i = 0; i < points.length - 1; i++) {
-      const p0 = points[i], p1 = points[i + 1];
-      const segLen = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+      if (cum >= totalLen) break; // already fully faded — nothing further is visible
+      const p0 = points[i], p1raw = points[i + 1];
+      const segLen = Math.hypot(p1raw.x - p0.x, p1raw.y - p0.y);
+      // see drawLaserTrail above — clamp the drawn endpoint to exactly where
+      // alpha reaches 0 instead of stretching the gradient across a final
+      // segment that runs well past totalLen.
+      const remaining = totalLen - cum;
+      const p1 = segLen > remaining ? {
+        x: p0.x + (p1raw.x - p0.x) * (remaining / segLen),
+        y: p0.y + (p1raw.y - p0.y) * (remaining / segLen),
+      } : p1raw;
+      const drawSegLen = Math.hypot(p1.x - p0.x, p1.y - p0.y);
       const a0 = Math.max(0, 1 - cum / totalLen);
-      const a1 = Math.max(0, 1 - (cum + segLen) / totalLen);
+      const a1 = Math.max(0, 1 - (cum + drawSegLen) / totalLen);
       const grad = ctx.createLinearGradient(p0.x, p0.y, p1.x, p1.y);
       grad.addColorStop(0, `rgba(255,255,255,${(0.95 * a0).toFixed(3)})`);
       grad.addColorStop(1, `rgba(${BALL_LASER_RED.join(',')},${(0.9 * a1).toFixed(3)})`);
@@ -1867,25 +2933,107 @@ export function startGame(opts = {}) {
     if (pullLen < 1) return null;
     return { ux: (dx * scale) / pullLen, uy: (dy * scale) / pullLen, len: pullLen * LASER_LENGTH_FACTOR };
   }
-  // Safety cap on ticks, well above the ~350 a full-power stone needs to
-  // decay from MAX_SPEED to STOP_THRESHOLD under FRICTION — real cascades
-  // stop long before this from their own moving/wall/blocker conditions; this
-  // just bounds the pathological worst case (e.g. a body re-launched by a
-  // late collision needing its own ~350-tick tail on top of however long the
-  // frame already ran).
-  const GHOST_MAX_TICKS = 600;
+  // Safety cap on ticks. A full-power stone now genuinely runs to its true
+  // friction stop (~615 ticks, since SIM_REACH_FACTOR no longer cuts it off
+  // early) rather than the ~350 it used to take against the old, tighter
+  // budget; real cascades stop long before this cap from their own
+  // moving/wall/blocker conditions regardless — this just bounds the
+  // pathological worst case (e.g. a body re-launched by a late collision
+  // needing its own ~615-tick tail on top of however long the frame already
+  // ran, plus room for the sweep boost's extended reach).
+  const GHOST_MAX_TICKS = 900;
   // (Re)assigns this body's onward reach budget from whatever speed it has
   // RIGHT NOW — used both at creation (from the aimed pull strength) and
   // after every collision (from the resulting post-impulse speed), which is
   // what makes a struck body's laser length track the energy it received
   // rather than some fraction handed down from the body that hit it.
+  // Safety margin for the SIMULATION's own reach — deliberately separate
+  // from LASER_LENGTH_FACTOR, which still governs only the drawn/visual
+  // fade length (totalLen) below, unchanged. b.budget here needs to sit
+  // comfortably above the true friction-decay-to-STOP_THRESHOLD distance
+  // (speed/(1-FRICTION), largest for stones) so a body's physics never
+  // freezes early — a body that froze early kept acting as a phantom
+  // stationary obstacle for OTHER bodies checked against it on later ticks.
+  // Confirmed by hand: a fast stone whose contact point sat just past its
+  // old (LASER_LENGTH_FACTOR-scaled) budget froze there instead of gliding
+  // on past it like the real stone does — then a ball arriving at that same
+  // spot much later (after a real prior hit) registered a spurious
+  // "collision" with the frozen ghost, predicting a contact that could
+  // never happen in the real sim. 4.5 clears the worst case (a max-speed
+  // stone) with margin; the sweep boost's own top-up (see stepGhostBodies)
+  // still stacks on top of this for a boosted body outrunning even that.
+  const SIM_REACH_FACTOR = 4.5;
+  const BALL_LASER_LENGTH_FACTOR = LASER_LENGTH_FACTOR; // same length as the primary for now — tune separately if needed
+  // b.originTotalLen/b.originUsed track ONE stone's own reach across however
+  // many legs it takes, from whenever it was last set moving from a dead
+  // stop — NOT reset by every collision, only by a fresh launch. Without
+  // this, a stone that grazes something early in its path (barely slowing
+  // down) got a whole FRESH totalLen for the leg after, stacking on top of
+  // distance it had already spent — its own total visible reach ended up
+  // longer than an identical, uninterrupted shot would ever show, just for
+  // having clipped something. A graze should redirect the reach a body
+  // already has left, not hand it a second helping. Only stones get this —
+  // the ball (kind==='ball') always gets a fresh budget from whatever speed
+  // it currently has, matching "length proportional to the energy just
+  // received" rather than rationing it against an earlier shot's pull.
+  // Geometric length of a leg's own recorded points, optionally extended by a
+  // final straight segment out to (extraX, extraY) — the body's actual
+  // current position, which isn't pushed onto the leg's points yet at the
+  // point this gets called (see setGhostBudget below, called before
+  // startNewLeg). This is exactly the path drawLaserTrail/drawBallLaserTrail
+  // will fade along once that final point IS pushed, so measuring against
+  // this (rather than the incrementally-tracked b.traveled) can't drift out
+  // of sync with any position correction — wall/post "kiss the rail" snaps,
+  // overlap separation on a body-body hit, whatever else nudges b.x/b.y
+  // outside the plain per-tick move — without needing to separately teach
+  // every such correction to also bump b.traveled by the right amount.
+  function legPathLen(leg, extraX, extraY) {
+    const pts = leg.points;
+    let d = 0;
+    for (let i = 0; i < pts.length - 1; i++) d += Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+    if (extraX !== undefined) {
+      const last = pts[pts.length - 1];
+      d += Math.hypot(extraX - last.x, extraY - last.y);
+    }
+    return d;
+  }
   function setGhostBudget(b) {
     const speed = Math.hypot(b.vx, b.vy);
+    const wasMoving = b.moving;
+    // If this contact happens past the point where the leg ENDING right
+    // now had already faded to invisible (measured along its own actual
+    // drawn geometry, see legPathLen — not the incrementally-tracked
+    // b.traveled, which can drift from it), drawing anything at all for the
+    // new leg would show it floating in the dead space between where the
+    // old leg's fade actually stopped and where this contact really
+    // occurred — the new leg starts exactly at the contact point, not at
+    // the old leg's visible tip, so any nonzero length here reads as a
+    // disconnected fragment past a gap, not a continuation. There's no
+    // length that avoids that once a gap exists, so any leg starting past
+    // one is fully suppressed rather than merely shrunk.
+    const gapped = wasMoving && legPathLen(currentLeg(b), b.x, b.y) > b.totalLen;
     b.moving = speed > 1e-4;
     if (b.moving) {
-      b.budget = (speed / POWER_SCALE) * LASER_LENGTH_FACTOR;
+      const pullLenEquiv = speed / POWER_SCALE;
+      b.budget = pullLenEquiv * SIM_REACH_FACTOR;
+      const freshTotalLen = pullLenEquiv * (b.kind === 'ball' ? BALL_LASER_LENGTH_FACTOR : LASER_LENGTH_FACTOR);
+      if (gapped) {
+        b.totalLen = 0;
+      } else if (wasMoving && b.kind !== 'ball') {
+        // continuing, not a fresh launch — cap to whatever's left of THIS
+        // stone's own origin reach.
+        b.totalLen = Math.max(0, Math.min(freshTotalLen, b.originTotalLen - b.originUsed));
+      } else {
+        if (!wasMoving) {
+          // fresh launch from a dead stop (this body's own aimed shot, or
+          // the moment it's first struck while at rest) — new origin,
+          // matching "length proportional to the energy just received".
+          b.originTotalLen = freshTotalLen;
+          b.originUsed = 0;
+        }
+        b.totalLen = freshTotalLen;
+      }
       b.traveled = 0;
-      b.totalLen = b.budget;
     }
   }
   function makeGhostBody(ref, kind, r, mass) {
@@ -1901,6 +3049,7 @@ export function startGame(opts = {}) {
     const body = {
       ref, kind, r, mass, x: ref.x, y: ref.y, vx, vy,
       moving: false, budget: 0, traveled: 0, totalLen: 0,
+      originTotalLen: 0, originUsed: 0,
       // Split into "legs" — one per budget assignment — rather than one flat
       // points array: drawLaserTrail fades a segment based on cumulative
       // distance from its OWN start divided by ONE totalLen, so feeding it a
@@ -1956,6 +3105,14 @@ export function startGame(opts = {}) {
     const overlap = (minDist - dist) / 2;
     a.x -= nx * overlap; a.y -= ny * overlap;
     b2.x += nx * overlap; b2.y += ny * overlap;
+    // This push-apart moves each body past whatever per-tick movement already
+    // counted toward traveled this frame — without adding it here, the gap
+    // check below (traveled vs. totalLen, in setGhostBudget) compares against
+    // a position that's stale by exactly this much, so it can wave through a
+    // leg that starts past where the outgoing leg's own points array (which
+    // DOES include this correction, via startNewLeg below) actually stops
+    // rendering: a real gap the check was supposed to catch.
+    a.traveled += overlap; b2.traveled += overlap;
     const velAlongNormal = rvx * nx + rvy * ny;
     if (velAlongNormal > 0) return false;
     let j = -(1 + BODY_RESTITUTION) * velAlongNormal;
@@ -1964,6 +3121,15 @@ export function startGame(opts = {}) {
     const impX = j * nx, impY = j * ny;
     a.vx -= impX / a.mass; a.vy -= impY / a.mass;
     b2.vx += impX / b2.mass; b2.vy += impY / b2.mass;
+    // If either side had already traveled past its OWN visible length
+    // (a.traveled/a.totalLen — read here, before setGhostBudget resets them)
+    // by the time they actually meet, this contact happens partly or wholly
+    // within the simulation's "invisible" tail (SIM_REACH_FACTOR reaches
+    // further than LASER_LENGTH_FACTOR ever draws). setGhostBudget carries
+    // that overshoot forward as debt subtracted from the next leg's
+    // totalLen, so the new leg shrinks continuously toward zero as the
+    // contact point drifts deeper into the invisible tail, instead of a
+    // hard on/off cutoff at the boundary.
     setGhostBudget(a); setGhostBudget(b2);
     startNewLeg(a); startNewLeg(b2);
     return true;
@@ -1985,6 +3151,7 @@ export function startGame(opts = {}) {
     const vDotN = b.vx * nx + b.vy * ny;
     const overlap = b.r - dist;
     b.x += nx * overlap; b.y += ny * overlap;
+    b.traveled += overlap; // same untracked-correction gap risk as ghostResolveCollision above
     b.vx -= (1 + WALL_RESTITUTION) * vDotN * nx;
     b.vy -= (1 + WALL_RESTITUTION) * vDotN * ny;
     return { x: b.x - nx * b.r, y: b.y - ny * b.r };
@@ -2007,22 +3174,33 @@ export function startGame(opts = {}) {
       const moveDist = Math.hypot(b.vx, b.vy);
       b.x += b.vx; b.y += b.vy;
       b.traveled += moveDist;
+      b.originUsed += moveDist; // cumulative across this body's own legs — see setGhostBudget
       let fr = b.kind === 'ball' ? BALL_FRICTION : FRICTION;
       if (boostZone && Math.hypot(b.x - boostZone.x, b.y - boostZone.y) <= boostZone.r) {
         fr = withSweepBoost(fr);
-        // The stopping condition below is budget-capped, not purely
-        // friction-decay-driven (a straight, unobstructed shot almost always
-        // hits `traveled >= budget` long before its speed would naturally
-        // decay under STOP_THRESHOLD) — so just slowing the decay here
-        // barely moves where the laser stops. Topping up THIS leg's budget
-        // by the same fraction the boost trims off the real friction
-        // deficit (see withSweepBoost) makes the predicted reach visibly
-        // stretch through the patch instead of only showing up later via a
-        // faster post-collision leg. No effect whenever no zone is active,
-        // or for any body whose path never enters one (boostZone is only
-        // ever the aiming team's own not-yet-committed patch — see
-        // runAimCascade) — doesn't touch anything's tuned reach otherwise.
-        b.budget += moveDist * SWEEP_FRICTION_BONUS;
+        // b.budget (the SIMULATION's own reach, see setGhostBudget) is now
+        // deliberately generous and rarely the binding stop condition, so
+        // topping it up here has little effect on its own — b.totalLen
+        // (the DRAWN/visual fade length) is what actually needs the same
+        // top-up, so the predicted reach visibly stretches through the
+        // patch instead of only showing up later via a faster post-collision
+        // leg. Both get bumped together so a boosted body's true stop point
+        // (wherever that ends up) and what's drawn of it stay consistent.
+        // No effect whenever no zone is active, or for any body whose path
+        // never enters one (boostZone is only ever the aiming team's own
+        // not-yet-committed patch — see runAimCascade) — doesn't touch
+        // anything's tuned reach otherwise.
+        const bonus = moveDist * SWEEP_FRICTION_BONUS;
+        b.budget += bonus;
+        b.totalLen += bonus;
+        b.originTotalLen += bonus; // keep this body's own origin ceiling (see setGhostBudget) from clawing the bonus back on a later continuation leg
+        // currentLeg(b).totalLen was copied from b.totalLen once, when this
+        // leg started — bumping b.totalLen alone never reached the drawn
+        // leg unless a later collision happened to start a fresh one (which
+        // re-copies the by-then-larger value). A single-segment shot with no
+        // collision at all never got that re-copy, so the sweep boost was
+        // invisible on exactly the plain, uninterrupted primary laser.
+        currentLeg(b).totalLen = b.totalLen;
       }
       b.vx *= fr; b.vy *= fr;
       const spd = Math.hypot(b.vx, b.vy);
@@ -2124,12 +3302,46 @@ export function startGame(opts = {}) {
     }
     return bodies;
   }
+  // During the post-commit retract window, eats each body's own legs back
+  // from the far tip toward the stone: walks legs in stone-to-tip order,
+  // handing each one min(its own length, whatever budget is left), so the
+  // budget always runs out on the FARTHEST leg first and the leg touching
+  // the stone is the last to shrink — reading as the whole trail reeling
+  // back into its stone rather than each leg fading in place independently.
+  function applyLaserRetract(body) {
+    const totalPathLen = body.legs.reduce((sum, leg) => sum + leg.totalLen, 0);
+    let remaining = totalPathLen * (1 - laserRetractProgress());
+    for (const leg of body.legs) {
+      const original = leg.totalLen;
+      leg.totalLen = Math.max(0, Math.min(original, remaining));
+      remaining -= original;
+    }
+  }
   function renderAimCascade(team) {
     const bodies = runAimCascade(team);
-    for (const b of bodies) for (const leg of b.legs) {
-      if (leg.totalLen < 1 || leg.points.length < 2) continue;
-      if (b.kind === 'ball') drawBallLaserTrail(leg.points, leg.totalLen);
-      else drawLaserTrail(leg.points, team, leg.totalLen);
+    const retracting = phase === 'pending';
+    for (const b of bodies) {
+      // The ball's own trail isn't a programmed shot — it's just the
+      // predicted path of a body the aiming team's stones might strike, so
+      // it has nothing of its own to "retract into". Rather than animate it
+      // shrinking like the stones' lasers, it simply cuts the instant PLAY
+      // is pressed, same as every laser did before the retract animation.
+      if (retracting && b.kind === 'ball') continue;
+      // one strength per body (not recomputed per leg/segment) so a stone's
+      // whole predicted trail — every bounce leg — breathes together, same
+      // pulse/fixed split as its own halo (haloMode): pulses only while it's
+      // the one actually being dragged, fixed once released. The ball's own
+      // trail never pulses (b.ref is entities.ball, no halo concept there).
+      // Floor at 50% (not 0) so the laser never goes fully dark mid-pulse —
+      // just the laser's own remap, pulseStrength(g) itself stays 0..1 for
+      // the halo/LEDs.
+      const strength = (b.kind !== 'ball' && drag && drag.entity === b.ref) ? 0.5 + 0.5 * pulseStrength(b.ref) : 1;
+      if (retracting) applyLaserRetract(b);
+      for (const leg of b.legs) {
+        if (leg.totalLen < 1 || leg.points.length < 2) continue;
+        if (b.kind === 'ball') drawBallLaserTrail(leg.points, leg.totalLen);
+        else drawLaserTrail(leg.points, team, leg.totalLen, strength);
+      }
     }
   }
   // "Power" toolbar toggle, off-branch: a straight direction/energy readout
@@ -2138,13 +3350,19 @@ export function startGame(opts = {}) {
   // toggle mid-drag doesn't introduce a second, differently-behaved smoothing
   // path; only the shape drawn from that smoothed aim changes.
   function renderBasicLaser(team) {
+    const retracting = phase === 'pending';
     for (const g of entities[team]) {
       if (g.out || g.falling) continue;
       const aim = getBodyAim(g);
       if (!aim) { g._laserUx = g._laserUy = g._laserLen = undefined; continue; }
       const s = smoothLaserAim(g, aim.ux, aim.uy, aim.len);
       const points = [{ x: g.x, y: g.y }, { x: g.x + s.ux * s.len, y: g.y + s.uy * s.len }];
-      drawLaserTrail(points, team, s.len);
+      // floor at 50%, same laser-only remap as renderAimCascade above
+      const strength = (drag && drag.entity === g) ? 0.5 + 0.5 * pulseStrength(g) : 1;
+      // single segment, no legs — retracting it toward the stone is just
+      // shrinking totalLen, same as applyLaserRetract's per-leg case above.
+      const drawLen = retracting ? s.len * (1 - laserRetractProgress()) : s.len;
+      drawLaserTrail(points, team, drawLen, strength);
     }
   }
   function drawDragPreview() {
@@ -2279,6 +3497,10 @@ export function startGame(opts = {}) {
     // while waiting on the opponent, instead of vanishing the instant PLAY
     // is pressed.
     else if (phase === 'lanAim' || phase === 'lanWait') drawAimLaser(myTeam);
+    // Reveal just started: keep drawing the just-committed team's laser
+    // while it retracts into its stones (see playLaunchEngine/retractTeam) —
+    // renderAimCascade/renderBasicLaser themselves shrink it frame by frame.
+    else if (phase === 'pending' && retractTeam && laserRetractProgress() < 1) drawAimLaser(retractTeam);
     drawDragPreview();
     // under the stones/ball (painter's order) — see drawSweepZone's own comment
     drawSweepOverlay();
@@ -2383,6 +3605,17 @@ export function startGame(opts = {}) {
     // the board in one giant jump when the frame comes back.
     const dt = lastFrameTime === null ? 1 / 60 : Math.min((now - lastFrameTime) / 1000, 0.1);
     lastFrameTime = now;
+    // True pause: freeze the exact current frame, mid-shot included — no
+    // physics/animation update runs at all while paused, only render() below
+    // keeps repainting the same state. maybeAdvanceReplay()'s own
+    // !replayPlaying guard only ever covered "don't auto-start the next
+    // manche"; this is what actually stops an in-flight shot from continuing
+    // to move once the user hits pause (see CLAUDE.md replay section).
+    if (isReplay && !replayPlaying) {
+      render();
+      requestAnimationFrame(loop);
+      return;
+    }
     // atmosphere.update(dt); // neutralized for perf, see note at createAtmosphere()
     if (phase !== turnTimerPhase) {
       if (isAimingPhase(phase)) turnTimerStart = performance.now();
@@ -2418,7 +3651,11 @@ export function startGame(opts = {}) {
       updateStraighten();
     } else if (phase === 'roundReset') {
       updateRoundReset();
+    } else if (phase === 'matchIntro') {
+      updateMatchIntro();
     }
+    if (isReplay) updateReplayBar();
+    if (net) { maybeAutoSyncMute(); syncChatCompose(); }
     render();
     requestAnimationFrame(loop);
   }

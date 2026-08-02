@@ -148,6 +148,40 @@ vite.config.ts.timestamp-*
 # Local scratch labs (never pushed) — see CLAUDE.md for the lab-to-main workflow
 /design-lab/
 /physics-lab/
+/audio-lab/
 
 # Local GIMP/PSD working files, not source-controlled
 *.xcf
+
+# Ableton sample-analysis sidecar files, not audio
+*.asd
+
+# Rejected/alternate SFX takes not referenced by src/audio.js — only the
+# winning take from each round gets committed to public/sfx/, see CLAUDE.md
+public/sfx/plastic/
+public/sfx/Ice sphere 2.wav
+public/sfx/Ice sphere appear.wav
+public/sfx/bubble.wav
+public/sfx/drag 1.wav
+public/sfx/golf layer/glisse launch.wav
+public/sfx/impact-stone-high.wav
+public/sfx/impact-stone-low.wav
+public/sfx/impact-stone-soft-hipass.wav
+public/sfx/impact-stone-soft.wav
+public/sfx/impact-stone-wall-soft.wav
+public/sfx/impacts stone-ball.wav
+public/sfx/laser sample 2.wav
+public/sfx/play button.wav
+public/sfx/point ok 2.wav
+public/sfx/stone fall 2.wav
+public/sfx/stone fall 3a.wav
+public/sfx/stone fall.wav
+public/sfx/stone select a.wav
+public/sfx/stone wall.wav
+public/sfx/ticket music.wav
+public/sfx/timer start 2.wav
+public/sfx/timer start.wav
+public/sfx/whistle 2 old.wav
+public/sfx/whistle.wav
+public/sfx/whoosh layer 2.wav
+public/sfx/whoosh low.wav

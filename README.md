@@ -1,4 +1,4 @@
-# NIM Ball
+# Nim-Curl
 
 Mini app soccer game for Nimiq — teams shoot orb-shaped pieces at each other's goal, pinball-style, then a physics pass resolves the round.
 

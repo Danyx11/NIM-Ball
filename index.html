@@ -3,10 +3,34 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
-<title>NIM Ball</title>
+<title>Nim-Curl</title>
 </head>
 <body>
   <img id="bg-logo" alt="logo">
+  <!-- Nimiq wallet identity: real "nq-login" glyph from @nimiq/style's icon
+       sprite (see src/nimiq.js's chooseAddress()), inlined rather than
+       pulling in the whole @nimiq/style CSS package for one icon. -->
+  <button id="connectBtn" class="nq-connect-btn" type="button">
+    <svg class="nq-connect-icon" viewBox="0 0 54 54" aria-hidden="true"><path fill="currentColor" d="M26.95 0A27.05 27.05 0 0 0 .21 22.32a1.12 1.12 0 0 0 1.13 1.3h18.72c.62 0 1.12-.5 1.12-1.12v-8.1a2.25 2.25 0 0 1 3.66-1.76l15.75 12.6a2.25 2.25 0 0 1 0 3.52l-15.75 12.6a2.25 2.25 0 0 1-3.66-1.76v-8.1c0-.62-.5-1.12-1.12-1.12H1.35a1.14 1.14 0 0 0-1.13 1.3 27 27 0 0 0 53.55-5.78A27.25 27.25 0 0 0 26.95 0z"/></svg>
+    <span id="connectBtnLabel">Connecter</span>
+  </button>
+  <!-- Master audio VU meter (dev/mixing aid, see src/main.js's meter loop) —
+       reads the real combined output of every sound currently playing via an
+       AnalyserNode tapped on audio.js's master bus, not a per-sound gauge. -->
+  <div id="vuMeter">
+    <div id="vuTrack">
+      <div id="vuFill"></div>
+      <div id="vuPeakHold"></div>
+    </div>
+    <div class="vu-labels">
+      <div class="vu-readout" id="vuPeakLabel">-∞</div>
+      <div class="vu-readout vu-readout-max" id="vuMaxLabel" title="Peak max depuis le chargement — clique pour réinitialiser">-∞</div>
+    </div>
+  </div>
+  <!-- Sound trigger log (debug aid, see src/main.js) — each row shows a
+       one-shot SFX name for 3s right as audio.js actually plays it, so a
+       sound you can't otherwise identify shows itself here as it fires. -->
+  <div id="soundLog"></div>
   <div id="game-card">
   <div id="scene">
   <div id="bg-stage">
@@ -550,12 +574,14 @@
       <div class="tbtn-row">
         <button class="tbtn" id="tbtn-sound" type="button" aria-label="Son">
           <img class="tbtn-base" id="tbtn-sound-img" alt=""><img class="tbtn-cap" id="tbtn-sound-cap" alt="">
-        </button>
-        <button class="tbtn" id="tbtn-exit" type="button" aria-label="Quitter">
-          <img class="tbtn-base" id="tbtn-exit-img" alt=""><img class="tbtn-cap" id="tbtn-exit-cap" alt="">
+          <div class="tbtn-muted-slash" id="tbtn-sound-slash"></div>
         </button>
         <button class="tbtn" id="tbtn-chat" type="button" aria-label="Chat">
           <img class="tbtn-base" id="tbtn-chat-img" alt=""><img class="tbtn-cap" id="tbtn-chat-cap" alt="">
+          <div class="tbtn-muted-slash" id="tbtn-chat-slash"></div>
+        </button>
+        <button class="tbtn" id="tbtn-exit" type="button" aria-label="Quitter">
+          <img class="tbtn-base" id="tbtn-exit-img" alt=""><img class="tbtn-cap" id="tbtn-exit-cap" alt="">
         </button>
       </div>
       <div class="tbtn-row">
@@ -572,6 +598,25 @@
       </div>
     </div>
     <div id="overlay" class="hidden"><div id="ovContent"></div></div>
+    <div id="replayBar" class="hidden">
+      <button id="replayExitBtn" type="button" aria-label="Quitter le replay">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M5 5l14 14M19 5L5 19"/></svg>
+      </button>
+      <div id="replayRail"></div>
+      <div id="replayBottomBar">
+        <div id="replaySegments"></div>
+        <div id="replayTransport">
+          <button id="replaySoundBtn" type="button" aria-label="Son"></button>
+          <button id="replayPrevBtn" type="button" aria-label="Manche précédente">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="2.4" height="14" fill="currentColor"/><polygon points="19,5 19,19 8,12" fill="currentColor"/></svg>
+          </button>
+          <button id="replayPlayBtn" type="button" aria-label="Lecture"></button>
+          <button id="replayNextBtn" type="button" aria-label="Manche suivante">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5,5 5,19 16,12" fill="currentColor"/><rect x="16.6" y="5" width="2.4" height="14" fill="currentColor"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
     <div id="modeOverlay" class="team-select">
       <div class="half a" id="modeLocal">
         <div class="tag">JOUER EN LOCAL</div>
@@ -585,6 +630,20 @@
         <div class="tag">SOLO VS IA</div>
         <div class="sub">Entraîne-toi contre l'ordinateur</div>
       </div>
+      <div class="half d" id="modeReplay">
+        <div class="tag">REPLAY</div>
+        <div class="sub">Revoir un match sauvegardé</div>
+      </div>
+    </div>
+    <div id="replayUploadOverlay" class="hidden">
+      <div id="replayUploadBox">
+        <div class="tag">CHARGER UN REPLAY</div>
+        <div class="sub">Dépose le ticket de match (image) ici, ou choisis un fichier</div>
+        <input type="file" id="replayFileInput" accept="image/*" hidden>
+        <button class="bigbtn" id="replayChooseFileBtn">📁 Choisir un fichier</button>
+        <button class="bigbtn" id="replayUploadCancelBtn">Annuler</button>
+        <p id="replayUploadStatus"></p>
+      </div>
     </div>
     <div id="startOverlay" class="team-select hidden">
       <div class="half a" id="halfA">
@@ -597,6 +656,59 @@
         <div class="tag">ÉQUIPE JAUNE</div>
         <div class="sub">Touche ici quand tu es prêt</div>
       </div>
+    </div>
+  </div>
+  <!-- Duel LAN chat: only shown for a live LAN match (see src/game.js's
+       `if (net)` chat wiring). Two independent windows, one under each half
+       of the board — équipe bleue (A) on the left, équipe jaune (B) on the
+       right, matching the board's own fixed left/right layout. Each window
+       shows that team's current displayed state (a message, or "Chat OFF"
+       while that team has muted itself via #tbtn-chat) — persists until
+       either a newer message or a mute toggle replaces it, nothing
+       recorded/replayed. Only the local player's own window gets a compose
+       form (see game.js hiding the other one). Sends are unlimited in
+       count but rate-limited to one every 30s (see CHAT_COOLDOWN_MS in
+       game.js) — the small ring next to the emoji button fills back up as
+       that cooldown clears; composing/emoji-picking is never blocked by it,
+       only the actual send. -->
+  <div id="chatBar" class="hidden">
+    <div class="chat-window chat-window-a" id="chatWindowA">
+      <div class="chat-window-text" id="chatTextA"></div>
+      <form class="chat-window-form" id="chatFormA" autocomplete="off">
+        <input class="chat-window-input" id="chatInputA" type="text" maxlength="30" placeholder="Message (30 max)" disabled>
+        <div class="chat-window-controls">
+          <div class="chat-window-controls-top">
+            <svg class="chat-timer" viewBox="0 0 20 20" aria-hidden="true">
+              <circle class="chat-timer-track" cx="10" cy="10" r="8"></circle>
+              <circle class="chat-timer-fill" id="chatTimerFillA" cx="10" cy="10" r="8"></circle>
+            </svg>
+            <button class="chat-emoji-btn" id="chatEmojiBtnA" type="button" aria-label="Emoji" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <button class="chat-window-send" id="chatSendBtnA" type="submit" aria-label="Envoyer" disabled>➤</button>
+        </div>
+        <div class="chat-emoji-picker hidden" id="chatEmojiPickerA"></div>
+      </form>
+    </div>
+    <div class="chat-window chat-window-b" id="chatWindowB">
+      <div class="chat-window-text" id="chatTextB"></div>
+      <form class="chat-window-form" id="chatFormB" autocomplete="off">
+        <input class="chat-window-input" id="chatInputB" type="text" maxlength="30" placeholder="Message (30 max)" disabled>
+        <div class="chat-window-controls">
+          <div class="chat-window-controls-top">
+            <svg class="chat-timer" viewBox="0 0 20 20" aria-hidden="true">
+              <circle class="chat-timer-track" cx="10" cy="10" r="8"></circle>
+              <circle class="chat-timer-fill" id="chatTimerFillB" cx="10" cy="10" r="8"></circle>
+            </svg>
+            <button class="chat-emoji-btn" id="chatEmojiBtnB" type="button" aria-label="Emoji" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <button class="chat-window-send" id="chatSendBtnB" type="submit" aria-label="Envoyer" disabled>➤</button>
+        </div>
+        <div class="chat-emoji-picker hidden" id="chatEmojiPickerB"></div>
+      </form>
     </div>
   </div>
 </div>
