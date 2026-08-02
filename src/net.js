@@ -29,15 +29,46 @@ export function connectLan(base) {
     let launchCb = null;
     let opponentJoinedCb = null;
     let disconnectCb = null;
+    let chatCb = null;
+    let chatMuteCb = null;
+    let bothReadyCb = null;
 
     const net = {
       myTeam: null,
       sendShots(stones, sweep = null) {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'shots', stones, sweep }));
       },
+      // Sent when the local player taps the LAN lobby's "Prêt" button (see
+      // main.js's showReadyScreen) — the arbiter only tells either side to
+      // actually start (onBothReady below) once BOTH have sent this. Without
+      // that handshake, whichever player clicked first could start their own
+      // match (and start chatting) while the other was still sitting on the
+      // lobby screen with no startGame()/onChat() wired up yet to receive
+      // anything — messages sent into that gap were silently dropped.
+      sendReady() {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ready' }));
+      },
+      // Unlimited count, but the arbiter enforces at most one every
+      // CHAT_COOLDOWN_MS per team (see server/arbiter.js) — text is
+      // truncated again server-side too; this is just UX, not the real
+      // enforcement (a modified client could send anything here). Always a
+      // real typed message — the mute toggle has its own sendChatMute below,
+      // on a separate channel that doesn't share this cooldown at all.
+      sendChat(text) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'chat', text }));
+      },
+      // Unlimited/instant, unlike sendChat above — this is a status toggle,
+      // not chat content, so it shouldn't compete with the chat cooldown
+      // (see game.js's maybeAutoSyncMute).
+      sendChatMute(muted) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'chatMute', muted }));
+      },
       onLaunch(cb) { launchCb = cb; },
       onOpponentJoined(cb) { opponentJoinedCb = cb; },
       onDisconnect(cb) { disconnectCb = cb; },
+      onChat(cb) { chatCb = cb; },
+      onChatMute(cb) { chatMuteCb = cb; },
+      onBothReady(cb) { bothReadyCb = cb; },
       close() { ws.close(); },
     };
 
@@ -66,6 +97,12 @@ export function connectLan(base) {
         if (disconnectCb) disconnectCb();
       } else if (msg.type === 'launch') {
         if (launchCb) launchCb({ shotsA: msg.shotsA, shotsB: msg.shotsB, sweepA: msg.sweepA, sweepB: msg.sweepB });
+      } else if (msg.type === 'chat') {
+        if (chatCb) chatCb({ team: msg.team, text: msg.text });
+      } else if (msg.type === 'chatMute') {
+        if (chatMuteCb) chatMuteCb({ team: msg.team, muted: !!msg.muted });
+      } else if (msg.type === 'bothReady') {
+        if (bothReadyCb) bothReadyCb();
       }
     });
   });

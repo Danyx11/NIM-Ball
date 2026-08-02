@@ -28,6 +28,8 @@ export const SFX_SRC = {
   pointOk: `${ASSET_BASE}sfx/Point ok.wav`,   // the +1 point-result panel appearing (mid-match, non-deciding point)
   ticket2: `${ASSET_BASE}sfx/ticket 2.wav`,   // the match-winning ticket screen appearing
   sweepAppear: `${ASSET_BASE}sfx/ice sphere 3.wav`, // balai patch placed, played right after the toolbar's button.wav, see sweepBtn in game.js
+  chatIn: `${ASSET_BASE}sfx/message IN.wav`,   // a real chat message arrives from the opponent (not our own echo, not the mute toggle) — see net.onChat in game.js
+  chatOut: `${ASSET_BASE}sfx/message OUT.wav`, // local player's own chat message send, played optimistically at submit time
 };
 export const AMBIENCE_SRC = `${ASSET_BASE}sfx/ambience-forest.m4a`;
 export const AMBIENCE_VOLUME = 0.622; // was 1.107, -5dB
@@ -561,11 +563,25 @@ function createAudio() {
     const voice = glideVoices[id];
     if (!voice || voice.stopping) return;
     voice.stopping = true;
-    if (immediate || !ctx) {
+    // `finished` (see startGlideVoice()'s onended) means the ~1.5s recording
+    // already played out and fired its onended once, naturally — very common,
+    // since a real glide (several seconds of friction decay) routinely
+    // outlasts the sample. A BufferSourceNode's onended only ever fires once
+    // per node, at that one real stop transition; reassigning `.onended`
+    // below and calling `.stop()` again on an already-ended node is a no-op
+    // that will NEVER fire the new handler, so the `delete glideVoices[id]`
+    // it was meant to do would simply never happen — leaving this id stuck
+    // "finished" forever and permanently silencing every later round that
+    // picks it as the glide leader again. Delete immediately in that case
+    // instead of scheduling a fade that can't complete (nodes are already
+    // disconnected by that first onended, so there's nothing left to fade).
+    if (immediate || !ctx || voice.finished) {
       try { voice.src.stop(); } catch { /* already ended */ }
-      voice.src.disconnect();
-      voice.lowpass1.disconnect(); voice.lowpass2.disconnect();
-      voice.gain.disconnect(); voice.panner.disconnect();
+      if (!voice.finished) {
+        voice.src.disconnect();
+        voice.lowpass1.disconnect(); voice.lowpass2.disconnect();
+        voice.gain.disconnect(); voice.panner.disconnect();
+      }
       delete glideVoices[id];
       return;
     }

@@ -476,6 +476,13 @@ export function startGame(opts = {}) {
   // when nothing launched with any speed this round (or before the first
   // round starts) — physicsStep() then just skips calling setGlide() entirely.
   let glideLeaderId = null;
+  // Which team's aim laser/halo is mid-retract right now, and when that
+  // retraction started — set by playLaunchEngine(team) at the exact moment
+  // the reveal begins (see LASER_RETRACT_MS/laserRetractProgress below).
+  // null/0 means "not retracting" (render()/haloMode fall back to their
+  // normal phase-gated visibility).
+  let retractTeam = null;
+  let retractStart = 0;
   preloadTicketAssets();
   let phase = 'start';
   // Visual-only 30s turn timer for the score panel LED bar — resets whenever aiming
@@ -990,6 +997,176 @@ export function startGame(opts = {}) {
     }
   }
 
+  // ---- Duel LAN chat (see server/arbiter.js's per-team cooldown + CLAUDE.md
+  // "chat" notes). Two windows, one per team, each showing that team's
+  // current displayed state, persisting until either a newer message or a
+  // mute toggle replaces it — no history, nothing recorded/replayed, just
+  // "what's on screen right now". Only ever wired up when net is set.
+  const chatBar = document.getElementById('chatBar');
+  const chatTextA = document.getElementById('chatTextA');
+  const chatTextB = document.getElementById('chatTextB');
+  const chatFormA = document.getElementById('chatFormA');
+  const chatFormB = document.getElementById('chatFormB');
+  const chatInputA = document.getElementById('chatInputA');
+  const chatInputB = document.getElementById('chatInputB');
+  const chatSendBtnA = document.getElementById('chatSendBtnA');
+  const chatSendBtnB = document.getElementById('chatSendBtnB');
+  const chatEmojiBtnA = document.getElementById('chatEmojiBtnA');
+  const chatEmojiBtnB = document.getElementById('chatEmojiBtnB');
+  const chatEmojiPickerA = document.getElementById('chatEmojiPickerA');
+  const chatEmojiPickerB = document.getElementById('chatEmojiPickerB');
+  const chatTimerFillA = document.getElementById('chatTimerFillA');
+  const chatTimerFillB = document.getElementById('chatTimerFillB');
+  // The local player only ever controls their own team's window — the
+  // opponent's is read-only (see chatOppForm.classList.add(...) below).
+  const chatOwnForm = myTeam === 'B' ? chatFormB : chatFormA;
+  const chatOwnInput = myTeam === 'B' ? chatInputB : chatInputA;
+  const chatOwnSendBtn = myTeam === 'B' ? chatSendBtnB : chatSendBtnA;
+  const chatOwnEmojiBtn = myTeam === 'B' ? chatEmojiBtnB : chatEmojiBtnA;
+  const chatOwnEmojiPicker = myTeam === 'B' ? chatEmojiPickerB : chatEmojiPickerA;
+  const chatOwnTimerFill = myTeam === 'B' ? chatTimerFillB : chatTimerFillA;
+  const chatOppForm = myTeam === 'B' ? chatFormA : chatFormB;
+  // Unlimited sends, but at most one every CHAT_COOLDOWN_MS — a flat, real-
+  // time cooldown instead of the old "2 slots tied to aim/reveal phase"
+  // quota. Simpler to reason about ("wait 30s between messages"), simpler to
+  // enforce (one timestamp per team, no per-manche reset to keep in sync
+  // with the game's own phase machine), and 30s already matches
+  // TURN_TIMER_MS — this is deliberately the same pace as one aiming turn,
+  // not an arbitrary number. Composing is never blocked by the cooldown,
+  // only the actual send — see syncChatCompose below.
+  const CHAT_COOLDOWN_MS = 30000;
+  const CHAT_TIMER_C = 2 * Math.PI * 8; // matches the r=8 circle in index.html
+  let chatLastSentAt = 0; // far enough in the past that the very first send is never blocked
+  function chatCooldownRemaining() { return Math.max(0, CHAT_COOLDOWN_MS - (Date.now() - chatLastSentAt)); }
+  let chatInputEnabledCache = null;
+  let chatSendEnabledCache = null;
+  function syncChatCompose() {
+    const inputEnabled = !!net && !chatMuted;
+    const sendEnabled = inputEnabled && chatCooldownRemaining() === 0;
+    if (inputEnabled !== chatInputEnabledCache) {
+      chatInputEnabledCache = inputEnabled;
+      chatOwnInput.disabled = !inputEnabled;
+      chatOwnEmojiBtn.disabled = !inputEnabled;
+      if (!inputEnabled) chatOwnEmojiPicker.classList.add('hidden');
+    }
+    if (sendEnabled !== chatSendEnabledCache) {
+      chatSendEnabledCache = sendEnabled;
+      chatOwnSendBtn.disabled = !sendEnabled;
+    }
+    // Ring fill goes from empty (just sent) to full (ready) — updated every
+    // frame while cooling down, cheap enough not to need its own dirty-check.
+    const progress = 1 - chatCooldownRemaining() / CHAT_COOLDOWN_MS;
+    chatOwnTimerFill.style.strokeDashoffset = String(CHAT_TIMER_C * (1 - progress));
+    chatOwnTimerFill.classList.toggle('ready', sendEnabled);
+  }
+  // team here is whichever side the message came from (from the arbiter's
+  // echo, see net.onChat below) — always drawn on that team's fixed board
+  // side, same for both players' screens (the board itself isn't mirrored).
+  function showChatMessage(team, text) {
+    const el = team === 'A' ? chatTextA : chatTextB;
+    if (el.textContent === text) return; // nothing actually changed
+    el.textContent = text;
+    el.classList.remove('chat-pop');
+    if (text) {
+      void el.offsetWidth; // restart the CSS transition even if the window is already showing something
+      el.classList.add('chat-pop');
+    }
+  }
+  // A small fixed set rather than a full system emoji grid — quick reactions,
+  // not a general-purpose keyboard (see design brief: "sober, simple").
+  const CHAT_EMOJI = ['🔥', '🎯', '👏', '😅', '💪', '🙌'];
+  function buildEmojiPicker(picker, input) {
+    for (const emoji of CHAT_EMOJI) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = emoji;
+      btn.addEventListener('click', () => {
+        input.value = Array.from(input.value + emoji).slice(0, 30).join('');
+        picker.classList.add('hidden');
+        input.focus();
+      });
+      picker.appendChild(btn);
+    }
+  }
+  buildEmojiPicker(chatEmojiPickerA, chatInputA);
+  buildEmojiPicker(chatEmojiPickerB, chatInputB);
+  // tbtn-chat: mutes/unmutes the LOCAL player's own side of the chat (see
+  // CLAUDE.md-worthy design note — this is a moderation switch, not a
+  // regular message, so it rides its own net.sendChatMute channel instead of
+  // the chat cooldown above (see src/net.js) — always instant, unlimited.
+  // Clicking updates this player's own window immediately, no network round
+  // trip — maybeAutoSyncMute() below is what actually tells the other
+  // player, as soon as possible. If toggled back before that fires,
+  // chatMuted just equals chatLastSentMuted again and nothing ever gets
+  // sent — no separate "cancel" bookkeeping needed.
+  const chatBtn = document.getElementById('tbtn-chat');
+  const chatBtnCap = document.getElementById('tbtn-chat-cap');
+  const chatBtnSlash = document.getElementById('tbtn-chat-slash');
+  let chatMuted = false;
+  let chatLastSentMuted = false; // what the opponent currently believes, as far as we've told them
+  function pressChatBtn() {
+    chatBtnCap.classList.remove('pressed');
+    void chatBtnCap.offsetWidth; // restart the animation if pressed again mid-tween
+    chatBtnCap.classList.add('pressed');
+    audio.play('button');
+  }
+  if (net) {
+    chatOppForm.classList.add('chat-window-form-hidden');
+    chatBtn.addEventListener('click', () => {
+      pressChatBtn();
+      chatMuted = !chatMuted;
+      chatBtnSlash.classList.toggle('show', chatMuted);
+      showChatMessage(myTeam, chatMuted ? 'Chat OFF' : '');
+      chatOwnInput.value = '';
+      syncChatCompose();
+    });
+    chatOwnEmojiBtn.addEventListener('click', () => {
+      chatOwnEmojiPicker.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+      if (chatOwnEmojiPicker.classList.contains('hidden')) return;
+      // contains(), not === — a click on the emoji button's own SVG icon has
+      // e.target set to the SVG (or one of its inner shapes), never the
+      // <button> element itself, so the old strict-equality check missed it:
+      // this same click bubbled up to here and immediately re-hid the picker
+      // the button's own handler (above) had just shown, in one event.
+      if (chatOwnEmojiBtn.contains(e.target) || chatOwnEmojiPicker.contains(e.target)) return;
+      chatOwnEmojiPicker.classList.add('hidden');
+    });
+    chatOwnForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (chatMuted || chatCooldownRemaining() > 0) return;
+      const text = Array.from(chatOwnInput.value.trim()).slice(0, 30).join('');
+      if (!text) return;
+      net.sendChat(text);
+      chatLastSentAt = Date.now();
+      audio.play('chatOut', { volume: 0.251 }); // -12dB
+      // Shown locally right away rather than waiting on the arbiter's own
+      // echo of this same send (net.onChat below) — same "own screen updates
+      // instantly, network catches up" pattern as the mute toggle above.
+      showChatMessage(myTeam, text);
+      chatOwnInput.value = '';
+      chatOwnEmojiPicker.classList.add('hidden');
+      syncChatCompose();
+    });
+  } else {
+    // Outside a LAN match there's no chat to mute — same click-SFX-only stub
+    // the whole toolbar used to have for this button (see main.js).
+    chatBtn.addEventListener('click', () => {
+      pressChatBtn();
+      console.log('[toolbar] chat pressed — no LAN match in progress');
+    });
+  }
+  // Sends the local mute toggle's current state to the opponent as soon as
+  // it's actually out of sync with what they were last told — so un-muting
+  // before the "Chat OFF" ever went out just silently cancels. Unlike a real
+  // chat send, this never touches the cooldown above — it has none of its own.
+  function maybeAutoSyncMute() {
+    if (!net || chatMuted === chatLastSentMuted) return;
+    net.sendChatMute(chatMuted);
+    chatLastSentMuted = chatMuted;
+  }
+
   function showOverlay(html) { overlay.classList.remove('hidden'); ovContent.innerHTML = html; }
   function hideOverlay() { overlay.classList.add('hidden'); }
   // J1->J2: no "pass the device" screen, straight into the other team's aim phase.
@@ -1030,7 +1207,7 @@ export function startGame(opts = {}) {
       // never places a sweep patch of its own (out of scope for now).
       commitSweep('A');
       phase = 'pending';
-      playLaunchEngine();
+      playLaunchEngine('A');
       // Extra "thinking" pause on top of the usual pre-launch beat — purely a
       // feel beat (see reactionDelay in ai.js), not real computation time.
       const think = AI_CONFIG.reactionDelay[0] + Math.random() * (AI_CONFIG.reactionDelay[1] - AI_CONFIG.reactionDelay[0]);
@@ -1039,7 +1216,7 @@ export function startGame(opts = {}) {
       return;
     }
     if (phase === 'aimA') { commitSweep('A'); phase = 'aimB'; }
-    else if (phase === 'aimB') { commitSweep('B'); phase = 'pending'; playLaunchEngine(); scheduleGlideLeadIn(PRE_SIM_DELAY); setTimeout(launchSimulation, PRE_SIM_DELAY); }
+    else if (phase === 'aimB') { commitSweep('B'); phase = 'pending'; playLaunchEngine('B'); scheduleGlideLeadIn(PRE_SIM_DELAY); setTimeout(launchSimulation, PRE_SIM_DELAY); }
   }
   // Ticket stat (see src/ticket.js) — fastest stone launched all match, in the
   // same physics units as vx/vy (converted to a % of MAX_DRAG*POWER_SCALE for display).
@@ -1065,12 +1242,30 @@ export function startGame(opts = {}) {
   // cue now leads the movement by a fixed beat instead of starting exactly
   // when physicsStep first sees the stones move.
   const GLIDE_LEAD_MS = 200; // was 500, too far ahead of the stones' visual motion
+  // How long the just-committed team's laser takes to retract into its
+  // stones once the reveal starts (see retractTeam/laserRetractProgress) —
+  // still inside PRE_SIM_DELAY (1700ms) so it's fully finished before the
+  // glide whoosh (PRE_SIM_DELAY - GLIDE_LEAD_MS = 1500ms) and the stones'
+  // actual departure at PRE_SIM_DELAY itself, just with a tighter margin
+  // than a shorter retract would leave.
+  const LASER_RETRACT_MS = 1200;
+  // 0 (just started) -> 1 (fully retracted / nothing left to draw). 1 whenever
+  // no retraction is in flight, so callers can just check `< 1`.
+  function laserRetractProgress() {
+    if (!retractTeam) return 1;
+    return Math.min(1, (performance.now() - retractStart) / LASER_RETRACT_MS);
+  }
   // First sound in the reveal, fired the instant phase flips to 'pending' —
   // ahead of both the glide whoosh (scheduleGlideLeadIn, GLIDE_LEAD_MS before
   // launch) and the stones' actual departure (launchSimulation, PRE_SIM_DELAY
   // later). Called from every path that starts a reveal (local, AI, LAN, replay).
-  function playLaunchEngine() {
+  // `team`, when given, is whichever team's laser/halo was on screen right
+  // before this reveal began — starts that team's retract animation in sync
+  // with this same cue. Omitted for the replay path, which never shows a
+  // laser during 'replayAim' in the first place (see isAimingPhase).
+  function playLaunchEngine(team) {
     audio.play('launchEngine', { volume: 0.178 }); // -10dB, then another -5dB, ~-15dB total
+    if (team) { retractTeam = team; retractStart = performance.now(); }
   }
   // Called right alongside every setTimeout(launchSimulation, delayMs) below:
   // pendingVx/Vy for every stone are already final by the time each of those
@@ -1110,10 +1305,31 @@ export function startGame(opts = {}) {
     startOverlay.classList.add('hidden');
     controlsEnabled = true;
     beginMatchIntro();
+    chatBar.classList.remove('hidden');
+    // While self-muted, the opponent's updates are simply dropped — they
+    // keep chatting into a void without knowing it (see the design note on
+    // tbtn-chat above). Our own echoed sends (team === myTeam) still apply
+    // normally, since that's how our own message actually gets displayed
+    // (see the optimistic showChatMessage call at send time too).
+    net.onChat(({ team, text }) => {
+      if (chatMuted && team !== myTeam) return;
+      // Only the opponent's messages get the "IN" cue — our own echo of the
+      // send we just made (already cued with "OUT" above) shouldn't chime
+      // twice.
+      if (team !== myTeam) audio.play('chatIn', { volume: 0.251 }); // -12dB
+      showChatMessage(team, text);
+    });
+    // Separate channel from onChat above (see net.sendChatMute) — same
+    // self-mute filter, since it's still "ignore everything from the other
+    // side while I'm off".
+    net.onChatMute(({ team, muted }) => {
+      if (chatMuted && team !== myTeam) return;
+      showChatMessage(team, muted ? 'Chat OFF' : '');
+    });
     net.onLaunch(({ shotsA, shotsB, sweepA, sweepB }) => {
       hideOverlay();
       phase = 'pending';
-      playLaunchEngine();
+      playLaunchEngine(myTeam);
       // Own patch is already active/committed locally from commitSweep() at
       // send time — this overwrites both sides fully from what the arbiter
       // actually relayed (same pattern as the `used` flag below) so both
@@ -1157,6 +1373,8 @@ export function startGame(opts = {}) {
       audio.stopAmbience();
       audio.stopAllGlides();
       showOverlay(`<h2>Connexion perdue</h2><p>L'autre joueur s'est déconnecté.</p>`);
+      chatOwnInput.disabled = true; chatOwnSendBtn.disabled = true; chatOwnEmojiBtn.disabled = true;
+      chatInputEnabledCache = false; chatSendEnabledCache = false;
     });
   } else if (aiTeam) {
     // Solo vs IA: no lobby/ready-tap step needed (only one human) — straight
@@ -2229,10 +2447,25 @@ export function startGame(opts = {}) {
   const HALO_PULSE_PERIOD = 2; // seconds
   function haloMode(g) {
     if (g.falling || g.out) return 'off';
-    // reveal (pending/sim): halos cut entirely for a cheap, simple view — the
-    // LEDs (fully independent, see below) are what carries the damage/"alive"
-    // read during the shot instead.
-    if (phase === 'pending' || phase === 'sim') return 'off';
+    // reveal: halos cut entirely once the sim actually starts moving things —
+    // the LEDs (fully independent, see below) carry the damage/"alive" read
+    // from there. 'pending' itself is handled below: the just-committed
+    // team's halo keeps fading out through the laser's own retract window
+    // instead of popping off the instant PLAY is pressed.
+    if (phase === 'pending') {
+      if (!g.used || g.team !== retractTeam) return 'off';
+      if (aiTeam && g.team === aiTeam) return 'off';
+      return laserRetractProgress() < 1 ? 'retract' : 'off';
+    }
+    // Whitelist, not a blacklist: only the phases where a validated shot's
+    // halo is actually meant to show. Everything else (sim, goal,
+    // roundReset, gameover, matchIntro, straighten, start...) must be off
+    // even though g.used can still read true there — it isn't cleared until
+    // beginRoundReset() runs, which for a scored point only happens AFTER
+    // the GOAL_PAUSE_MS celebration pause (see onGoal), so without this
+    // whitelist the scoring team's halos stayed lit fixed through that
+    // entire pause instead of cutting the instant the reveal ended.
+    if (!isAimingPhase(phase) && phase !== 'lanWait' && phase !== 'replayAim') return 'off';
     if (!g.used) return 'off';
     // vs-IA: the AI's shots are precomputed silently in one shot at the start
     // of the round (see prepareAiShots) — g.used flips true for all 3 of its
@@ -2267,7 +2500,9 @@ export function startGame(opts = {}) {
     // remap the pulse's 0..1 breathing to a 20%-80% range instead of fading
     // fully to black or full brightness — only the halo's own brightness, not
     // pulseStrength() itself (shared with the stone's LED strips, which should
-    // keep their own full 0..1 breathing)
+    // keep their own full 0..1 breathing). 'retract' stays at full strength,
+    // same as 'on' — haloMode() below is what cuts it to 'off' outright the
+    // instant the laser finishes retracting, no fade of its own.
     const strength = mode === 'pulse' ? 0.2 + 0.6 * pulseStrength(g) : 1;
     ctx.save();
     // clip to the ice rect so the halo tucks under the wood frame at wall
@@ -3067,9 +3302,31 @@ export function startGame(opts = {}) {
     }
     return bodies;
   }
+  // During the post-commit retract window, eats each body's own legs back
+  // from the far tip toward the stone: walks legs in stone-to-tip order,
+  // handing each one min(its own length, whatever budget is left), so the
+  // budget always runs out on the FARTHEST leg first and the leg touching
+  // the stone is the last to shrink — reading as the whole trail reeling
+  // back into its stone rather than each leg fading in place independently.
+  function applyLaserRetract(body) {
+    const totalPathLen = body.legs.reduce((sum, leg) => sum + leg.totalLen, 0);
+    let remaining = totalPathLen * (1 - laserRetractProgress());
+    for (const leg of body.legs) {
+      const original = leg.totalLen;
+      leg.totalLen = Math.max(0, Math.min(original, remaining));
+      remaining -= original;
+    }
+  }
   function renderAimCascade(team) {
     const bodies = runAimCascade(team);
+    const retracting = phase === 'pending';
     for (const b of bodies) {
+      // The ball's own trail isn't a programmed shot — it's just the
+      // predicted path of a body the aiming team's stones might strike, so
+      // it has nothing of its own to "retract into". Rather than animate it
+      // shrinking like the stones' lasers, it simply cuts the instant PLAY
+      // is pressed, same as every laser did before the retract animation.
+      if (retracting && b.kind === 'ball') continue;
       // one strength per body (not recomputed per leg/segment) so a stone's
       // whole predicted trail — every bounce leg — breathes together, same
       // pulse/fixed split as its own halo (haloMode): pulses only while it's
@@ -3079,6 +3336,7 @@ export function startGame(opts = {}) {
       // just the laser's own remap, pulseStrength(g) itself stays 0..1 for
       // the halo/LEDs.
       const strength = (b.kind !== 'ball' && drag && drag.entity === b.ref) ? 0.5 + 0.5 * pulseStrength(b.ref) : 1;
+      if (retracting) applyLaserRetract(b);
       for (const leg of b.legs) {
         if (leg.totalLen < 1 || leg.points.length < 2) continue;
         if (b.kind === 'ball') drawBallLaserTrail(leg.points, leg.totalLen);
@@ -3092,6 +3350,7 @@ export function startGame(opts = {}) {
   // toggle mid-drag doesn't introduce a second, differently-behaved smoothing
   // path; only the shape drawn from that smoothed aim changes.
   function renderBasicLaser(team) {
+    const retracting = phase === 'pending';
     for (const g of entities[team]) {
       if (g.out || g.falling) continue;
       const aim = getBodyAim(g);
@@ -3100,7 +3359,10 @@ export function startGame(opts = {}) {
       const points = [{ x: g.x, y: g.y }, { x: g.x + s.ux * s.len, y: g.y + s.uy * s.len }];
       // floor at 50%, same laser-only remap as renderAimCascade above
       const strength = (drag && drag.entity === g) ? 0.5 + 0.5 * pulseStrength(g) : 1;
-      drawLaserTrail(points, team, s.len, strength);
+      // single segment, no legs — retracting it toward the stone is just
+      // shrinking totalLen, same as applyLaserRetract's per-leg case above.
+      const drawLen = retracting ? s.len * (1 - laserRetractProgress()) : s.len;
+      drawLaserTrail(points, team, drawLen, strength);
     }
   }
   function drawDragPreview() {
@@ -3235,6 +3497,10 @@ export function startGame(opts = {}) {
     // while waiting on the opponent, instead of vanishing the instant PLAY
     // is pressed.
     else if (phase === 'lanAim' || phase === 'lanWait') drawAimLaser(myTeam);
+    // Reveal just started: keep drawing the just-committed team's laser
+    // while it retracts into its stones (see playLaunchEngine/retractTeam) —
+    // renderAimCascade/renderBasicLaser themselves shrink it frame by frame.
+    else if (phase === 'pending' && retractTeam && laserRetractProgress() < 1) drawAimLaser(retractTeam);
     drawDragPreview();
     // under the stones/ball (painter's order) — see drawSweepZone's own comment
     drawSweepOverlay();
@@ -3389,6 +3655,7 @@ export function startGame(opts = {}) {
       updateMatchIntro();
     }
     if (isReplay) updateReplayBar();
+    if (net) { maybeAutoSyncMute(); syncChatCompose(); }
     render();
     requestAnimationFrame(loop);
   }

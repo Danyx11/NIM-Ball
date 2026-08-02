@@ -128,11 +128,11 @@ requestAnimationFrame(updateSoundLog);
 // wired inside game.js's startGame() alongside "play", since it needs live
 // access to phase/entities state; "exit" shows a quit-confirm dialog in the
 // shared #overlay (below); "sound" toggles the shared audio singleton's mute
-// (see below); "chat" (reserved for an eventual in-match chat window) is
-// still a placeholder, so this just plays the click SFX/animation and logs a
-// stub for it.
+// (see below); "chat" toggles the local player's own Duel LAN chat mute —
+// also wired inside game.js's startGame() (needs net/myTeam/phase), same
+// pattern as "sweep"/"play".
 const TOOLBAR_BUTTONS = ['sound', 'power', 'sweep', 'play', 'exit', 'chat'];
-const TOOLBAR_STUB_BUTTONS = ['chat'];
+const TOOLBAR_STUB_BUTTONS = [];
 TOOLBAR_BUTTONS.forEach((id) => {
   document.getElementById(`tbtn-${id}-img`).src = `${ASSET_BASE}ui/btn-${id}.png`;
   document.getElementById(`tbtn-${id}-cap`).src = `${ASSET_BASE}ui/btn-${id}-cap.png`;
@@ -446,7 +446,46 @@ function showWaitingScreen(net) {
     <h2>En attente de l'adversaire…</h2>
     <p>Partage le lien avec l'autre joueur si ce n'est pas déjà fait.</p>
   `);
-  net.onOpponentJoined(() => {
+  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls));
+  net.onDisconnect(() => {
+    showLanJoinScreen("L'autre joueur s'est déconnecté.");
+  });
+}
+
+// One more explicit tap between "opponent joined" and startGame(), same
+// idea as local/solo's own #startOverlay ready-tap — this used to call
+// startGame() straight from the onOpponentJoined network callback, an async
+// event with no user gesture of its own. If this player's tab had been
+// sitting idle on the waiting screen for a while, beginMatchIntro() (called
+// synchronously inside startGame() for net mode) could fire without a fresh
+// rendered frame and without WebAudio properly unlocked, and the match-start
+// slide tween would silently never play (stones stuck at their pre-animation
+// spot) — a real bug report, not a hypothetical. A real click here
+// guarantees both a fresh frame and a fresh gesture right before it matters.
+//
+// The tap alone isn't synced across the two players though — net.sendReady()
+// / onBothReady() (see src/net.js, server/arbiter.js) hold off calling
+// startGame() until BOTH sides have tapped, so one fast player can't start
+// their own match (and start chatting) while the other is still sitting on
+// this screen with no startGame()/onChat() wired up yet to receive it —
+// those messages used to just silently vanish.
+function showReadyScreen(net, teamLabel, cls) {
+  showLobby(`
+    <span class="team-pill ${cls}">${teamLabel}</span>
+    <h2>Adversaire connecté !</h2>
+    <p>Touche pour démarrer la partie.</p>
+    <button class="bigbtn" id="lanReadyBtn">Prêt</button>
+  `);
+  document.getElementById('lanReadyBtn').onclick = () => {
+    audio.unlock();
+    audio.play('button');
+    net.sendReady();
+    showLobby(`
+      <span class="team-pill ${cls}">${teamLabel}</span>
+      <h2>En attente de l'autre joueur…</h2>
+    `);
+  };
+  net.onBothReady(() => {
     hideLobby();
     showToolbar();
     startGame({ net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam) });

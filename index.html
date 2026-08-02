@@ -578,6 +578,7 @@
         </button>
         <button class="tbtn" id="tbtn-chat" type="button" aria-label="Chat">
           <img class="tbtn-base" id="tbtn-chat-img" alt=""><img class="tbtn-cap" id="tbtn-chat-cap" alt="">
+          <div class="tbtn-muted-slash" id="tbtn-chat-slash"></div>
         </button>
         <button class="tbtn" id="tbtn-exit" type="button" aria-label="Quitter">
           <img class="tbtn-base" id="tbtn-exit-img" alt=""><img class="tbtn-cap" id="tbtn-exit-cap" alt="">
@@ -655,6 +656,59 @@
         <div class="tag">ÉQUIPE JAUNE</div>
         <div class="sub">Touche ici quand tu es prêt</div>
       </div>
+    </div>
+  </div>
+  <!-- Duel LAN chat: only shown for a live LAN match (see src/game.js's
+       `if (net)` chat wiring). Two independent windows, one under each half
+       of the board — équipe bleue (A) on the left, équipe jaune (B) on the
+       right, matching the board's own fixed left/right layout. Each window
+       shows that team's current displayed state (a message, or "Chat OFF"
+       while that team has muted itself via #tbtn-chat) — persists until
+       either a newer message or a mute toggle replaces it, nothing
+       recorded/replayed. Only the local player's own window gets a compose
+       form (see game.js hiding the other one). Sends are unlimited in
+       count but rate-limited to one every 30s (see CHAT_COOLDOWN_MS in
+       game.js) — the small ring next to the emoji button fills back up as
+       that cooldown clears; composing/emoji-picking is never blocked by it,
+       only the actual send. -->
+  <div id="chatBar" class="hidden">
+    <div class="chat-window chat-window-a" id="chatWindowA">
+      <div class="chat-window-text" id="chatTextA"></div>
+      <form class="chat-window-form" id="chatFormA" autocomplete="off">
+        <input class="chat-window-input" id="chatInputA" type="text" maxlength="30" placeholder="Message (30 max)" disabled>
+        <div class="chat-window-controls">
+          <div class="chat-window-controls-top">
+            <svg class="chat-timer" viewBox="0 0 20 20" aria-hidden="true">
+              <circle class="chat-timer-track" cx="10" cy="10" r="8"></circle>
+              <circle class="chat-timer-fill" id="chatTimerFillA" cx="10" cy="10" r="8"></circle>
+            </svg>
+            <button class="chat-emoji-btn" id="chatEmojiBtnA" type="button" aria-label="Emoji" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <button class="chat-window-send" id="chatSendBtnA" type="submit" aria-label="Envoyer" disabled>➤</button>
+        </div>
+        <div class="chat-emoji-picker hidden" id="chatEmojiPickerA"></div>
+      </form>
+    </div>
+    <div class="chat-window chat-window-b" id="chatWindowB">
+      <div class="chat-window-text" id="chatTextB"></div>
+      <form class="chat-window-form" id="chatFormB" autocomplete="off">
+        <input class="chat-window-input" id="chatInputB" type="text" maxlength="30" placeholder="Message (30 max)" disabled>
+        <div class="chat-window-controls">
+          <div class="chat-window-controls-top">
+            <svg class="chat-timer" viewBox="0 0 20 20" aria-hidden="true">
+              <circle class="chat-timer-track" cx="10" cy="10" r="8"></circle>
+              <circle class="chat-timer-fill" id="chatTimerFillB" cx="10" cy="10" r="8"></circle>
+            </svg>
+            <button class="chat-emoji-btn" id="chatEmojiBtnB" type="button" aria-label="Emoji" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <button class="chat-window-send" id="chatSendBtnB" type="submit" aria-label="Envoyer" disabled>➤</button>
+        </div>
+        <div class="chat-emoji-picker hidden" id="chatEmojiPickerB"></div>
+      </form>
     </div>
   </div>
 </div>

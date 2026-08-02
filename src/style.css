@@ -250,6 +250,114 @@ canvas {
   display: block; width: 100%; height: auto; touch-action: none;
 }
 
+/* Duel LAN chat — two independent windows below the board (flex sibling of
+   #stage-wrap inside #app, see index.html), one under each half, not drawn
+   on the canvas: plain DOM so a phone's own keyboard behaves normally.
+   Hidden outside a live LAN match (see src/game.js's chat wiring). Left =
+   équipe bleue (team A, always drawn on the board's left, per
+   FX0/MATCH_INTRO_START_INSET), right = équipe jaune (team B) — same fixed
+   left/right layout on both players' screens, never mirrored (the board
+   itself isn't mirrored either). Only the local player's own window has a
+   visible compose form (see game.js hiding the other one) — the other
+   window is read-only, just showing whatever that team last displayed. */
+/* margin-top pulls the windows up close under the board — #stage-wrap's own
+   translateY(6.52%) (see that rule above) shifts the board down visually
+   without affecting layout flow, so the flex gap between the two would
+   otherwise read as a much bigger blank stripe than the board's actual
+   printed edge. This intentionally still leaves #chatBar overlapping the
+   bottom of #stage-wrap's own box at most card sizes — that's fine and
+   expected, see position/z-index below for why it's safe.
+   position:relative + z-index:1 is the actual load-bearing fix here, not
+   just polish: #stage-wrap is `position: relative` AND has a `transform`
+   (see its own rule above), and ANY positioned element paints above
+   non-positioned ("static") siblings regardless of DOM order — so #chatBar,
+   left at the default `static`, was rendering (and hit-testing) BEHIND the
+   board's canvas wherever the two overlapped, silently swallowing clicks
+   meant for the compose input into the canvas instead. That's what "can't
+   type in the chat box" actually was — confirmed via
+   document.elementFromPoint() on the input's own center returning the
+   canvas, not the input. Making #chatBar positioned too restores normal
+   DOM-order stacking, so it reliably wins the overlap regardless of exactly
+   how much margin-top pulls it up — don't remove this to "fix" it via
+   margin math alone again.
+   -4% is a deliberately conservative bump from an earlier -3.5% (itself the
+   ~geometric match for the translateY shift above) — verified via
+   document.elementFromPoint() on the input's own center (still resolves to
+   the input, not the canvas) at a normal desktop size before landing this.
+   -5% was tried and rejected: at a short/narrow viewport, #game-card's own
+   fixed aspect-ratio box (and its overflow:hidden) doesn't have enough
+   height for canvas + gap + chat bar to all fit, so pulling the bar up
+   further doesn't shrink the visible gap — it pushes the compose row's
+   bottom past #game-card's own clipped edge, hiding/disabling it entirely.
+   That specific breakage exists at -4% and even margin-top:0 too (confirmed
+   independently of this value, it's a pre-existing "doesn't fit" limit at
+   extreme portrait aspect ratios, not something this margin causes or
+   fixes) — so don't chase a smaller visual gap by pushing this further
+   without first giving the card more vertical room to work with. */
+#chatBar { width: 70%; display: flex; gap: 12px; margin-top: -4%; position: relative; z-index: 1; }
+#chatBar.hidden { display: none; }
+.chat-window {
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px;
+  background: var(--panel); border-radius: 14px; padding: 8px 10px;
+}
+.chat-window-a { border: 1px solid var(--teamA-dark); }
+.chat-window-b { border: 1px solid var(--teamB-dark); }
+.chat-window-text {
+  min-height: 18px; font-size: 13px; font-weight: 600; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0; transform: translateY(6px); transition: opacity 180ms ease, transform 180ms ease;
+}
+.chat-window-a .chat-window-text { text-align: left; }
+.chat-window-b .chat-window-text { text-align: right; }
+/* .chat-pop is added/removed by game.js on every new (non-empty) state —
+   the reflow trick there restarts the transition even if the window was
+   already showing something — this is the "la fenêtre remonte" cue from the
+   design brief. Text now persists until the next message or a mute toggle
+   replaces it (no more per-manche clear), so this class just tracks
+   "currently showing something" rather than a temporary reveal. */
+.chat-window-text.chat-pop { opacity: 1; transform: translateY(0); }
+.chat-window-form { display: flex; gap: 8px; align-items: flex-end; position: relative; }
+/* Set by game.js on whichever side isn't the local player's own team — that
+   window is read-only, it never gets a compose form of its own. */
+.chat-window-form.chat-window-form-hidden { display: none; }
+.chat-window-input {
+  flex: 1; min-width: 0; padding: 7px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.06); color: var(--ink); font-size: 13px; font-family: inherit;
+}
+.chat-window-input::placeholder { color: var(--ink-dim); }
+.chat-window-input:disabled { opacity: 0.4; }
+/* Timer ring + emoji button stacked above the send button — see game.js's
+   syncChatCompose for the ring's live fill and the CHAT_EMOJI picker. */
+.chat-window-controls { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.chat-window-controls-top { display: flex; gap: 6px; align-items: center; }
+.chat-timer { width: 16px; height: 16px; transform: rotate(-90deg); }
+.chat-timer-track { fill: none; stroke: rgba(255,255,255,0.15); stroke-width: 2; }
+.chat-timer-fill {
+  fill: none; stroke: var(--ink-dim); stroke-width: 2; stroke-linecap: round;
+  stroke-dasharray: 50.265; stroke-dashoffset: 50.265; transition: stroke-dashoffset 200ms linear;
+}
+.chat-timer-fill.ready { stroke: var(--accent); }
+.chat-emoji-btn {
+  width: 18px; height: 18px; padding: 0; border: none; background: none; color: var(--ink-dim);
+  display: flex; align-items: center; justify-content: center;
+}
+.chat-emoji-btn svg { width: 16px; height: 16px; }
+.chat-emoji-btn:disabled { opacity: 0.35; }
+/* Small fixed set, not a full system emoji keyboard (see CHAT_EMOJI in
+   game.js) — a compact popover above the controls rather than a modal. */
+.chat-emoji-picker {
+  position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2;
+  display: flex; gap: 4px; padding: 6px; border-radius: 10px;
+  background: var(--panel); border: 1px solid rgba(255,255,255,0.1);
+}
+.chat-emoji-picker.hidden { display: none; }
+.chat-emoji-picker button { padding: 2px 4px; background: none; border: none; font-size: 16px; line-height: 1; }
+.chat-window-send {
+  flex: 0 0 auto; width: 32px; height: 32px; padding: 0; border-radius: 50%; border: none;
+  background: var(--accent); color: #3a2900; font-size: 14px; display: flex; align-items: center; justify-content: center;
+}
+.chat-window-send:disabled { opacity: 0.35; }
+
 button { font-family: inherit; font-weight: 700; font-size: 14px; border: none; border-radius: 999px; padding: 10px 20px; cursor: pointer; transition: transform .08s ease; }
 button:active { transform: scale(0.95); }
 button:disabled { opacity: 0.35; cursor: default; }

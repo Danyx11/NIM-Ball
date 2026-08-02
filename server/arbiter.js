@@ -18,6 +18,19 @@ export function createArbiter(wssOptions) {
   let players = { A: null, B: null };
   let shots = { A: null, B: null };
   let sweeps = { A: null, B: null };
+  // Chat: unlimited count, but at most one message every CHAT_COOLDOWN_MS per
+  // team (see CLAUDE.md / src/game.js's chat wiring) — enforced here, not
+  // just client-side, since a client is trivially editable. A flat rolling
+  // cooldown rather than a per-manche quota, so it's independent of the
+  // game's own phase machine — no reset needed on resetRound() below.
+  const CHAT_COOLDOWN_MS = 30000;
+  let lastChatAt = { A: 0, B: 0 };
+  // Match-start handshake (see src/main.js's showReadyScreen /
+  // src/net.js's sendReady): both sides must tap "Prêt" before EITHER
+  // actually starts, so a fast player can't begin chatting into a match the
+  // other side hasn't wired up yet (their onChat() isn't registered until
+  // startGame() runs) — those messages used to just vanish.
+  let ready = { A: false, B: false };
 
   function send(ws, msg) {
     if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
@@ -59,12 +72,43 @@ export function createArbiter(wssOptions) {
           send(players.B, payload);
           resetRound();
         }
+      } else if (msg.type === 'chat' && (team === 'A' || team === 'B')) {
+        const now = Date.now();
+        if (now - lastChatAt[team] < CHAT_COOLDOWN_MS) return; // still cooling down
+        // Array.from(...) rather than a plain string slice — a plain
+        // text.slice(0, 30) counts UTF-16 code units, which can split an
+        // emoji's surrogate pair in half; Array.from splits on whole
+        // codepoints instead (see CHAT_EMOJI in game.js).
+        const text = typeof msg.text === 'string'
+          ? Array.from(msg.text.replace(/[\r\n\t]+/g, ' ').trim()).slice(0, 30).join('')
+          : '';
+        if (!text) return;
+        lastChatAt[team] = now;
+        const payload = { type: 'chat', team, text };
+        send(players.A, payload);
+        send(players.B, payload);
+      } else if (msg.type === 'chatMute' && (team === 'A' || team === 'B')) {
+        // Deliberately NOT cooldown-tracked like chat above — this is a
+        // status toggle (see src/game.js's tbtn-chat), not chat content.
+        // Always relayed immediately, as often as it changes.
+        const payload = { type: 'chatMute', team, muted: !!msg.muted };
+        send(players.A, payload);
+        send(players.B, payload);
+      } else if (msg.type === 'ready' && (team === 'A' || team === 'B')) {
+        ready[team] = true;
+        if (ready.A && ready.B) {
+          const payload = { type: 'bothReady' };
+          send(players.A, payload);
+          send(players.B, payload);
+        }
       }
     });
 
     ws.on('close', () => {
       if (players[team] === ws) players[team] = null;
       resetRound();
+      lastChatAt[team] = 0; // a fresh reconnect shouldn't inherit a stale cooldown
+      ready[team] = false; // ditto for a stale "already tapped ready" from a dropped connection
       const remaining = players[otherTeam(team)];
       if (remaining) send(remaining, { type: 'opponentLeft' });
     });
