@@ -11,6 +11,36 @@ import { audio } from './audio.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 
+// Mobile port (see CLAUDE.md/joystick design notes): detected once at load
+// via the standard coarse-vs-fine pointer media feature (true for
+// touch-primary devices, false for mouse/trackpad) rather than screen width,
+// since a touch laptop shouldn't get the phone layout and a resized desktop
+// window shouldn't lose it. Drives both the CSS stack (.mobile-layout, see
+// style.css) and game.js's input mode (tap-select + joystick vs. direct
+// mouse drag) — passed into every startGame() call below.
+const IS_MOBILE = window.matchMedia('(pointer: coarse)').matches;
+if (IS_MOBILE) document.body.classList.add('mobile-layout');
+
+// iOS Safari never implements Element.requestFullscreen() for anything but a
+// <video> — document.fullscreenEnabled reads false there rather than the
+// call throwing, so this is a real feature-detect, not a UA sniff. The only
+// way to actually shed Safari's chrome on that browser is launching an
+// icon added to the home screen (see index.html's apple-mobile-web-app-*
+// meta tags), which reports as 'standalone' display-mode/navigator.standalone
+// once running that way.
+//
+// Parked for now (IOS_FULLSCREEN_FIX_ENABLED = false): testing is moving
+// into the Nimiq Pay in-app WebView, which may not have the same fullscreen
+// gap plain mobile Safari does — no point hiding the button/swapping copy
+// there until we actually see it misbehave. Detection itself stays real
+// either way (cheap, side-effect-free); flip the flag back on to reinstate
+// the hidden-button + "add to home screen" behavior once we revisit this.
+const IOS_FULLSCREEN_FIX_ENABLED = false;
+const FULLSCREEN_API_AVAILABLE = !!(document.documentElement.requestFullscreen && document.fullscreenEnabled);
+const IS_STANDALONE_MODE = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+const FULLSCREEN_SUPPORTED = IOS_FULLSCREEN_FIX_ENABLED ? FULLSCREEN_API_AVAILABLE : true;
+const IS_STANDALONE = IOS_FULLSCREEN_FIX_ENABLED && IS_STANDALONE_MODE;
+
 initBackground();
 
 // Loaded once here rather than per-match (see src/audio.js) — game.js's
@@ -25,60 +55,6 @@ const audioReady = audio.load();
 // and pointerdown always fires before the click handlers below that call
 // audio.play('button').
 document.addEventListener('pointerdown', () => audio.unlock(), { once: true });
-
-// ---- Master VU meter (mixing aid, #vuMeter in index.html) — reads the real
-// combined output via audio.js's getMasterPeakDb(), not a per-sound gauge.
-// Linear-in-dB scale from VU_FLOOR_DB (bottom, 0% lit) to 0dBFS (top, 100%
-// lit) — the standard convention for this kind of meter. Zone colors are
-// baked into #vuTrack's CSS gradient (green/yellow/red); this loop only
-// moves the dark mask (#vuFill) that covers the unlit portion from the top,
-// plus a peak-hold marker that jumps to the loudest recent instant and decays
-// back down, so a brief transient is still readable a moment later instead
-// of only flickering by for one frame.
-const VU_FLOOR_DB = -48;
-const VU_HOLD_MS = 2500;      // was 1200 — sits still noticeably longer before decaying
-const VU_DECAY_DB_PER_S = 12; // was 24 — half as fast once it does start decaying
-const vuFill = document.getElementById('vuFill');
-const vuPeakHold = document.getElementById('vuPeakHold');
-const vuPeakLabel = document.getElementById('vuPeakLabel');
-const vuMaxLabel = document.getElementById('vuMaxLabel');
-function dbToPercent(db) {
-  return Math.max(0, Math.min(100, ((db - VU_FLOOR_DB) / (0 - VU_FLOOR_DB)) * 100));
-}
-function colorForDb(db) { return db > -3 ? '#e74c3c' : db > -6 ? '#f1c40f' : '#dbe6ff'; }
-let vuHoldDb = -Infinity;
-let vuHoldAt = 0;
-let vuLastFrame = performance.now();
-// Absolute max ever seen (since load, or since the last click-to-reset below)
-// — never decays on its own, unlike vuHoldDb above, so a single loud outlier
-// hours into a session is never missed just because it wasn't glanced at
-// the instant it happened.
-let vuMaxDb = -Infinity;
-vuMaxLabel.addEventListener('click', () => { vuMaxDb = -Infinity; });
-function updateVuMeter() {
-  const now = performance.now();
-  const dt = (now - vuLastFrame) / 1000;
-  vuLastFrame = now;
-  const db = audio.getMasterPeakDb();
-  if (db >= vuHoldDb) {
-    vuHoldDb = db;
-    vuHoldAt = now;
-  } else if (now - vuHoldAt > VU_HOLD_MS) {
-    vuHoldDb = Math.max(db, vuHoldDb - VU_DECAY_DB_PER_S * dt);
-  }
-  if (db > vuMaxDb) vuMaxDb = db;
-  const levelPct = dbToPercent(db);
-  vuFill.style.height = `${100 - levelPct}%`;
-  const holdPct = dbToPercent(vuHoldDb);
-  vuPeakHold.style.bottom = `${holdPct}%`;
-  vuPeakHold.style.opacity = vuHoldDb > VU_FLOOR_DB ? '1' : '0';
-  vuPeakLabel.textContent = vuHoldDb > VU_FLOOR_DB ? vuHoldDb.toFixed(1) : '-∞';
-  vuPeakLabel.style.color = colorForDb(vuHoldDb);
-  vuMaxLabel.textContent = vuMaxDb > VU_FLOOR_DB ? vuMaxDb.toFixed(1) : '-∞';
-  vuMaxLabel.style.color = colorForDb(vuMaxDb);
-  requestAnimationFrame(updateVuMeter);
-}
-requestAnimationFrame(updateVuMeter);
 
 // ---- Sound trigger log (#soundLog in index.html, debug aid) — shows a
 // one-shot SFX's own name for SOUND_LOG_MS every time audio.js's onPlay()
@@ -254,6 +230,104 @@ bgLogo.addEventListener('click', () => {
   document.getElementById('logoNoBtn').onclick = () => { audio.play('button'); hideLobby(); };
 });
 
+// ---- Fullscreen toggle (#fullscreenBtn, real counterpart to the still-
+// reserved #menuBtn) — baked PNG glyph (same pattern as the toolbar's
+// btn-*.png icons, see TOOLBAR_BUTTONS above) rather than inline SVG: the
+// source art (design/full screen.jpg) is a flattened external-link-style
+// icon with its transparency baked in as a visible checkerboard instead of
+// real alpha, so it's pre-processed into a proper white-on-transparent
+// cutout (icon-fullscreen-enter/exit.png, exit is just the enter glyph
+// rotated 180°) rather than inlined as markup like the other icon-btn/
+// reserved-slot glyphs.
+const FULLSCREEN_ICON_SRC = {
+  enter: `${ASSET_BASE}ui/icon-fullscreen-enter.png`,
+  exit: `${ASSET_BASE}ui/icon-fullscreen-exit.png`,
+};
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+const fullscreenIcon = document.getElementById('fullscreenIcon');
+if (!FULLSCREEN_SUPPORTED) {
+  // iOS Safari: this button could never do anything (see FULLSCREEN_SUPPORTED
+  // above) — hiding it beats leaving a dead control in the chrome.
+  fullscreenBtn.style.display = 'none';
+} else {
+  function syncFullscreenButton() {
+    const active = !!document.fullscreenElement;
+    fullscreenIcon.src = active ? FULLSCREEN_ICON_SRC.exit : FULLSCREEN_ICON_SRC.enter;
+    fullscreenBtn.setAttribute('aria-label', active ? 'Quitter le plein écran' : 'Plein écran');
+  }
+  syncFullscreenButton();
+  document.addEventListener('fullscreenchange', syncFullscreenButton);
+  fullscreenBtn.addEventListener('click', () => {
+    audio.play('button');
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      document.documentElement.requestFullscreen()
+        .catch((err) => console.log('[fullscreen] request failed:', err.message));
+    }
+  });
+}
+
+// ---- "Fullscreen recommended" intro gate (mobile only, see IS_MOBILE above)
+// — shown in front of #modeOverlay before the player ever sees a mode tile;
+// only actually revealed at the bottom of this file, once we know this isn't
+// a magic-link entry (?duel/?replay=) that intentionally skips every overlay.
+// Tapping the icon requests fullscreen (best-effort — a denied/unsupported
+// request still just falls through to revealing the menu) and hands off to
+// the normal mode-select screen.
+const fsRecommendOverlay = document.getElementById('fsRecommendOverlay');
+const fsRecommendIcon = document.getElementById('fsRecommendIcon');
+const fsRecommendText = document.getElementById('fsRecommendText');
+// iOS Safari (not already standalone) can't be put into fullscreen at all
+// (see FULLSCREEN_SUPPORTED above) — tapping the icon there would silently
+// do nothing, so the copy instead points at the one thing that actually
+// works on that browser: installing to the home screen.
+if (!FULLSCREEN_SUPPORTED && !IS_STANDALONE) {
+  fsRecommendText.textContent = 'Ajoute Nim-Curl à l’écran d’accueil pour jouer en plein écran (icône de partage Safari)';
+}
+fsRecommendIcon.addEventListener('click', () => {
+  audio.play('button');
+  if (FULLSCREEN_SUPPORTED) {
+    document.documentElement.requestFullscreen()
+      .catch((err) => console.log('[fullscreen] request failed:', err.message));
+  }
+  fsRecommendOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+});
+
+// ---- "Rotate to landscape" intro gate (mobile only) — the whole mobile
+// layout (right-margin joystick column, see style.css's .mobile-layout
+// rules) only works in landscape, so this comes ahead of even the
+// fullscreen-recommend gate above whenever a phone starts out in portrait.
+// Purely illustrative icon, no tap target — dismisses itself once the
+// orientation media query actually flips (see the listener below), same
+// "no menu detour until the real thing happened" spirit as everything else
+// gating #modeOverlay.
+const rotateOverlay = document.getElementById('rotateOverlay');
+function isPortraitMobile() { return IS_MOBILE && window.matchMedia('(orientation: portrait)').matches; }
+// What comes after the gate(s): the fullscreen-recommend prompt if that
+// parked feature gets switched back on (IOS_FULLSCREEN_FIX_ENABLED above),
+// otherwise straight to the mode-select screen. Self-contained (sets the
+// final state outright rather than assuming what ran before it), so both
+// the initial entry below and the orientation listener can just call it.
+function revealAfterGates() {
+  if (IOS_FULLSCREEN_FIX_ENABLED && !IS_STANDALONE) {
+    modeOverlay.classList.add('hidden');
+    fsRecommendOverlay.classList.remove('hidden');
+  } else {
+    modeOverlay.classList.remove('hidden');
+  }
+}
+window.matchMedia('(orientation: portrait)').addEventListener('change', (e) => {
+  // Only acts while the rotate gate is actually the thing on screen — a
+  // later rotation back to portrait (already past it, mid mode-select or
+  // mid-match) is out of scope for what's just a one-time intro screen.
+  if (IS_MOBILE && !e.matches && !rotateOverlay.classList.contains('hidden')) {
+    rotateOverlay.classList.add('hidden');
+    revealAfterGates();
+  }
+});
+
 // Best-effort: only succeeds when the app is opened inside Nimiq Pay.
 // Logged for now — wire this up to real features (wallet identity,
 // on-chain results, etc.) as the Mini App integration grows.
@@ -321,10 +395,19 @@ function beginAmbience() {
 
 // Toolbar reads as arena chrome, not app UI — stays hidden through mode-select
 // (and, for LAN, the address-entry/waiting-for-opponent lobby) and is only
-// revealed right at each of the 3 actual startGame() call sites below.
-const toolbar = document.getElementById('toolbar');
+// revealed right at each of the 3 actual startGame() call sites below. Split
+// across two bars now (see style.css #toolbar-top/#toolbar-bottom) — both
+// toggle together, there's no case where one should show without the other.
+const toolbarTop = document.getElementById('toolbar-top');
+const toolbarBottom = document.getElementById('toolbar-bottom');
+// Mobile relocation target for #tbtn-play/#tbtn-sweep/#tbtn-power (see
+// style.css's #toolbarMobile and game.js's mobile branch, which reparents
+// those buttons here) — starts hidden like the other two, revealed together.
+const toolbarMobile = document.getElementById('toolbarMobile');
 function showToolbar() {
-  toolbar.classList.remove('hidden');
+  toolbarTop.classList.remove('hidden');
+  toolbarBottom.classList.remove('hidden');
+  toolbarMobile.classList.remove('hidden');
 }
 
 modeLocal.addEventListener('click', () => {
@@ -332,7 +415,7 @@ modeLocal.addEventListener('click', () => {
   modeOverlay.classList.add('hidden');
   startOverlay.classList.remove('hidden');
   showToolbar();
-  startGame({ identiconAddress: identiconOverride('A') });
+  startGame({ identiconAddress: identiconOverride('A'), mobile: IS_MOBILE });
 });
 
 modeLan.addEventListener('click', () => {
@@ -347,7 +430,7 @@ modeSolo.addEventListener('click', () => {
   audio.play('button');
   modeOverlay.classList.add('hidden');
   showToolbar();
-  startGame({ aiTeam: 'B', identiconAddress: identiconOverride('A') });
+  startGame({ aiTeam: 'B', identiconAddress: identiconOverride('A'), mobile: IS_MOBILE });
 });
 
 // ---- Replay mode (see CLAUDE.md replay section) — upload a saved ticket
@@ -399,7 +482,7 @@ async function handleReplayFile(file) {
     }
     replayUploadOverlay.classList.add('hidden');
     beginAmbience();
-    startGame({ replayPoints: points });
+    startGame({ replayPoints: points, mobile: IS_MOBILE });
   } catch (err) {
     replayUploadStatus.textContent = 'Impossible de lire ce fichier.';
     console.log('[replay] decode failed:', err);
@@ -488,7 +571,7 @@ function showReadyScreen(net, teamLabel, cls) {
   net.onBothReady(() => {
     hideLobby();
     showToolbar();
-    startGame({ net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam) });
+    startGame({ net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), mobile: IS_MOBILE });
   });
   net.onDisconnect(() => {
     showLanJoinScreen("L'autre joueur s'est déconnecté.");
@@ -503,9 +586,19 @@ const replayFromLink = parseReplayFromLocation();
 if (replayFromLink) {
   modeOverlay.classList.add('hidden');
   beginAmbience();
-  startGame({ replayPoints: [replayFromLink] });
+  startGame({ replayPoints: [replayFromLink], mobile: IS_MOBILE });
 } else if (new URLSearchParams(location.search).has('duel')) {
   modeOverlay.classList.add('hidden');
   showLobby(`<h2>Connexion…</h2><p>Connexion au serveur du duel.</p>`);
   joinLan(defaultLanAddress(), null);
+} else if (IS_MOBILE) {
+  // Normal entry (no magic link) on a phone: gate #modeOverlay behind
+  // rotate-to-landscape first (if needed), then whatever revealAfterGates()
+  // decides comes next (see its own comment above).
+  if (isPortraitMobile()) {
+    modeOverlay.classList.add('hidden');
+    rotateOverlay.classList.remove('hidden');
+  } else {
+    revealAfterGates();
+  }
 }

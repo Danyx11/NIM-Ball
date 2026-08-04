@@ -37,7 +37,7 @@ const ICON_SOUND_ON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="c
 const ICON_SOUND_OFF = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9 L8 9 L13 4 L13 20 L8 15 L4 15 Z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M16 8l5 8M21 8l-5 8"/></svg>`;
 
 export function startGame(opts = {}) {
-  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, replayPoints = null } = opts;
+  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, replayPoints = null, mobile = false } = opts;
   // Replay mode: replayPoints is an array of previously-recorded points (see
   // src/recorder.js + src/replay.js) — one if opened from a single-point QR
   // link, several if assembled from an uploaded ticket. Mutually exclusive
@@ -82,7 +82,15 @@ export function startGame(opts = {}) {
   // at 2 — Pixi/Phaser's standard tradeoff, since the per-frame shadow blur in
   // drawContactShadow scales with pixel count) and ctx.scale()'d once so every
   // existing drawImage/fillRect/arc call keeps working unmodified.
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.3); // perf test: was 2, see perf audit
+  // Mobile gets a higher cap than desktop: .mobile-layout #scene stretches
+  // this canvas another 1.75x via CSS transform (style.css), which doesn't
+  // add any resolution of its own — it just magnifies whatever's already in
+  // the backing buffer. At the old 1.3 cap that left mobile rendering at an
+  // effective ~0.74x density (1.3/1.75), visibly softer than desktop's own
+  // capped-but-unstretched 1.3x. 2/1.75 ≈ 1.14x keeps it at least at native
+  // density post-zoom without paying for a full uncapped devicePixelRatio
+  // (3 on many phones) that the perf audit ruled out.
+  const dpr = Math.min(window.devicePixelRatio || 1, mobile ? 2 : 1.3); // perf test: was 2, see perf audit
   canvas.width = W * dpr;
   canvas.height = H * dpr;
   ctx.scale(dpr, dpr);
@@ -286,6 +294,14 @@ export function startGame(opts = {}) {
   const BOUNCE_BOOST = 1.0;                   // >1 re-adds the old arcade kick on impacts
   const MAX_DRAG = 130 * SCALE;                // ~173
   const POWER_SCALE = 0.054;
+  // Mobile only (see `mobile` opt): how a touch on a stone is told apart from
+  // one meant to reach the joystick. A short tap (released before either
+  // threshold trips) selects the stone for the joystick instead of arming a
+  // shot; holding past LONG_PRESS_MS, or moving past TAP_MOVE_THRESHOLD
+  // first, promotes straight into the same direct-drag gesture desktop uses
+  // (see beginDrag/pendingTap below) — no separate mobile drag math needed.
+  const LONG_PRESS_MS = 280;
+  const TAP_MOVE_THRESHOLD = 10 * SCALE;
   const DRAG_TICK_STEP = 8 * SCALE;            // px of drag distance between each dragTick retrigger, see onPointerMove
   const MAX_SPEED = 8;
   const STOP_THRESHOLD = 0.08;
@@ -504,6 +520,14 @@ export function startGame(opts = {}) {
   let matchIntroAnimDone = false;
   let entities = { A: [], B: [], ball: null };
   let drag = null;
+  // Mobile only: the stone a tap has selected (see LONG_PRESS_MS above) —
+  // the joystick's own drag reads/writes into this instead of whatever the
+  // pointer happens to be over, since the joystick itself never sits on top
+  // of a stone. pendingTap holds a touch that landed on a stone but hasn't
+  // yet resolved into either a tap-select or a promoted drag.
+  let selectedStone = null;
+  let pendingTap = null;
+  let joystickDrag = null;
   let readyA = false, readyB = false;
   // sweep.<team>.active: currently placed (visible only to that team while
   // aiming, or during 'sim' as the shared reveal — see sweepViewTeam/render).
@@ -882,75 +906,46 @@ export function startGame(opts = {}) {
       if (Math.hypot(g.x - pos.x, g.y - pos.y) <= g.r + 12) return g;
     return null;
   }
-  function onPointerDown(evt) {
-    audio.unlock();
-    const pos = getPointerPos(evt);
-    if (!isAimingPhase(phase)) return;
-    evt.preventDefault();
-    const g = findStoneAt(pos);
-    if (g) {
-      g.pendingVx = 0; g.pendingVy = 0;
-      // halo/LED "programmed" state (haloMode) starts the instant a stone is
-      // picked up, not only once released — onPointerUp still reverts this to
-      // false if the drag turns out too short to count as an actual shot.
-      g.used = true;
-      drag = { entity: g, startX: g.x, startY: g.y, curX: pos.x, curY: pos.y, lastTickDist: 0 };
-      audio.play('stoneSelect', { volume: 0.316 }); // -10dB
-      // aim-laser loop, runs for the whole drag until onPointerUp's stopLaser() — phase offset
-      // syncs its filter sweep to this specific stone's own halo pulse, see pulseStrength()
-      const haloIdx = parseInt(g.id.slice(1), 10) || 0;
-      audio.startLaser((haloIdx / 3) * HALO_PULSE_PERIOD);
-      return;
-    }
-    // No stone at this point — check for a grab on the aiming team's own
-    // sweep patch (only reachable/visible to them, no placement restriction
-    // per feedback: it can sit anywhere, including under a stone/the ball).
-    const team = aimingTeam();
-    if (!team) return;
-    const sw = sweep[team];
-    if (sw.active && !sw.used && Math.hypot(sw.x - pos.x, sw.y - pos.y) <= sw.r) {
-      sweepDrag = { team, offsetX: pos.x - sw.x, offsetY: pos.y - sw.y };
-    }
+  // Starts the actual pull gesture on a stone — shared by desktop's immediate
+  // pickup-on-touch (onPointerDown below) and both of mobile's two ways in:
+  // a promoted long-press (onPointerMove's pendingTap branch) and the
+  // joystick's own pointerdown (onJoystickDown), which begins the drag at
+  // curX/curY == startX/startY (zero pull) since the stick starts centered.
+  function beginDrag(g, curX, curY) {
+    g.pendingVx = 0; g.pendingVy = 0;
+    // halo/LED "programmed" state (haloMode) starts the instant a stone is
+    // picked up, not only once released — releaseDrag still reverts this to
+    // false if the drag turns out too short to count as an actual shot.
+    g.used = true;
+    drag = { entity: g, startX: g.x, startY: g.y, curX, curY, lastTickDist: 0 };
+    audio.play('stoneSelect', { volume: 0.316 }); // -10dB
+    // aim-laser loop, runs for the whole drag until releaseDrag's stopLaser() — phase offset
+    // syncs its filter sweep to this specific stone's own halo pulse, see pulseStrength()
+    const haloIdx = parseInt(g.id.slice(1), 10) || 0;
+    audio.startLaser((haloIdx / 3) * HALO_PULSE_PERIOD);
   }
-  function onPointerMove(evt) {
-    if (drag) {
-      evt.preventDefault();
-      const pos = getPointerPos(evt);
-      drag.curX = pos.x; drag.curY = pos.y;
-      // Ratchet/"machine-gun" drag feedback: retrigger a short tick every
-      // DRAG_TICK_STEP px of pull distance covered, only while stretching
-      // further out (never while easing back in, per feedback) — so the tick
-      // rate rises and falls with how fast the player is actually pulling
-      // without any timer — a fast pull crosses more step boundaries per real
-      // second than a slow one, for free. Stops once the drag is maxed out
-      // (dist clamped to MAX_DRAG); the tick itself never fires on release —
-      // onPointerUp plays 'stoneSelect'/'shot' instead.
-      const dist = Math.min(MAX_DRAG, Math.hypot(drag.startX - drag.curX, drag.startY - drag.curY));
-      audio.setLaserIntensity(dist / MAX_DRAG);
-      if (dist < MAX_DRAG) {
-        if (dist - drag.lastTickDist >= DRAG_TICK_STEP) {
-          drag.lastTickDist = dist;
-          audio.play('dragTick', { volume: 0.316, rate: 0.95 + Math.random() * 0.1 }); // -10dB
-        } else if (dist < drag.lastTickDist) {
-          // shortening: track silently so the next stretch resumes ticking
-          // right away instead of first re-crossing the old high-water mark
-          drag.lastTickDist = dist;
-        }
+  // Ratchet/"machine-gun" drag feedback: retrigger a short tick every
+  // DRAG_TICK_STEP px of pull distance covered, only while stretching further
+  // out (never while easing back in, per feedback) — so the tick rate rises
+  // and falls with how fast the player is actually pulling without any
+  // timer. Shared by the canvas drag (onPointerMove) and the joystick
+  // (onJoystickMove), both of which just feed a pull distance in.
+  function updateDragTickAudio(dist) {
+    audio.setLaserIntensity(dist / MAX_DRAG);
+    if (dist < MAX_DRAG) {
+      if (dist - drag.lastTickDist >= DRAG_TICK_STEP) {
+        drag.lastTickDist = dist;
+        audio.play('dragTick', { volume: 0.316, rate: 0.95 + Math.random() * 0.1 }); // -10dB
+      } else if (dist < drag.lastTickDist) {
+        // shortening: track silently so the next stretch resumes ticking
+        // right away instead of first re-crossing the old high-water mark
+        drag.lastTickDist = dist;
       }
-      return;
-    }
-    if (sweepDrag) {
-      evt.preventDefault();
-      const pos = getPointerPos(evt);
-      const sw = sweep[sweepDrag.team];
-      sw.x = pos.x - sweepDrag.offsetX;
-      sw.y = pos.y - sweepDrag.offsetY;
     }
   }
-  function onPointerUp(evt) {
-    if (sweepDrag) { evt.preventDefault(); sweepDrag = null; return; }
-    if (!drag) return;
-    evt.preventDefault();
+  // Commits whatever the current drag object holds — same finalize path
+  // whether that drag came from a direct canvas pull or the joystick.
+  function releaseDrag() {
     let dx = drag.startX - drag.curX;
     let dy = drag.startY - drag.curY;
     let dist = Math.hypot(dx, dy);
@@ -968,12 +963,157 @@ export function startGame(opts = {}) {
     }
     drag = null;
   }
+  function onPointerDown(evt) {
+    audio.unlock();
+    const pos = getPointerPos(evt);
+    if (!isAimingPhase(phase)) return;
+    evt.preventDefault();
+    const g = findStoneAt(pos);
+    if (g) {
+      if (mobile) {
+        // Don't arm a shot yet — wait for onPointerMove/onPointerUp to tell a
+        // tap bref (select this stone for the joystick) apart from a tap
+        // long+drag (same direct gesture as desktop, once promoted).
+        pendingTap = { entity: g, startX: pos.x, startY: pos.y, startTime: performance.now() };
+        return;
+      }
+      beginDrag(g, pos.x, pos.y);
+      return;
+    }
+    // No stone at this point — check for a grab on the aiming team's own
+    // sweep patch (only reachable/visible to them, no placement restriction
+    // per feedback: it can sit anywhere, including under a stone/the ball).
+    const team = aimingTeam();
+    if (!team) return;
+    const sw = sweep[team];
+    if (sw.active && !sw.used && Math.hypot(sw.x - pos.x, sw.y - pos.y) <= sw.r) {
+      sweepDrag = { team, offsetX: pos.x - sw.x, offsetY: pos.y - sw.y };
+    }
+  }
+  function onPointerMove(evt) {
+    if (pendingTap) {
+      evt.preventDefault();
+      const pos = getPointerPos(evt);
+      const dist = Math.hypot(pos.x - pendingTap.startX, pos.y - pendingTap.startY);
+      const held = performance.now() - pendingTap.startTime;
+      if (dist >= TAP_MOVE_THRESHOLD || held >= LONG_PRESS_MS) {
+        const g = pendingTap.entity;
+        pendingTap = null;
+        beginDrag(g, pos.x, pos.y);
+      }
+      return;
+    }
+    if (drag) {
+      evt.preventDefault();
+      const pos = getPointerPos(evt);
+      drag.curX = pos.x; drag.curY = pos.y;
+      // the tick itself never fires on release — releaseDrag plays
+      // 'stoneSelect'/'shot' instead.
+      const dist = Math.min(MAX_DRAG, Math.hypot(drag.startX - drag.curX, drag.startY - drag.curY));
+      updateDragTickAudio(dist);
+      return;
+    }
+    if (sweepDrag) {
+      evt.preventDefault();
+      const pos = getPointerPos(evt);
+      const sw = sweep[sweepDrag.team];
+      sw.x = pos.x - sweepDrag.offsetX;
+      sw.y = pos.y - sweepDrag.offsetY;
+    }
+  }
+  function onPointerUp(evt) {
+    if (sweepDrag) { evt.preventDefault(); sweepDrag = null; return; }
+    if (pendingTap) {
+      // Tap bref: released before either promotion threshold tripped above —
+      // select this stone for the joystick instead of arming a shot.
+      evt.preventDefault();
+      selectedStone = pendingTap.entity;
+      audio.play('stoneSelect', { volume: 0.316 });
+      pendingTap = null;
+      return;
+    }
+    if (!drag) return;
+    evt.preventDefault();
+    releaseDrag();
+  }
   canvas.addEventListener('mousedown', onPointerDown);
   window.addEventListener('mousemove', onPointerMove);
   window.addEventListener('mouseup', onPointerUp);
   canvas.addEventListener('touchstart', onPointerDown, { passive: false });
   window.addEventListener('touchmove', onPointerMove, { passive: false });
   window.addEventListener('touchend', onPointerUp, { passive: false });
+
+  // ---------- Mobile joystick ----------
+  // Drives the exact same `drag` object the canvas gestures above populate
+  // (see beginDrag/releaseDrag) — the stick's pull, converted from screen px
+  // to a canvas-space curX/curY around the selected stone's own position, is
+  // indistinguishable from a direct drag to every other system that reads
+  // `drag` (laser preview, halo pulse, dragTick audio, releaseDrag itself).
+  // Natural joystick semantics: push toward where you want the stone to go
+  // (unlike the canvas pull-back-to-shoot gesture) — curX/curY are placed on
+  // the opposite side of the stone from the push so releaseDrag's own
+  // startX-curX math reproduces that direction.
+  if (mobile) {
+    // Reparent the play/sweep/power toolbar buttons into #toolbarMobile (see
+    // its comment in index.html/style.css) so they sit under the joystick
+    // column instead of below the board — CSS alone can't do this because
+    // #stage-wrap (their desktop parent) is `transform`ed, which traps
+    // `position: fixed` descendants inside its own box instead of the
+    // viewport. Reparenting doesn't affect the getElementById lookups /
+    // listeners wired up below (playBtn etc.) — those resolve by id
+    // regardless of current DOM parent.
+    document.getElementById('toolbarMobile').append(
+      document.getElementById('tbtn-play'),
+      document.getElementById('tbtn-sweep'),
+      document.getElementById('tbtn-power'),
+    );
+    const joystick = document.getElementById('joystick');
+    const joystickRing = document.getElementById('joystickRing');
+    const joystickStick = document.getElementById('joystickStick');
+    function joystickClientPos(evt) {
+      const t = evt.touches ? (evt.touches[0] || evt.changedTouches[0]) : evt;
+      return { x: t.clientX, y: t.clientY };
+    }
+    function onJoystickDown(evt) {
+      audio.unlock();
+      if (!isAimingPhase(phase)) return;
+      const g = selectedStone;
+      if (!g || !currentTeamStones().includes(g)) return;
+      evt.preventDefault();
+      const rect = joystickRing.getBoundingClientRect();
+      joystickDrag = { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, r: rect.width / 2 };
+      joystickStick.classList.add('dragging');
+      beginDrag(g, g.x, g.y);
+    }
+    function onJoystickMove(evt) {
+      if (!joystickDrag) return;
+      evt.preventDefault();
+      const p = joystickClientPos(evt);
+      let dx = p.x - joystickDrag.cx, dy = p.y - joystickDrag.cy;
+      const rawDist = Math.hypot(dx, dy);
+      const clampedDist = Math.min(rawDist, joystickDrag.r);
+      const ux = rawDist > 0 ? dx / rawDist : 0, uy = rawDist > 0 ? dy / rawDist : 0;
+      joystickStick.style.transform = `translate(calc(-50% + ${(ux * clampedDist).toFixed(1)}px), calc(-50% + ${(uy * clampedDist).toFixed(1)}px))`;
+      const pullDist = (clampedDist / joystickDrag.r) * MAX_DRAG;
+      drag.curX = drag.startX - ux * pullDist;
+      drag.curY = drag.startY - uy * pullDist;
+      updateDragTickAudio(pullDist);
+    }
+    function onJoystickUp(evt) {
+      if (!joystickDrag) return;
+      evt.preventDefault();
+      joystickDrag = null;
+      joystickStick.classList.remove('dragging');
+      joystickStick.style.transform = '';
+      releaseDrag();
+    }
+    joystickRing.addEventListener('mousedown', onJoystickDown);
+    window.addEventListener('mousemove', onJoystickMove);
+    window.addEventListener('mouseup', onJoystickUp);
+    joystickRing.addEventListener('touchstart', onJoystickDown, { passive: false });
+    window.addEventListener('touchmove', onJoystickMove, { passive: false });
+    window.addEventListener('touchend', onJoystickUp, { passive: false });
+  }
 
   // ---------- UI ----------
   const overlay = document.getElementById('overlay');
@@ -1182,6 +1322,12 @@ export function startGame(opts = {}) {
     if (sw.active) { sw.used = true; sw.committed = true; }
   }
   function onValidate() {
+    // Mobile: whichever stone was selected for the joystick belonged to the
+    // team whose turn just ended — never carry it into the other team's turn
+    // (or the next round), where it'd otherwise sit there pulsing for a stone
+    // that isn't even this team's to aim.
+    selectedStone = null;
+    pendingTap = null;
     if (net) {
       if (phase !== 'lanAim') return;
       const stones = entities[myTeam].map(g => ({ vx: g.pendingVx || 0, vy: g.pendingVy || 0, used: g.used }));
@@ -1366,6 +1512,20 @@ export function startGame(opts = {}) {
         phase = 'sim';
       }, PRE_SIM_DELAY);
     });
+    // Claim this slot away from the pre-match lobby's handler (main.js's
+    // showReadyScreen, set via onOpponentJoined before startGame() ran): the
+    // arbiter re-broadcasts 'opponentJoined' to BOTH sides whenever either
+    // one (re)connects — including a same-team reconnect after a hard
+    // refresh mid-match (see server/arbiter.js's wss.on('connection', ...)).
+    // Left pointing at the stale lobby handler, that reconnect would pop the
+    // "Prêt" ready screen back onto this client's shared #overlay mid-match
+    // and, if tapped, fire a second startGame() call — startGame() has no
+    // teardown, so the old loop() keeps running with its phase/turn-timer
+    // frozen, which is what showed up as "the other machine keeps the
+    // previous match's already-elapsed timer" (see "LAN Timer sync problem
+    // nimball" design note). Once the real match is running, a mid-match
+    // 'opponentJoined' carries no useful information, so no-op it.
+    net.onOpponentJoined(() => {});
     net.onDisconnect(() => {
       // Dead-end screen (no button, no way back into aim/reveal) — leaving
       // ambience running behind it would mean it plays forever with no
@@ -2466,7 +2626,11 @@ export function startGame(opts = {}) {
     // whitelist the scoring team's halos stayed lit fixed through that
     // entire pause instead of cutting the instant the reveal ended.
     if (!isAimingPhase(phase) && phase !== 'lanWait' && phase !== 'replayAim') return 'off';
-    if (!g.used) return 'off';
+    if (!g.used) {
+      // Mobile: a tap-selected stone glows before the joystick ever arms a
+      // shot, so the player can see which stone they're about to aim.
+      return (mobile && selectedStone === g) ? 'pulse' : 'off';
+    }
     // vs-IA: the AI's shots are precomputed silently in one shot at the start
     // of the round (see prepareAiShots) — g.used flips true for all 3 of its
     // stones instantly, with no drag the player ever sees, unlike a human's
@@ -3509,50 +3673,19 @@ export function startGame(opts = {}) {
     if (!entities.ball.out) drawBall(entities.ball);
     // atmosphere.draw(ctx); // neutralized for perf, see note at createAtmosphere()
     syncSweepButton();
-    if (import.meta.env.DEV) drawPerfOverlay();
   }
 
-  // ---------- Dev perf overlay (temporary — see perf audit, delete once done) ----------
-  // Reports raw (uncapped) frame time, not the atmosphere-safe clamped `dt`
-  // below, so real stalls/spikes over 100ms are visible instead of hidden by
-  // that clamp. "worst frame" is the max seen within the current 1s window,
-  // so a single spike doesn't get averaged away before you can read it.
-  let perfWindowStart = performance.now();
-  let perfFrameCount = 0;
-  let perfMaxFrameMs = 0;
-  let perfDisplayFps = 0;
-  let perfDisplayMaxMs = 0;
-  // Logged instead of just shown on-screen: reading a live counter while
-  // also playing/dragging is unworkable, so spikes get written to the
-  // console (with the game phase at that moment) to review after the fact.
+  // ---------- Dev perf logging (temporary — see perf audit, delete once done) ----------
+  // On-screen counter removed on request (unreadable while also playing) —
+  // this keeps just the silent console-only spike log. Reports raw
+  // (uncapped) frame time, not the atmosphere-safe clamped `dt` below, so
+  // real stalls/spikes over 100ms show up instead of being hidden by that
+  // clamp.
   const PERF_SPIKE_MS = 50; // ~20fps or worse
-  function updatePerfOverlay(rawMs) {
-    if (rawMs > 0) {
-      perfFrameCount++;
-      if (rawMs > perfMaxFrameMs) perfMaxFrameMs = rawMs;
-      if (rawMs > PERF_SPIKE_MS) {
-        console.warn(`[perf] slow frame: ${rawMs.toFixed(0)}ms  phase=${phase}  t=${(performance.now() / 1000).toFixed(1)}s`);
-      }
+  function logSlowFrame(rawMs) {
+    if (rawMs > PERF_SPIKE_MS) {
+      console.warn(`[perf] slow frame: ${rawMs.toFixed(0)}ms  phase=${phase}  t=${(performance.now() / 1000).toFixed(1)}s`);
     }
-    const elapsed = performance.now() - perfWindowStart;
-    if (elapsed >= 1000) {
-      perfDisplayFps = Math.round(perfFrameCount * 1000 / elapsed);
-      perfDisplayMaxMs = perfMaxFrameMs;
-      perfFrameCount = 0;
-      perfMaxFrameMs = 0;
-      perfWindowStart = performance.now();
-    }
-  }
-  function drawPerfOverlay() {
-    ctx.save();
-    ctx.font = '16px monospace';
-    const text = `${perfDisplayFps} fps  (worst frame: ${perfDisplayMaxMs.toFixed(0)}ms)`;
-    const w = ctx.measureText(text).width + 16;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(8, 8, w, 26);
-    ctx.fillStyle = perfDisplayMaxMs > 33 ? '#ff5566' : '#7CFC9A';
-    ctx.fillText(text, 16, 26);
-    ctx.restore();
   }
 
   // ---------- Main loop ----------
@@ -3600,7 +3733,7 @@ export function startGame(opts = {}) {
 
   function loop() {
     const now = performance.now();
-    if (import.meta.env.DEV) updatePerfOverlay(lastFrameTime === null ? 0 : now - lastFrameTime);
+    if (import.meta.env.DEV) logSlowFrame(lastFrameTime === null ? 0 : now - lastFrameTime);
     // Capped so a backgrounded-tab reflow doesn't fling every particle across
     // the board in one giant jump when the frame comes back.
     const dt = lastFrameTime === null ? 1 / 60 : Math.min((now - lastFrameTime) / 1000, 0.1);

@@ -4,6 +4,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
 <title>Nim-Curl</title>
+<!-- Classic browser-tab/home-screen icon: the hex mark cropped out of
+     bg/nimiq-logo-transparent.webp (see scripts/ — generated once, not
+     wired through JS since this loads before any script runs). %BASE_URL%
+     is Vite's own placeholder for index.html, resolved the same way
+     ASSET_BASE is in JS (see background.js) — '/' in dev, '/NIM-Ball/' in
+     the GitHub Pages build. -->
+<link rel="icon" type="image/png" href="%BASE_URL%favicon.png">
+<link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon.png">
+<!-- iOS Safari never implements Element.requestFullscreen() (see main.js's
+     FULLSCREEN_SUPPORTED feature-detect) — true fullscreen there only comes
+     from launching a home-screen-installed icon in standalone mode, which
+     these two tags enable. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Nim-Curl">
 </head>
 <body>
   <img id="bg-logo" alt="logo">
@@ -14,17 +29,76 @@
     <svg class="nq-connect-icon" viewBox="0 0 54 54" aria-hidden="true"><path fill="currentColor" d="M26.95 0A27.05 27.05 0 0 0 .21 22.32a1.12 1.12 0 0 0 1.13 1.3h18.72c.62 0 1.12-.5 1.12-1.12v-8.1a2.25 2.25 0 0 1 3.66-1.76l15.75 12.6a2.25 2.25 0 0 1 0 3.52l-15.75 12.6a2.25 2.25 0 0 1-3.66-1.76v-8.1c0-.62-.5-1.12-1.12-1.12H1.35a1.14 1.14 0 0 0-1.13 1.3 27 27 0 0 0 53.55-5.78A27.25 27.25 0 0 0 26.95 0z"/></svg>
     <span id="connectBtnLabel">Connecter</span>
   </button>
-  <!-- Master audio VU meter (dev/mixing aid, see src/main.js's meter loop) —
-       reads the real combined output of every sound currently playing via an
-       AnalyserNode tapped on audio.js's master bus, not a per-sound gauge. -->
-  <div id="vuMeter">
-    <div id="vuTrack">
-      <div id="vuFill"></div>
-      <div id="vuPeakHold"></div>
+  <!-- Reserved, inactive placeholder for the desktop system column (top-right,
+       stacked under the logo) — menu (wallet/help/params/credits) is not
+       built yet, this just reserves its slot in the layout. Fullscreen
+       (below) is the real, wired-up toggle — see src/main.js. -->
+  <button id="menuBtn" class="reserved-slot" type="button" disabled aria-label="Menu (à venir)">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg>
+  </button>
+  <button id="fullscreenBtn" class="icon-btn" type="button" aria-label="Plein écran">
+    <img id="fullscreenIcon" alt="" width="20" height="20">
+  </button>
+  <!-- Mobile-only virtual joystick (see src/style.css's .mobile-layout rules
+       and src/game.js's joystick wiring in startGame()) — sits in the same
+       right-margin column as the buttons above, only shown once main.js
+       detects a coarse pointer and adds .mobile-layout to <body>. Ring is the
+       fixed track, stick is the draggable puck (translated via inline
+       transform in game.js, not real drag-and-drop). -->
+  <div id="joystick" aria-hidden="true">
+    <div id="joystickRing"><div id="joystickStick"></div></div>
+  </div>
+  <!-- Mobile-only relocation target for the play/sweep/power toolbar buttons,
+       stacked directly under #joystick above (see src/style.css's
+       .mobile-layout rules). Starts empty — src/game.js's mobile branch
+       reparents the existing #tbtn-play/#tbtn-sweep/#tbtn-power elements
+       from #toolbar-bottom into here rather than duplicating them, since
+       #toolbar-bottom's own board-relative (cqw) positioning only works
+       while its buttons stay nested inside #stage-wrap; on desktop nothing
+       ever moves them here, so this stays empty and hidden. Starts with the
+       same `hidden` class as #toolbar-top/#toolbar-bottom (see main.js's
+       showToolbar(), which reveals all three together once a match actually
+       starts) so the relocated buttons don't show up early on mode-select. -->
+  <div id="toolbarMobile" class="hidden" aria-hidden="true"></div>
+  <!-- "Rotate to landscape" intro gate, mobile-only (see main.js) — the whole
+       mobile layout (right-margin joystick column) only works in landscape,
+       so this is the very first thing a phone player in portrait sees,
+       before #modeOverlay. Purely illustrative icon — no tap target, this
+       dismisses itself automatically once main.js's orientation listener
+       sees the device actually rotate. -->
+  <div id="rotateOverlay" class="gate-overlay hidden">
+    <div class="gate-box">
+      <div id="rotateIcon" class="gate-icon">
+        <svg viewBox="0 0 160 100" aria-hidden="true">
+          <rect x="14" y="20" width="34" height="60" rx="7" fill="none" stroke="currentColor" stroke-width="4"/>
+          <circle cx="31" cy="72" r="2.4" fill="currentColor"/>
+          <path d="M50 38 C 66 6, 92 6, 104 28" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+          <polygon points="96,20 110,24 100,34" fill="currentColor"/>
+          <rect x="86" y="33" width="60" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="4"/>
+          <circle cx="140" cy="50" r="2.4" fill="currentColor"/>
+        </svg>
+      </div>
+      <p>Tourne ton téléphone en mode paysage</p>
     </div>
-    <div class="vu-labels">
-      <div class="vu-readout" id="vuPeakLabel">-∞</div>
-      <div class="vu-readout vu-readout-max" id="vuMaxLabel" title="Peak max depuis le chargement — clique pour réinitialiser">-∞</div>
+  </div>
+  <!-- "Fullscreen recommended" intro gate, mobile-only, parked behind
+       IOS_FULLSCREEN_FIX_ENABLED (see main.js) — shown after #rotateOverlay,
+       before #modeOverlay, so a phone player is nudged into fullscreen (more
+       board real-estate, no browser chrome eating into the joystick's own
+       column) before ever seeing a mode tile. Tapping the icon requests
+       fullscreen and reveals #modeOverlay underneath; already hidden by
+       default so desktop never sees a flash of it. iOS Safari never
+       implements the Fullscreen API for non-video elements though (main.js's
+       FULLSCREEN_SUPPORTED feature-detect) — there, #fsRecommendText instead
+       points the player at "Add to Home Screen" (see the apple-mobile-web-
+       app-capable meta tags above), the only way to actually drop Safari's
+       chrome on that browser. -->
+  <div id="fsRecommendOverlay" class="gate-overlay hidden">
+    <div class="gate-box">
+      <button id="fsRecommendIcon" class="gate-icon" type="button" aria-label="Passer en plein écran">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9V4h5v2H6v3H4zm0 6h2v3h3v2H4v-5zm16-6h-2V6h-3V4h5v5zm0 6v5h-5v-2h3v-3h2z"/></svg>
+      </button>
+      <p id="fsRecommendText">Plein écran recommandé</p>
     </div>
   </div>
   <!-- Sound trigger log (debug aid, see src/main.js) — each row shows a
@@ -570,12 +644,12 @@
 <div id="app">
   <div id="stage-wrap">
     <canvas id="stage" width="1200" height="905"></canvas>
-    <div id="toolbar" class="hidden">
-      <div class="tbtn-row">
-        <button class="tbtn" id="tbtn-sound" type="button" aria-label="Son">
-          <img class="tbtn-base" id="tbtn-sound-img" alt=""><img class="tbtn-cap" id="tbtn-sound-cap" alt="">
-          <div class="tbtn-muted-slash" id="tbtn-sound-slash"></div>
-        </button>
+    <div id="toolbar-top" class="hidden">
+      <button class="tbtn" id="tbtn-sound" type="button" aria-label="Son">
+        <img class="tbtn-base" id="tbtn-sound-img" alt=""><img class="tbtn-cap" id="tbtn-sound-cap" alt="">
+        <div class="tbtn-muted-slash" id="tbtn-sound-slash"></div>
+      </button>
+      <div class="tbtn-group">
         <button class="tbtn" id="tbtn-chat" type="button" aria-label="Chat">
           <img class="tbtn-base" id="tbtn-chat-img" alt=""><img class="tbtn-cap" id="tbtn-chat-cap" alt="">
           <div class="tbtn-muted-slash" id="tbtn-chat-slash"></div>
@@ -584,18 +658,18 @@
           <img class="tbtn-base" id="tbtn-exit-img" alt=""><img class="tbtn-cap" id="tbtn-exit-cap" alt="">
         </button>
       </div>
-      <div class="tbtn-row">
-        <button class="tbtn" id="tbtn-play" type="button" aria-label="Play">
-          <img class="tbtn-base" id="tbtn-play-img" alt=""><img class="tbtn-cap" id="tbtn-play-cap" alt="">
-        </button>
-        <button class="tbtn" id="tbtn-sweep" type="button" aria-label="Balai">
-          <img class="tbtn-base" id="tbtn-sweep-img" alt=""><img class="tbtn-cap" id="tbtn-sweep-cap" alt="">
-          <div class="tbtn-used-cross" id="tbtn-sweep-cross"></div>
-        </button>
-        <button class="tbtn" id="tbtn-power" type="button" aria-label="Power">
-          <img class="tbtn-base" id="tbtn-power-img" alt=""><img class="tbtn-cap" id="tbtn-power-cap" alt="">
-        </button>
-      </div>
+    </div>
+    <div id="toolbar-bottom" class="hidden">
+      <button class="tbtn" id="tbtn-sweep" type="button" aria-label="Balai">
+        <img class="tbtn-base" id="tbtn-sweep-img" alt=""><img class="tbtn-cap" id="tbtn-sweep-cap" alt="">
+        <div class="tbtn-used-cross" id="tbtn-sweep-cross"></div>
+      </button>
+      <button class="tbtn" id="tbtn-play" type="button" aria-label="Play">
+        <img class="tbtn-base" id="tbtn-play-img" alt=""><img class="tbtn-cap" id="tbtn-play-cap" alt="">
+      </button>
+      <button class="tbtn" id="tbtn-power" type="button" aria-label="Power">
+        <img class="tbtn-base" id="tbtn-power-img" alt=""><img class="tbtn-cap" id="tbtn-power-cap" alt="">
+      </button>
     </div>
     <div id="overlay" class="hidden"><div id="ovContent"></div></div>
     <div id="replayBar" class="hidden">
