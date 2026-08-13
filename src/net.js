@@ -1,8 +1,13 @@
-// Thin client wrapper around the LAN arbiter (server/arbiter.js, mounted at
+// Thin client wrapper around the two arbiter backends this game can talk to:
+// the local relay for Duel LAN (server/arbiter.js, plain `ws`, mounted at
 // ARBITER_PATH by both server/lan-server.js and server/duel-server.js — see
-// CLAUDE.md "LAN mode"). Only relays two things: which team we were
-// assigned, and each round's shot vectors once both sides have submitted —
-// no physics/state sync, the two clients simulate locally in lockstep.
+// CLAUDE.md "LAN mode") and the hosted one for Match Réseau (party/arbiter.js
+// on PartyKit — see CLAUDE.md "Network match"). Both speak the exact same
+// message protocol (party/arbiter.js is a straight port of
+// server/arbiter.js) — which team we were assigned, and each round's shot
+// vectors once both sides have submitted, no physics/state sync, the two
+// clients simulate locally in lockstep — so a single connectSocket() below
+// wires up either; only the URL differs.
 
 // Kept in sync with server/arbiter.js's ARBITER_PATH (not imported directly —
 // that file only runs under Node, this one only in the browser bundle).
@@ -16,10 +21,28 @@ function arbiterUrl(base) {
 }
 
 export function connectLan(base) {
+  return connectSocket(arbiterUrl(base));
+}
+
+// Match Réseau: same arbiter logic (party/arbiter.js), hosted on PartyKit and
+// addressed by room id instead of a LAN address — the 4-character code
+// shown/typed on the host/join screen (see main.js) IS that room id (same
+// "first connection = A, second = B" assignment as connectLan, just routed
+// by code instead of connection order on a shared LAN address). In dev, this
+// points at a locally running `npm run party:dev` (localhost:1999) instead
+// of the deployed project — same "advanced two-process" pattern already used
+// for LAN dev (npm run lan-server + npm run dev -- --host).
+const PARTY_HOST = import.meta.env.DEV ? 'ws://localhost:1999' : 'wss://nim-ball.danyx11.partykit.dev';
+
+export function connectMatch(code) {
+  return connectSocket(`${PARTY_HOST}/parties/main/${code}`);
+}
+
+function connectSocket(url) {
   return new Promise((resolve, reject) => {
     let ws;
     try {
-      ws = new WebSocket(arbiterUrl(base));
+      ws = new WebSocket(url);
     } catch (err) {
       reject(err);
       return;

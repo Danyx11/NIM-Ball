@@ -1151,6 +1151,19 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* ---------- Replay mode (see CLAUDE.md replay section) ---------- */
 .half.d { background: rgba(45,140,130,0.55); }
 
+/* ---------- Network match (see CLAUDE.md "Network match") ---------- */
+.half.e { background: rgba(168,110,50,0.55); }
+/* The host's shareable 4-character room code (see main.js's
+   showMatchHostWaitingScreen) — big and spaced out, read/typed by the other
+   player rather than clicked, so legibility matters more than tile styling. */
+.match-code {
+  font-family: 'Mulish', sans-serif;
+  font-weight: 800;
+  font-size: 42px;
+  letter-spacing: 10px;
+  padding: 10px 0;
+}
+
 /* Ticket point-QR tiles are also directly clickable on the same device that's
    displaying the ticket (see game.js showVictory) — invisible hit regions
    layered over the baked-in QR pixels, positioned as percentages of the
