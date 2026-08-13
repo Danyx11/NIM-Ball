@@ -56,42 +56,6 @@ const audioReady = audio.load();
 // audio.play('button').
 document.addEventListener('pointerdown', () => audio.unlock(), { once: true });
 
-// ---- Sound trigger log (#soundLog in index.html, debug aid) — shows a
-// one-shot SFX's own name for SOUND_LOG_MS every time audio.js's onPlay()
-// fires, so a sound you can hear but can't place shows itself here as it
-// triggers. Fixed row count, round-robin: a new trigger claims the next row
-// in order (wrapping around) regardless of whether older rows have expired
-// yet, so several sounds firing close together each get their own visible
-// row instead of overwriting one shared line.
-const SOUND_LOG_ROWS = 6;
-const SOUND_LOG_MS = 3000;
-const soundLogEl = document.getElementById('soundLog');
-const soundLogSlots = Array.from({ length: SOUND_LOG_ROWS }, () => {
-  const row = document.createElement('div');
-  row.className = 'sound-log-row';
-  soundLogEl.appendChild(row);
-  return { el: row, expiresAt: 0 };
-});
-let soundLogNext = 0;
-audio.onPlay((name) => {
-  const slot = soundLogSlots[soundLogNext];
-  soundLogNext = (soundLogNext + 1) % SOUND_LOG_ROWS;
-  slot.el.textContent = name;
-  slot.el.classList.add('show');
-  slot.expiresAt = performance.now() + SOUND_LOG_MS;
-});
-function updateSoundLog() {
-  const now = performance.now();
-  for (const slot of soundLogSlots) {
-    if (slot.expiresAt && now >= slot.expiresAt) {
-      slot.el.classList.remove('show');
-      slot.expiresAt = 0;
-    }
-  }
-  requestAnimationFrame(updateSoundLog);
-}
-requestAnimationFrame(updateSoundLog);
-
 // ---- Toolbar: 6 buttons pulled from design-lab's "boutons" layer (+
 // hand-supplied "exit" and "chat" icons), sat above the board in two rows of
 // 3 (see style.css #toolbar/.tbtn-row and index.html for the row split).
@@ -141,11 +105,15 @@ const powerBtn = document.getElementById('tbtn-power');
 const powerCap = document.getElementById('tbtn-power-cap');
 function syncPowerButton() { powerCap.src = isBasicLaser() ? POWER_CAP_SRC.off : POWER_CAP_SRC.on; }
 syncPowerButton();
-powerBtn.addEventListener('click', () => {
+// Factored out so the "laser" HUD rock (see startGame's onRockPower option,
+// wired to game.js's own canvas click hit-testing) can trigger the exact
+// same logic as the old toolbar button, not a separate copy of it.
+function triggerPower() {
   playToolbarClick(powerCap);
   setBasicLaser(!isBasicLaser());
   syncPowerButton();
-});
+}
+powerBtn.addEventListener('click', triggerPower);
 
 // "sound": mutes/unmutes the shared audio singleton — every in-match SFX
 // (game.js) plus the ambience loop below all read the same muted flag, so
@@ -158,20 +126,28 @@ const soundCap = document.getElementById('tbtn-sound-cap');
 const soundSlash = document.getElementById('tbtn-sound-slash');
 function syncSoundButton() { soundSlash.classList.toggle('show', audio.isMuted()); }
 syncSoundButton();
-soundBtn.addEventListener('click', () => {
+// Factored out so the "sound" HUD rock (see startGame's onRockSound option)
+// can trigger the exact same logic as the old toolbar button.
+function triggerSound() {
   playToolbarClick(soundCap);
   audio.setMuted(!audio.isMuted());
   syncSoundButton();
-});
+}
+soundBtn.addEventListener('click', triggerSound);
 
 // "exit": standard confirm dialog in the shared #overlay/#ovContent modal
-// (see showLobby/hideLobby below, also used for the LAN lobby screens) rather
-// than a bespoke one — reloading the page on confirm is the simplest way to
-// get back to a clean mode-select screen, since startGame() has no teardown
-// path of its own to unwind an in-progress match.
+// (see showLobby/hideLobby below, also used for the LAN lobby screens)
+// rather than a bespoke one. "Oui" tears the match down in place via
+// activeStopGame (game.js's stopGame(), see rockHandlers below) and reveals
+// mode-select directly (returnToModeSelect) — no page reload, so this used
+// to wait for the exitPanel clip's onEnded before reload() could even start;
+// now there's no navigation to wait on, so the clip just plays fire-and-
+// forget alongside the instant cut instead of gating it.
 const exitBtn = document.getElementById('tbtn-exit');
 const exitCap = document.getElementById('tbtn-exit-cap');
-exitBtn.addEventListener('click', () => {
+// Factored out so the "exit" HUD rock (see startGame's onRockExit option)
+// can trigger the exact same logic as the old toolbar button.
+function triggerExit() {
   playToolbarClick(exitCap);
   showLobby(`
     <h2>Quitter la partie ?</h2>
@@ -181,25 +157,43 @@ exitBtn.addEventListener('click', () => {
       <button class="bigbtn" id="exitNoBtn">Non</button>
     </div>
   `);
-  // stopAmbience() explicitly rather than relying on reload()'s teardown —
-  // makes the cut instant instead of trailing for whatever the navigation
-  // takes to commit. reload() itself waits for exitPanel's onEnded so the
-  // clip is never cut short by the navigation (muted/missing still resolves
-  // instantly, see play()'s onEnded contract).
   document.getElementById('exitYesBtn').onclick = () => {
     audio.stopAmbience();
-    audio.play('exitPanel', { volume: 0.501, onEnded: () => location.reload() }); // -6dB
+    audio.play('exitPanel', { volume: 0.501 }); // -6dB, fire-and-forget
+    hideLobby();
+    activeStopGame?.();
+    returnToModeSelect();
   };
   document.getElementById('exitNoBtn').onclick = () => { audio.play('button'); hideLobby(); };
-});
+}
+exitBtn.addEventListener('click', triggerExit);
+
+// The 5 HUD rocks baked into the V2 arena art (see design-lab's
+// arena-v2-hud-buttons.html for the original zone-mapping prototype) replace
+// the old round toolbar buttons entirely (see style.css hiding #toolbar-top/
+// #toolbar-bottom) — game.js does the actual canvas-space click
+// hit-testing (it already owns all pointer input on the canvas), and calls
+// back out to these 3 for the buttons main.js itself owns. "play"/"ice" stay
+// inside game.js's own startGame() closure (triggerPlay/triggerSweep) since
+// they need live phase/entities state, same as before.
+// Current match's teardown fn (see game.js's stopGame(), returned from
+// startGame() — see each call site below) — null on mode-select, where
+// there's nothing running to tear down.
+let activeStopGame = null;
+// onExit: returnToModeSelect (a hoisted function declaration further down —
+// safe to reference here) is how game.js's own internal exit buttons
+// (post-match "Menu", replay's exit) reach the same "show mode-select" reveal
+// after calling stopGame() themselves.
+const rockHandlers = { onRockSound: triggerSound, onRockExit: triggerExit, onRockPower: triggerPower, onExit: returnToModeSelect };
 
 // Nimiq logo doubles as a "back to menu" shortcut, same confirm dialog as
 // the exit toolbar button above (only relevant once a match is running —
 // on the mode-select screen there's no game in progress to lose) — always
 // confirmed, replay included, so an accidental click never dumps the player
-// straight out. In replay, "Oui" reuses replayExitBtn's own exit path
-// (game.js): a plain reload() would re-read a still-present ?replay= param
-// and jump straight back into the same replay.
+// straight out. No page reload either way now (see triggerExit above) — a
+// still-present ?replay= param no longer matters for landing on mode-select,
+// but stopGame() itself still strips it (history.replaceState) so a later
+// real page refresh doesn't relaunch the same replay.
 const bgLogo = document.getElementById('bg-logo');
 const replayBar = document.getElementById('replayBar');
 bgLogo.addEventListener('click', () => {
@@ -216,16 +210,12 @@ bgLogo.addEventListener('click', () => {
   `);
   document.getElementById('logoYesBtn').onclick = () => {
     audio.stopAmbience();
-    if (inReplay) {
-      // Replay's "Oui" keeps the plain button click (same as replayExitBtn's
-      // own direct exit) — only a live match's quit gets the exit-panel sound.
-      audio.play('button');
-      location.href = location.pathname;
-    } else {
-      // Navigation waits for exitPanel's onEnded so the clip is never cut
-      // short by the reload (muted/missing still resolves instantly).
-      audio.play('exitPanel', { volume: 0.501, onEnded: () => location.reload() }); // -6dB
-    }
+    // Replay's "Oui" keeps the plain button click — only a live match's
+    // quit gets the exit-panel sound.
+    audio.play(inReplay ? 'button' : 'exitPanel', inReplay ? undefined : { volume: 0.501 }); // -6dB, fire-and-forget
+    hideLobby();
+    activeStopGame?.();
+    returnToModeSelect();
   };
   document.getElementById('logoNoBtn').onclick = () => { audio.play('button'); hideLobby(); };
 });
@@ -313,6 +303,7 @@ function isPortraitMobile() { return IS_MOBILE && window.matchMedia('(orientatio
 function revealAfterGates() {
   if (IOS_FULLSCREEN_FIX_ENABLED && !IS_STANDALONE) {
     modeOverlay.classList.add('hidden');
+    fsRecommendOverlay.style.display = '';
     fsRecommendOverlay.classList.remove('hidden');
   } else {
     modeOverlay.classList.remove('hidden');
@@ -410,12 +401,29 @@ function showToolbar() {
   toolbarMobile.classList.remove('hidden');
 }
 
+// "Now show mode-select" half of the exit flow — the actual match teardown
+// (rAF loop, listeners, LAN socket, timers) is owned by game.js's own
+// stopGame(), captured below into activeStopGame at every startGame() call
+// site and returned again as opts.onExit so game.js's own internal exit
+// buttons (post-match "Menu", replay's exit) can reach this same reveal
+// without going through main.js's toolbar/logo at all. A function
+// declaration (not const) so it's hoisted — rockHandlers below references it
+// before this line runs.
+function returnToModeSelect() {
+  activeStopGame = null;
+  toolbarTop.classList.add('hidden');
+  toolbarBottom.classList.add('hidden');
+  toolbarMobile.classList.add('hidden');
+  startOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+}
+
 modeLocal.addEventListener('click', () => {
   audio.play('button');
   modeOverlay.classList.add('hidden');
   startOverlay.classList.remove('hidden');
   showToolbar();
-  startGame({ identiconAddress: identiconOverride('A'), mobile: IS_MOBILE });
+  activeStopGame = startGame({ ...rockHandlers, identiconAddress: identiconOverride('A'), mobile: IS_MOBILE });
 });
 
 modeLan.addEventListener('click', () => {
@@ -430,7 +438,7 @@ modeSolo.addEventListener('click', () => {
   audio.play('button');
   modeOverlay.classList.add('hidden');
   showToolbar();
-  startGame({ aiTeam: 'B', identiconAddress: identiconOverride('A'), mobile: IS_MOBILE });
+  activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), mobile: IS_MOBILE });
 });
 
 // ---- Replay mode (see CLAUDE.md replay section) — upload a saved ticket
@@ -482,7 +490,7 @@ async function handleReplayFile(file) {
     }
     replayUploadOverlay.classList.add('hidden');
     beginAmbience();
-    startGame({ replayPoints: points, mobile: IS_MOBILE });
+    activeStopGame = startGame({ ...rockHandlers, replayPoints: points, mobile: IS_MOBILE });
   } catch (err) {
     replayUploadStatus.textContent = 'Impossible de lire ce fichier.';
     console.log('[replay] decode failed:', err);
@@ -571,34 +579,47 @@ function showReadyScreen(net, teamLabel, cls) {
   net.onBothReady(() => {
     hideLobby();
     showToolbar();
-    startGame({ net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), mobile: IS_MOBILE });
+    activeStopGame = startGame({ ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), mobile: IS_MOBILE });
   });
   net.onDisconnect(() => {
     showLanJoinScreen("L'autre joueur s'est déconnecté.");
   });
 }
 
-// Magic links, both skip mode-select entirely: ?duel (printed by `npm run
-// duel`) connects straight to this same page's arbiter; ?replay=<data>
-// (from a point QR — see src/replay.js buildReplayUrl) jumps straight into
-// replaying that single point, same "no menu detour" idea as ?duel.
-const replayFromLink = parseReplayFromLocation();
-if (replayFromLink) {
-  modeOverlay.classList.add('hidden');
-  beginAmbience();
-  startGame({ replayPoints: [replayFromLink], mobile: IS_MOBILE });
-} else if (new URLSearchParams(location.search).has('duel')) {
-  modeOverlay.classList.add('hidden');
-  showLobby(`<h2>Connexion…</h2><p>Connexion au serveur du duel.</p>`);
-  joinLan(defaultLanAddress(), null);
-} else if (IS_MOBILE) {
-  // Normal entry (no magic link) on a phone: gate #modeOverlay behind
-  // rotate-to-landscape first (if needed), then whatever revealAfterGates()
-  // decides comes next (see its own comment above).
-  if (isPortraitMobile()) {
-    modeOverlay.classList.add('hidden');
+// ---- Title/splash screen (see index.html's #homeOverlay comment) — the
+// very first thing a normal (non-magic-link) entry sees, above even the
+// mobile rotate/fullscreen gates. Its own reveal logic is exactly what used
+// to run unconditionally at the bottom of this file for a plain mobile
+// entry; pulled into a function so both the mobile and desktop paths (which
+// previously just relied on #modeOverlay's default-visible markup) go
+// through the same explicit call once the player actually taps PLAY.
+const homeOverlay = document.getElementById('homeOverlay');
+function revealMenu() {
+  if (IS_MOBILE && isPortraitMobile()) {
+    rotateOverlay.style.display = '';
     rotateOverlay.classList.remove('hidden');
   } else {
     revealAfterGates();
   }
+}
+homeOverlay.addEventListener('click', () => {
+  audio.play('button');
+  homeOverlay.classList.add('hidden');
+  revealMenu();
+});
+
+// Magic links, all three skip mode-select (and now the home screen) entirely:
+// ?duel (printed by `npm run duel`) connects straight to this same page's
+// arbiter; ?replay=<data> (from a point QR — see src/replay.js
+// buildReplayUrl) jumps straight into replaying that single point — same
+// "no menu detour" idea as ?duel, now also skipping the splash screen.
+const replayFromLink = parseReplayFromLocation();
+if (replayFromLink) {
+  homeOverlay.classList.add('hidden');
+  beginAmbience();
+  activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], mobile: IS_MOBILE });
+} else if (new URLSearchParams(location.search).has('duel')) {
+  homeOverlay.classList.add('hidden');
+  showLobby(`<h2>Connexion…</h2><p>Connexion au serveur du duel.</p>`);
+  joinLan(defaultLanAddress(), null);
 }

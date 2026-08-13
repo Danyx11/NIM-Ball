@@ -34,8 +34,37 @@ export async function getIdenticonPngDataUrl(address, size = 512) {
   return canvas.toDataURL('image/png');
 }
 
-async function rasterize(address, size) {
-  const svgMarkup = await Identicons.svg(address);
+// A tighter "bust" version of the identicon — background AND legs/feet
+// stripped — used only for compositing into a stone's glass window, where a
+// bigger window has room to zoom in on the character but not on its legs.
+// The lib always emits this exact fixed-position background rect as the
+// second element of its SVG template (identicons.bundle.cjs.js: `<rect
+// fill="${bg}" x="0" y="0" width="160" height="160"/>`), so stripping it by
+// pattern is reliable, not a guess. Every identicon is composed of exactly
+// four parts in a fixed order — top (hair), side (ears), face, bottom (legs/
+// feet, sometimes a held prop) — one per line in that same template, always
+// 15 lines total regardless of which address/assets are picked, with
+// "bottom" always the 3rd-from-last line — confirmed by inspecting the
+// library source and cross-checking against several generated addresses
+// (see conversation), not assumed.
+const BG_RECT_RE = /<rect fill="[^"]*" x="0" y="0" width="160" height="160"\/>/;
+const BOTTOM_LINE_FROM_END = 3;
+const stoneBustCanvasCache = new Map();
+
+export function getIdenticonCanvasStoneBust(address, size = 512) {
+  const key = `${address}:${size}`;
+  if (!stoneBustCanvasCache.has(key)) stoneBustCanvasCache.set(key, rasterize(address, size, { stripBackground: true, stripLegs: true }));
+  return stoneBustCanvasCache.get(key);
+}
+
+async function rasterize(address, size, { stripBackground = false, stripLegs = false } = {}) {
+  let svgMarkup = await Identicons.svg(address);
+  if (stripBackground) svgMarkup = svgMarkup.replace(BG_RECT_RE, '');
+  if (stripLegs) {
+    const lines = svgMarkup.split('\n');
+    lines.splice(lines.length - BOTTOM_LINE_FROM_END, 1);
+    svgMarkup = lines.join('\n');
+  }
   const blobUrl = URL.createObjectURL(new Blob([svgMarkup], { type: 'image/svg+xml' }));
   try {
     const img = await loadImage(blobUrl);

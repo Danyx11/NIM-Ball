@@ -41,10 +41,10 @@ function getHubApi() {
 }
 
 // The chosen address is only re-requested from the Hub when the player
-// explicitly clicks connect again — persisted here so it survives the
-// location.reload() that "Quitter"/"Retour au menu" do to get back to a
-// clean mode-select screen (see main.js/game.js), instead of forgetting the
-// connection on every trip back to the menu.
+// explicitly clicks connect again — persisted here so it survives a real
+// page refresh (there's no page reload on "Quitter"/"Retour au menu"
+// anymore, see game.js's stopGame(), but a manual F5 still counts), instead
+// of forgetting the connection every time.
 const HUB_ADDRESS_KEY = 'nimball-hub-address';
 
 export function getStoredAddress() {

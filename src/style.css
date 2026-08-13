@@ -37,12 +37,19 @@ html, body {
   /* Shared with #bg-logo below so the logo can center itself in the margin
      between the viewport edge and the card's actual left edge, whatever
      that edge ends up being at a given viewport size. */
-  --card-w: min(82vw, 1300px, calc(90vh * 2400 / 1450));
-  /* Card's own aspect ratio (2400/1450) as a height, so anything anchored
-     above the card (the connect button below) can stay clear of its actual
-     top edge instead of a hardcoded offset that only works at one
-     viewport size. */
-  --card-h: calc(var(--card-w) * 1450 / 2400);
+  /* Ratio (3312/1896) matches the V2 arena art's own native size exactly —
+     the art is now the whole self-contained scene (forest baked in, no
+     separate constellation background needed underneath it, see
+     conversation), so the card's shape IS the board's shape, not an
+     independent frame around a smaller inset board like the old 2400/1450
+     card was. Every var() below (right-margin, joystick geometry, etc.) is
+     formula-driven off --card-w, not a hardcoded px, so this one ratio
+     change is the only edit needed for the whole cascade to follow. */
+  --card-w: min(82vw, 1300px, calc(90vh * 3312 / 1896));
+  /* Card's own aspect ratio as a height, so anything anchored above the
+     card (the connect button below) can stay clear of its actual top edge
+     instead of a hardcoded offset that only works at one viewport size. */
+  --card-h: calc(var(--card-w) * 1896 / 3312);
   /* Card now sits flush against the left edge (see #game-card) instead of
      centered, so the entire leftover width becomes one right-side margin
      column (logo/connect/reserved slots below, eventually the mobile
@@ -111,7 +118,7 @@ html, body {
 
 /* Mobile card size: bigger fractions than desktop's 82vw/90vh, closer to the
    actual screen edges, per explicit request. Custom properties don't
-   reactively re-derive, though: :root's --right-margin/--joy-*/--joy-center-
+   reactively re-derive, though: :root's --right-margin/--joy- (asterisk)/--joy-center-
    right above already baked in :root's OWN --card-w (82vw) the moment they
    were declared, and that already-substituted value is what inherits down —
    overriding --card-w here doesn't retroactively recompute them. So the
@@ -119,7 +126,7 @@ html, body {
    resolves against *this* rule's --card-w instead of :root's. Keep this in
    sync with the :root block above if that formula ever changes. */
 .mobile-layout {
-  --card-w: min(92vw, 1300px, calc(96vh * 2400 / 1450));
+  --card-w: min(92vw, 1300px, calc(96vh * 3312 / 1896));
   --right-margin: calc(100vw - var(--card-w) - var(--card-left-gap));
   --joy-d-full: min(calc(var(--right-margin) - 48px), calc(var(--joy-free-h) - 32px), 260px);
   --joy-d: calc(var(--joy-d-full) * 0.9);
@@ -203,9 +210,9 @@ html, body {
    logic); menuBtn stays a .reserved-slot until the menu itself is built. */
 .icon-btn {
   position: fixed;
-  /* Above #soundLog (z-index 3) — that debug overlay sits in the same
-     right-hand column and, at some viewport widths, physically overlaps
-     this button's slot; without this it's rendered but unclickable. */
+  /* Above other z-index:3 elements sharing this right-hand column, which at
+     some viewport widths physically overlap this button's slot; without
+     this it's rendered but unclickable. */
   z-index: 4;
   right: calc(var(--right-margin) / 2 - 22px);
   width: 44px;
@@ -422,35 +429,20 @@ html, body {
   text-align: center;
 }
 
-/* Sound trigger log — each row independently fading in/out as main.js's
-   onPlay() listener fills/clears it (see .sound-log-row.show below), not a
-   scrolling list. (VU meter removed for now — see git history to bring it
-   back.) */
-#soundLog {
+/* Title/splash screen — the very first thing a non-magic-link entry sees
+   (see index.html's own comment + revealMenu() in main.js). Sits above every
+   other overlay, including #game-card itself, since it gates the whole app.
+   PLAY is baked into home-screen.webp (design/ecran acceuil.png) rather than
+   a separate DOM button — the entire overlay is the tap target. */
+#homeOverlay {
   position: fixed;
-  z-index: 3;
-  top: 250px;
-  right: calc(var(--right-margin) / 2 - 50px);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 150px;
+  inset: 0;
+  z-index: 40;
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
 }
-.sound-log-row {
-  padding: 3px 6px;
-  border-radius: 4px;
-  background: #10182e;
-  border: 1px solid #263259;
-  color: #8fb4ff;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0;
-  transition: opacity 200ms ease;
-}
-.sound-log-row.show { opacity: 1; }
+#homeOverlay.hidden { display: none; }
 
 #game-card {
   position: fixed;
@@ -459,7 +451,7 @@ html, body {
   left: var(--card-left-gap);
   transform: translateY(-50%);
   width: var(--card-w);
-  aspect-ratio: 2400 / 1450;
+  aspect-ratio: 3312 / 1896;
   border: 1px solid #232838;
   border-radius: 14px;
   overflow: hidden;
@@ -481,7 +473,7 @@ html, body {
      at 1.4 the board's bottom ran ~7px past the card's fixed-size box).
      1.32 keeps a small safety margin at the bottom while still reading
      bigger than the original 1.25. */
-  transform: scale(1);
+  transform: scale(1.3);
   transform-origin: center;
 }
 /* Mobile-only: zoom in tighter on the gameplay, less surrounding forest —
@@ -506,22 +498,11 @@ html, body {
    (a few px), trading the bottom margin away since .mobile-layout #scene's
    1.75x zoom already crops aggressively there anyway. */
 .mobile-layout #app { justify-content: flex-start; padding-top: 0; }
-/* Desktop's translateY(6.52%) (see #stage-wrap below) exists to rebalance
-   frame.webp's asymmetric transparent margin (~8% above the scoreboard vs
-   ~21% below) for a centered layout — it pushes the board DOWN, which is
-   exactly what mobile doesn't want now that #app is top-aligned above. Mobile
-   already accepts an aggressive bottom crop (.mobile-layout #scene's 1.75x
-   zoom), so dropping it here trades that same asymmetry away at the top
-   instead, getting the scoreboard as close to #game-card's top as the art's
-   own baked-in margin (~8% of the board's height) allows. */
-/* -8.2% (not 0) crops away frame.webp's own baked-in empty margin above the
-   scoreboard (measured rows 0-74 of 905, see #stage-wrap's desktop comment
-   above) instead of just stopping at flush-with-#app's-top — frees that same
-   ~8% of height at the bottom so more of the board/wood-frame's bottom edge
-   stays visible instead of running off #game-card's fixed height. #toolbar-top
-   (sound/chat/exit) sits further down than this margin (~TIMER_BAR_Y, see
-   game.js) so it isn't clipped by this crop. */
-.mobile-layout #stage-wrap { transform: translateY(-8.2%); }
+/* Was translateY(-8.2%): cropped away frame.webp's own baked-in empty
+   margin above the old scoreboard plank. The V2 art has no such margin (no
+   plank at all — score moved onto the ice, see the score-under-ice
+   rendering in game.js) and fills #game-card exactly, so no crop
+   correction is needed here any more — left as the default (no transform). */
 
 /* Board width as a fraction of the CARD (validated in the mockup at 74%),
    not the viewport — #game-card's own min(70vw,1100px) already handles the
@@ -546,7 +527,14 @@ html, body {
    width of its own, and a plain % width there would resolve against that
    group's own indefinite size (silently landing at the wrong, smaller size)
    rather than the toolbar's actual full-width bar. */
-#stage-wrap { position: relative; width: 70%; transform: translateY(6.52%); container-type: inline-size; }
+/* Was 70% width + translateY(6.52%): the old frame.webp had a big
+   asymmetric transparent margin (~8% above the scoreboard plank, ~21%
+   below) that those numbers corrected for, centering the art actually
+   visible inside an oversized transparent canvas. The V2 art has no
+   transparent margin at all (fully opaque self-contained scene, see
+   #game-card above) — it fills #game-card exactly by design, so the board
+   is simply the whole card now, no correction needed. */
+#stage-wrap { position: relative; width: 100%; container-type: inline-size; }
 canvas {
   display: block; width: 100%; height: auto; touch-action: none;
 }
@@ -721,10 +709,14 @@ button:disabled { opacity: 0.35; cursor: default; }
   gap: 3%;
   z-index: 5;
 }
-/* Toolbar reads as part of the arena graphics, not app chrome — stays hidden
-   through the local/LAN/solo mode-select screen and is only revealed once
-   main.js actually starts a game (see showToolbar() there). */
-#toolbar-top.hidden, #toolbar-bottom.hidden { display: none; }
+/* Retired for the V2 arena art: the 5 HUD rocks baked into frame.webp
+   replace these round buttons entirely (see game.js's ROCK_ZONES/
+   onPointerDown and main.js's rockHandlers) — unconditionally hidden now
+   regardless of showToolbar()'s hidden-class toggle in main.js, rather than
+   ripping out that JS (still harmlessly running, just with nothing visible
+   to show/hide). Revisit if a future skin goes back to needing an on-screen
+   toolbar. */
+#toolbar-top, #toolbar-bottom { display: none !important; }
 .tbtn {
   position: relative;
   /* cqw (of #stage-wrap, see its container-type), not % — keeps the same
@@ -872,6 +864,36 @@ button:disabled { opacity: 0.35; cursor: default; }
 .half .sub { font-size: 12px; color: rgba(255,255,255,0.85); max-width: 150px; }
 .half .check { font-size: 30px; }
 
+/* Mode-select right-drawer override, ID-scoped so #startOverlay (which
+   shares .team-select/.half for its own team-ready screen) is unaffected.
+   Full inset (was rink-only) since #modeOverlayBg now replaces the visible
+   arena art entirely instead of just tinting the ice; the four mode tiles
+   move from a full-width row into a vertical drawer docked to the right
+   (design/ecran acceuil empty.png as the darkened backdrop — see
+   src/background.js). Rough first pass per the brief — colors/spacing/
+   Nimiq branding for this column TBD later. */
+/* No display override here on purpose — children are all position:absolute
+   (out of flow), so .team-select's own display:flex is harmless, and
+   leaving display alone keeps .team-select.hidden's display:none (a plain
+   class selector) able to win over this ID-scoped rule instead of being
+   beaten by higher ID specificity. */
+#modeOverlay { inset: 0; border-radius: 0; }
+#modeOverlayBg { position: absolute; inset: 0; background-size: cover; background-position: center; }
+.mode-select-scrim { position: absolute; inset: 0; background: rgba(6,14,18,0.5); }
+.mode-drawer {
+  position: absolute;
+  top: 8%;
+  bottom: 8%;
+  right: 4%;
+  width: 30%;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 20px;
+  overflow: hidden;
+}
+
 #overlay input[type="text"] {
   font-family: inherit; font-size: 15px; color: var(--ink); background: var(--bg-mid);
   border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; padding: 12px 14px;
@@ -888,7 +910,15 @@ button:disabled { opacity: 0.35; cursor: default; }
      (#game-card) is what handles the viewport-responsive sizing now, and
      .fond-layer's own background-size:cover fills whatever box this ends up
      being, same as before. */
+  /* Hidden for the V2 arena art: that art already bakes in its own forest
+     scene (see #game-card/#stage-wrap above), so this separate constellation
+     background would either be fully occluded behind the now fully-opaque
+     board or, worse, mismatch at the edges — rather than delete the whole
+     layer (and its JS wiring in background.js/main.js), just stop it from
+     rendering/animating. Revisit if a future skin goes back to a small inset
+     board with transparent margins. */
   #bg-stage {
+    display: none;
     position: absolute;
     inset: 0;
     background: #060716;
@@ -1038,7 +1068,11 @@ button:disabled { opacity: 0.35; cursor: default; }
      up as a visible seam where the picture stops and the card's plain
      background starts. 130% pushes both edges safely outside the card at
      any .scene scale we're likely to use. */
+  /* Hidden for the V2 arena art, same reasoning as #bg-stage above — this
+     layer's own translateY(6.52%) also matched the old board's now-removed
+     offset, so it'd be stale even if shown. */
   #bg-nature {
+    display: none;
     position: absolute;
     top: 50%;
     left: 50%;
@@ -1050,6 +1084,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   }
 
   #fg-stage {
+    display: none;
     position: absolute;
     top: 50%;
     left: 50%;
@@ -1173,7 +1208,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   padding: 0;
 }
 .replay-rail-thumb.current { border-color: var(--accent); }
-.replay-rail-thumb img { display: block; width: 100%; aspect-ratio: 1200 / 905; object-fit: cover; background: var(--bg-mid); }
+.replay-rail-thumb img { display: block; width: 100%; aspect-ratio: 3312 / 1896; object-fit: cover; background: var(--bg-mid); }
 .replay-rail-thumb-meta { display: flex; align-items: center; gap: 6px; padding: 4px 8px 6px; }
 .replay-rail-thumb-team { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
 .replay-rail-thumb-team.a { background: var(--teamA); }

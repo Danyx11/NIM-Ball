@@ -66,7 +66,7 @@
        before #modeOverlay. Purely illustrative icon — no tap target, this
        dismisses itself automatically once main.js's orientation listener
        sees the device actually rotate. -->
-  <div id="rotateOverlay" class="gate-overlay hidden">
+  <div id="rotateOverlay" class="gate-overlay hidden" style="display:none">
     <div class="gate-box">
       <div id="rotateIcon" class="gate-icon">
         <svg viewBox="0 0 160 100" aria-hidden="true">
@@ -93,7 +93,7 @@
        points the player at "Add to Home Screen" (see the apple-mobile-web-
        app-capable meta tags above), the only way to actually drop Safari's
        chrome on that browser. -->
-  <div id="fsRecommendOverlay" class="gate-overlay hidden">
+  <div id="fsRecommendOverlay" class="gate-overlay hidden" style="display:none">
     <div class="gate-box">
       <button id="fsRecommendIcon" class="gate-icon" type="button" aria-label="Passer en plein écran">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9V4h5v2H6v3H4zm0 6h2v3h3v2H4v-5zm16-6h-2V6h-3V4h5v5zm0 6v5h-5v-2h3v-3h2z"/></svg>
@@ -101,10 +101,15 @@
       <p id="fsRecommendText">Plein écran recommandé</p>
     </div>
   </div>
-  <!-- Sound trigger log (debug aid, see src/main.js) — each row shows a
-       one-shot SFX name for 3s right as audio.js actually plays it, so a
-       sound you can't otherwise identify shows itself here as it fires. -->
-  <div id="soundLog"></div>
+  <!-- Title/splash screen, the very first thing every non-magic-link entry
+       sees (see src/main.js) — sits above literally everything (z-index in
+       style.css), entirely clickable, no separate PLAY button element since
+       the PLAY label is baked into home-screen.webp itself (design/ecran
+       acceuil.png). Background wired up in src/background.js like every
+       other public/ asset. Dismissing it reveals whatever #modeOverlay's own
+       gating chain (rotate/fullscreen gates, see revealMenu() in main.js)
+       decides comes next. -->
+  <div id="homeOverlay" role="button" tabindex="0" aria-label="Jouer"></div>
   <div id="game-card">
   <div id="scene">
   <div id="bg-stage">
@@ -643,7 +648,7 @@
 
 <div id="app">
   <div id="stage-wrap">
-    <canvas id="stage" width="1200" height="905"></canvas>
+    <canvas id="stage" width="3312" height="1896"></canvas>
     <div id="toolbar-top" class="hidden">
       <button class="tbtn" id="tbtn-sound" type="button" aria-label="Son">
         <img class="tbtn-base" id="tbtn-sound-img" alt=""><img class="tbtn-cap" id="tbtn-sound-cap" alt="">
@@ -691,22 +696,38 @@
         </div>
       </div>
     </div>
-    <div id="modeOverlay" class="team-select">
-      <div class="half a" id="modeLocal">
-        <div class="tag">JOUER EN LOCAL</div>
-        <div class="sub">Les deux joueurs sur le même écran</div>
-      </div>
-      <div class="half b" id="modeLan">
-        <div class="tag">DUEL LAN</div>
-        <div class="sub">Chacun sur sa machine, même wifi</div>
-      </div>
-      <div class="half c" id="modeSolo">
-        <div class="tag">SOLO VS IA</div>
-        <div class="sub">Entraîne-toi contre l'ordinateur</div>
-      </div>
-      <div class="half d" id="modeReplay">
-        <div class="tag">REPLAY</div>
-        <div class="sub">Revoir un match sauvegardé</div>
+    <!-- Mode-select screen: still #modeOverlay/.team-select (shares its base
+         positioning + mobile counter-scale with #startOverlay, see the
+         .team-select comment in style.css) but with two ID-scoped overrides
+         layered on top — full inset (was rink-only) and a right-docked
+         vertical drawer instead of the old 4-column row, per #modeOverlay's
+         own CSS rules. #modeOverlayBg is the new "empty arena" backdrop
+         (design/ecran acceuil empty.png, wired in src/background.js) with a
+         dark scrim (.mode-select-scrim) behind the drawer for readability —
+         both start hidden together with #modeOverlay itself since they're
+         nested inside it, no extra JS toggling needed. The right column is
+         a rough first pass (existing tile styling/colors), not final —
+         layout/branding (Nimiq logo, constellation backdrop) TBD later. -->
+    <div id="modeOverlay" class="team-select hidden">
+      <div id="modeOverlayBg"></div>
+      <div class="mode-select-scrim"></div>
+      <div class="mode-drawer">
+        <div class="half a" id="modeLocal">
+          <div class="tag">JOUER EN LOCAL</div>
+          <div class="sub">Les deux joueurs sur le même écran</div>
+        </div>
+        <div class="half b" id="modeLan">
+          <div class="tag">DUEL LAN</div>
+          <div class="sub">Chacun sur sa machine, même wifi</div>
+        </div>
+        <div class="half c" id="modeSolo">
+          <div class="tag">SOLO VS IA</div>
+          <div class="sub">Entraîne-toi contre l'ordinateur</div>
+        </div>
+        <div class="half d" id="modeReplay">
+          <div class="tag">REPLAY</div>
+          <div class="sub">Revoir un match sauvegardé</div>
+        </div>
       </div>
     </div>
     <div id="replayUploadOverlay" class="hidden">
