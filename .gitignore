@@ -150,6 +150,14 @@ vite.config.ts.timestamp-*
 /physics-lab/
 /audio-lab/
 
+# Raw/candidate AI-generation output (scripts/flux_*.py, bake_stones.py etc.)
+# — throwaway, not part of the build; only the validated winners get copied
+# out into design/<asset>/ and public/ by hand, see CLAUDE.md
+/design/generated/
+
+# Stray scratch file, not referenced anywhere
+/tmp_stoneA.png
+
 # Local GIMP/PSD working files, not source-controlled
 *.xcf
 

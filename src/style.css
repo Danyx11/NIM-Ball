@@ -37,12 +37,103 @@ html, body {
   /* Shared with #bg-logo below so the logo can center itself in the margin
      between the viewport edge and the card's actual left edge, whatever
      that edge ends up being at a given viewport size. */
-  --card-w: min(82vw, 1300px, calc(90vh * 2400 / 1450));
-  /* Card's own aspect ratio (2400/1450) as a height, so anything anchored
-     above the card (the connect button below) can stay clear of its actual
-     top edge instead of a hardcoded offset that only works at one
-     viewport size. */
-  --card-h: calc(var(--card-w) * 1450 / 2400);
+  /* Ratio (3312/1896) matches the V2 arena art's own native size exactly —
+     the art is now the whole self-contained scene (forest baked in, no
+     separate constellation background needed underneath it, see
+     conversation), so the card's shape IS the board's shape, not an
+     independent frame around a smaller inset board like the old 2400/1450
+     card was. Every var() below (right-margin, joystick geometry, etc.) is
+     formula-driven off --card-w, not a hardcoded px, so this one ratio
+     change is the only edit needed for the whole cascade to follow. */
+  --card-w: min(82vw, 1300px, calc(90vh * 3312 / 1896));
+  /* Card's own aspect ratio as a height, so anything anchored above the
+     card (the connect button below) can stay clear of its actual top edge
+     instead of a hardcoded offset that only works at one viewport size. */
+  --card-h: calc(var(--card-w) * 1896 / 3312);
+  /* Card now sits flush against the left edge (see #game-card) instead of
+     centered, so the entire leftover width becomes one right-side margin
+     column (logo/connect/reserved slots below, eventually the mobile
+     joystick) instead of being split into two half-margins. */
+  --card-left-gap: 16px;
+  --right-margin: calc(100vw - var(--card-w) - var(--card-left-gap));
+
+  /* Mobile joystick column geometry (see .mobile-layout #joystick / #joystickRing
+     / #toolbarMobile further down) — hoisted to :root, not scoped to
+     #joystickRing, so #toolbarMobile can share the same numbers without
+     re-deriving them.
+     --toolbar-mobile-h: reserved height for the relocated play/sweep/power
+     pyramid stacked under the ring (52px play + 8px row-gap + 44px sweep/
+     power row + a little breathing room).
+     --joy-free-h / --joy-d-full: the ring's own box height and its "natural"
+     diameter — kept independent of --toolbar-mobile-h (the ring never
+     shrinks to make room for the toolbar; it's sized purely off the existing
+     menu/logo/connect stack, 146px, same as before #toolbarMobile existed).
+     --joy-d: the ring's actual rendered diameter — 90% of --joy-d-full (asked
+     to shrink the ring 10% while keeping its center exactly where it was).
+     --joy-center-y / --joy-shift-x are deliberately computed from
+     --joy-d-full, not --joy-d, and only the final ring rule (#joystickRing)
+     uses --joy-d for the actual width/height — that's what "locks" the
+     center: the point being centered on doesn't move just because the thing
+     rendered there got smaller. (--joy-shift-x's own MAX_DRAG safety margin,
+     see below, ends up slightly more conservative than strictly needed for
+     the smaller ring's actual radius — harmless, just unused slack.)
+     --joy-center-y / --joy-bottom-y: where the ring's own center and bottom
+     edge actually land, in viewport px from the top — reverse-engineered
+     from #joystickRing's box (top:16px, align-items:center) and its own
+     `translateY(-9%)` nudge (a % transform is relative to the element's own
+     size, hence `* var(--joy-d-full)`, matching the lock-center rationale
+     above — not the box height, and not the shrunk --joy-d). #toolbarMobile's
+     `top` is anchored off --joy-bottom-y (see its rule below) instead of a
+     fixed offset from the bottom stack, precisely because the ring is no
+     longer size-constrained by the toolbar: on a short viewport the ring can
+     render large enough to reach well past the old fixed 146px anchor, and a
+     fixed anchor would then sit the toolbar right under/inside the ring
+     instead of below it. This still isn't airtight on a viewport too short
+     for both a full-size ring AND 3 more buttons above the reserved stack —
+     on that edge case the toolbar block runs into the reserved stack instead
+     (the lesser regression, per explicit product call: ring size wins;
+     accepted as a known issue for now, see project memory).
+     --joy-shift-x: how far the ring (and the toolbar block under it) shift
+     right from centered — up to half the ring's own diameter, but never more
+     than the slack already sitting to its right minus a 12px safety margin,
+     otherwise a rightward drag would run out of screen before reaching
+     MAX_DRAG (onJoystickMove in game.js clamps pull distance to the ring's
+     own radius, so the ring needs that radius of physical room on every
+     side). Clamped to 0 (never shifts left) if a viewport is too narrow to
+     spare any slack at all. */
+  --toolbar-mobile-h: 112px;
+  --joy-free-h: calc(100vh - 16px - 146px);
+  --joy-d-full: min(calc(var(--right-margin) - 48px), calc(var(--joy-free-h) - 32px), 260px);
+  --joy-d: calc(var(--joy-d-full) * 0.9);
+  --joy-center-y: calc(16px + (var(--joy-free-h) / 2) - (0.09 * var(--joy-d-full)));
+  --joy-bottom-y: calc(var(--joy-center-y) + (var(--joy-d) / 2));
+  --joy-shift-x: max(0px, min(calc(var(--joy-d-full) / 2), calc((var(--right-margin) - var(--joy-d-full)) / 2 - 12px)));
+  /* Distance from the viewport's right edge to the joystick ring's actual
+     rendered center (its container is centered in --right-margin, then
+     nudged further right by --joy-shift-x — see #joystickRing below) — so
+     #bg-logo/#connectBtn can align to the same vertical line in mobile
+     instead of the plain --right-margin/2 midpoint everyone else uses. */
+  --joy-center-right: calc(var(--right-margin) / 2 - var(--joy-shift-x));
+}
+
+/* Mobile card size: bigger fractions than desktop's 82vw/90vh, closer to the
+   actual screen edges, per explicit request. Custom properties don't
+   reactively re-derive, though: :root's --right-margin/--joy- (asterisk)/--joy-center-
+   right above already baked in :root's OWN --card-w (82vw) the moment they
+   were declared, and that already-substituted value is what inherits down —
+   overriding --card-w here doesn't retroactively recompute them. So the
+   whole derived chain is repeated here, verbatim, purely so each `var(...)`
+   resolves against *this* rule's --card-w instead of :root's. Keep this in
+   sync with the :root block above if that formula ever changes. */
+.mobile-layout {
+  --card-w: min(92vw, 1300px, calc(96vh * 3312 / 1896));
+  --right-margin: calc(100vw - var(--card-w) - var(--card-left-gap));
+  --joy-d-full: min(calc(var(--right-margin) - 48px), calc(var(--joy-free-h) - 32px), 260px);
+  --joy-d: calc(var(--joy-d-full) * 0.9);
+  --joy-center-y: calc(16px + (var(--joy-free-h) / 2) - (0.09 * var(--joy-d-full)));
+  --joy-bottom-y: calc(var(--joy-center-y) + (var(--joy-d) / 2));
+  --joy-shift-x: max(0px, min(calc(var(--joy-d-full) / 2), calc((var(--right-margin) - var(--joy-d-full)) / 2 - 12px)));
+  --joy-center-right: calc(var(--right-margin) / 2 - var(--joy-shift-x));
 }
 
 #bg-logo {
@@ -50,38 +141,27 @@ html, body {
   z-index: 2;
   top: 16px;
   cursor: pointer;
-  /* Centered in the margin strip left of the card: that margin spans from
-     the viewport edge (0) to the card's left edge ((100vw - card-w)/2), so
-     the logo's own center sits at a quarter of (100vw - card-w). */
-  left: calc((100vw - var(--card-w)) / 4 - 85px);
+  /* Centered in the margin strip right of the card: that margin spans from
+     the card's right edge to the viewport edge ((100vw - card-w)/2), so
+     the logo's own center sits at a quarter of (100vw - card-w) in from
+     the right edge. Now shares that margin/column with #connectBtn (bottom)
+     and the reserved menu/fullscreen slots stacked below (see .reserved-slot). */
+  right: calc(var(--right-margin) / 2 - 85px);
   width: 170px;
   height: auto;
 }
 
-/* Wallet-connect CTA, mirrors #bg-logo's placement in the margin outside the
-   card but on the right. Nimiq's own light-blue brand color (#0582CA, the
-   color their Wallet/Hub use for login/connect actions) rather than a team
-   color, since this isn't team-specific — Mulish to match the rest of the
-   Nimiq-branded chrome (see game.js's SCORE_FONT). */
+/* Wallet-connect CTA, shares the right-margin column with #bg-logo (top) and
+   the reserved menu/fullscreen slots (stacked under the logo), but anchored
+   to the bottom of that column instead. Nimiq's own light-blue brand color
+   (#0582CA, the color their Wallet/Hub use for login/connect actions) rather
+   than a team color, since this isn't team-specific — Mulish to match the
+   rest of the Nimiq-branded chrome (see game.js's SCORE_FONT). */
 .nq-connect-btn {
   position: fixed;
   z-index: 3;
-  /* #bg-logo is a fixed 170px-wide image with a lot of transparent padding
-     baked in (natural 450x230, but the hex+wordmark only actually occupies
-     rows 76-149 — measured by scanning the image's alpha channel), so its
-     visual center sits at top:16px + 42.5px ≈ 58.5px from the viewport top,
-     not at the box's own top:16px. This button is 26px tall, so top:45.5px
-     (rounded to 46px) centers it on that same 58.5px line. A previous
-     version clamped this down via min() against the card's computed top
-     edge to avoid overlapping it on short viewports, but that clamp
-     triggered even at ordinary window heights (any window where the vh-vs-
-     vw card-width cap kicks in), yanking the button back up to ~8px and
-     breaking the alignment it was supposed to protect. #bg-logo has never
-     had this clamp and still never overlaps the card in practice, so drop
-     it here too instead of fighting the two constraints against each
-     other. */
-  top: 46px;
-  right: calc((100vw - var(--card-w)) / 4 - 50px);
+  bottom: 16px;
+  right: calc(var(--right-margin) / 2 - 50px);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -100,107 +180,278 @@ html, body {
   transition: transform .12s ease, box-shadow .12s ease;
 }
 .nq-connect-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px -6px rgba(5,130,202,0.7); }
+
+/* Reserved, inactive slots in the same right-margin column as #bg-logo,
+   stacked directly under it — menu and fullscreen toggle aren't built yet,
+   this just holds their spot in the layout (see index.html). Muted/dashed
+   styling (vs. #connectBtn's solid blue) signals "reserved" rather than live. */
+.reserved-slot {
+  position: fixed;
+  z-index: 2;
+  right: calc(var(--right-margin) / 2 - 22px);
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(159,184,188,0.4);
+  border-radius: 50%;
+  background: rgba(20,56,68,0.4);
+  color: var(--ink-dim);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.reserved-slot svg { width: 20px; height: 20px; }
+#menuBtn { top: 116px; }
+
+/* Real, active counterpart to .reserved-slot above — same slot shape/size,
+   but solid border + full opacity + pointer cursor signal "live" instead of
+   "reserved". Currently just #fullscreenBtn (see src/main.js for the toggle
+   logic); menuBtn stays a .reserved-slot until the menu itself is built. */
+.icon-btn {
+  position: fixed;
+  /* Above other z-index:3 elements sharing this right-hand column, which at
+     some viewport widths physically overlap this button's slot; without
+     this it's rendered but unclickable. */
+  z-index: 4;
+  right: calc(var(--right-margin) / 2 - 22px);
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(159,184,188,0.5);
+  border-radius: 50%;
+  background: rgba(20,56,68,0.55);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform .12s ease, background .12s ease;
+}
+.icon-btn:hover { transform: translateY(-1px); background: rgba(20,56,68,0.8); }
+.icon-btn:active { transform: translateY(0); }
+.icon-btn svg, .icon-btn img { width: 20px; height: 20px; }
+#fullscreenBtn { top: 170px; }
 .nq-connect-btn:active { transform: translateY(0); }
 .nq-connect-btn.connected { background: #1F2348; }
 .nq-connect-icon { width: 12px; height: 12px; flex: none; }
 
-/* Master VU meter — sits directly under the connect button, same right
-   alignment. dB scale is linear top(0dB)-to-bottom(VU_FLOOR_DB, see main.js),
-   not perceptual, which is the standard/simplest convention for this kind of
-   meter. Track shows a fixed green/yellow/red gradient (safe / -6..-3dB
-   margin / into the last 3dB before clipping); #vuFill is a dark mask that
-   covers the track from the top down to the current level, so only the
-   "lit" portion below it shows through. */
-#vuMeter {
-  position: fixed;
-  z-index: 3;
-  top: 84px;
-  right: calc((100vw - var(--card-w)) / 4 - 50px);
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-}
-#vuTrack {
-  position: relative;
-  width: 14px;
-  height: 150px;
-  border-radius: 4px;
-  overflow: hidden;
-  background: linear-gradient(to top,
-    #2ecc71 0%, #2ecc71 70%,
-    #f1c40f 70%, #f1c40f 90%,
-    #e74c3c 90%, #e74c3c 100%);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
-}
-#vuFill {
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 100%;
-  background: #0b1020;
-  transition: height 60ms linear;
-}
-#vuPeakHold {
-  position: absolute;
-  left: 0; right: 0;
-  height: 2px;
-  background: #fff;
-  opacity: 0;
-  transition: opacity 150ms ease;
-}
-.vu-labels { display: flex; flex-direction: column; gap: 4px; }
-.vu-readout {
-  min-width: 34px;
-  padding: 3px 5px;
-  border-radius: 4px;
-  background: #10182e;
-  border: 1px solid #33447a;
-  color: #dbe6ff;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  text-align: center;
-}
-/* Max-peak-ever readout — never decays on its own (see main.js), click to
-   reset. Slightly dimmer border so it reads as the secondary/reference value
-   next to the live peak-hold above it. */
-.vu-readout-max { cursor: pointer; border-color: #6a7799; color: #8fb4ff; }
+/* Mobile layout (see src/main.js's coarse-pointer detection, which toggles
+   this class on <body>): the same right-margin column, but #bg-logo/#menuBtn/
+   #connectBtn are regrouped into one compact bottom-anchored stack (top to
+   bottom: menu, logo, connect) instead of spanning the whole column
+   top-to-bottom — freeing the upper part of the column for #joystick below.
+   #fullscreenBtn is dropped from the mobile column entirely (see main.js —
+   parked alongside the rest of the mobile-fullscreen feature, hidden
+   unconditionally here rather than behind that flag since there's nothing to
+   toggle back on without also flipping IOS_FULLSCREEN_FIX_ENABLED). Sized
+   down from desktop dimensions (44px icon slots, 170px logo) and tightly
+   gapped (6px) since landscape phone viewports are short on vertical room
+   and the joystick — explicitly asked to be sized as big as this layout
+   allows — competes with this stack for the same column. Each offset is
+   hand-stacked off the one below it (own height + 6px gap); bump
+   MOBILE_STACK_H (joystick's own comment below) if any of these sizes
+   change. */
+.mobile-layout #fullscreenBtn { display: none; }
+/* Aligned to the joystick's own horizontal center (--joy-center-right) rather
+   than the plain right-margin midpoint, per explicit request — overlap with
+   the joystick/toolbar column is expected/acceptable for now, not fixed up
+   yet. */
+.mobile-layout #connectBtn { height: 32px; right: calc(var(--joy-center-right) - 50px); }
+.mobile-layout #bg-logo { top: auto; bottom: 54px; width: 70px; height: 36px; right: calc(var(--joy-center-right) - 35px); }
+.mobile-layout #menuBtn { top: auto; bottom: 96px; width: 40px; height: 40px; }
 
-/* Sound trigger log — fixed rows under the VU meter, each one independently
-   fading in/out as main.js's onPlay() listener fills/clears it (see
-   .sound-log-row.show below), not a scrolling list. */
-#soundLog {
+/* Virtual joystick (mobile only — see src/game.js's joystick wiring in
+   startGame() for the drag logic, this is purely the visual shell). Fills the
+   column strip freed by the bottom stack above: MOBILE_STACK_H (96px
+   menu-bottom + 40px its own height + 10px breathing room = 146px) is how
+   much of the column's bottom the stack above reserves. #toolbarMobile below
+   floats independently right above that same 146px mark instead of eating
+   into this box (see its own comment) — keeps the ring at its original full
+   size rather than shrinking it to make room. Ring is sized off both the
+   column's width and this leftover height so it stays a circle and never
+   crowds the frame (left) at any viewport size; nudged above dead-center of
+   that space per design (feels more natural under a mobile thumb than plein
+   centre), and nudged right by --joy-shift-x to rebalance the column now that
+   #toolbarMobile sits centered under it too. */
+#joystick { display: none; }
+.mobile-layout #joystick {
+  display: flex;
   position: fixed;
   z-index: 3;
-  top: 250px;
-  right: calc((100vw - var(--card-w)) / 4 - 50px);
+  top: 16px;
+  bottom: 146px;
+  right: 0;
+  width: var(--right-margin);
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+#joystickRing {
+  width: var(--joy-d);
+  height: var(--joy-d);
+  position: relative;
+  border-radius: 50%;
+  background: rgba(20,56,68,0.55);
+  border: 2px solid rgba(159,184,188,0.5);
+  /* translateY was `-9%` (relative to the ring's own size) before the ring
+     could shrink independently of its center — now a fixed px amount off
+     --joy-d-full so a smaller --joy-d doesn't also shrink this nudge and
+     drift the center down (see --joy-center-y's own comment, :root above,
+     for why this has to match that calc exactly). */
+  transform: translateY(calc(-0.09 * var(--joy-d-full))) translateX(var(--joy-shift-x));
+  pointer-events: auto;
+  touch-action: none;
+}
+#joystickStick {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42%;
+  height: 42%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 32%, rgba(238,246,244,0.95), rgba(159,184,188,0.4) 68%, rgba(20,56,68,0.25) 100%);
+  box-shadow: 0 4px 10px -2px rgba(0,0,0,0.5);
+  transform: translate(-50%, -50%);
+  transition: transform .15s ease-out;
+}
+#joystickStick.dragging { transition: none; }
+
+/* Relocation target for #tbtn-play/#tbtn-sweep/#tbtn-power (mobile only — see
+   src/game.js's mobile branch, which reparents those existing buttons here
+   instead of duplicating them, and index.html's comment on this div for why:
+   #toolbar-bottom's cqw sizing only works nested inside #stage-wrap, which is
+   `transform`ed and so traps `position: fixed` descendants inside its own
+   box instead of the viewport — moving the buttons' actual DOM parent is what
+   lets them anchor to this column like #joystick does). Sits directly under
+   the ring, in the same right-margin column, sharing its --joy-shift-x
+   horizontal offset so the pyramid stays centered under it: play on its own
+   row, sweep+power side by side below — via grid-area, not DOM order, so
+   #toolbar-bottom's own sweep/play/power source order (desktop) doesn't need
+   to change. justify-content: center is load-bearing, not decorative: Grid's
+   default justify-content computes to stretch, which would otherwise grow
+   the two `auto` columns to fill the whole --right-margin width and blow
+   sweep/power apart to opposite edges instead of packing them tight under
+   play. Positioned via `top: --joy-bottom-y + gap` (see :root above) rather
+   than anchored off the bottom stack, because the ring is intentionally NOT
+   sized to leave room for this block (kept at its original full size) — an
+   anchor fixed to the bottom would sit static while the ring's actual
+   rendered bottom edge moves with viewport size, overlapping it on shorter
+   screens. This computed anchor tracks the ring instead, so the two clear
+   each other by construction; the tradeoff (see :root comment) is that on a
+   viewport too short for both, this block runs into the reserved stack below
+   it rather than the ring shrinking. */
+#toolbarMobile { display: none; }
+/* display swapped in via a separate :not(.hidden)-gated rule (same specificity
+   trick as the `.hidden` toggle elsewhere) so main.js's showToolbar() —
+   which un-hides this alongside #toolbar-top/#toolbar-bottom, see there —
+   still wins over this unconditional positioning rule while a match hasn't
+   started yet. */
+.mobile-layout #toolbarMobile {
+  position: fixed;
+  z-index: 3;
+  right: 0;
+  top: calc(var(--joy-bottom-y) + 14px);
+  width: var(--right-margin);
+  height: var(--toolbar-mobile-h);
+  grid-template-columns: repeat(2, auto);
+  grid-template-areas: "play play" "sweep power";
+  justify-content: center;
+  justify-items: center;
+  align-content: center;
+  row-gap: 8px;
+  column-gap: 10px;
+  transform: translateX(var(--joy-shift-x));
+  pointer-events: none;
+}
+.mobile-layout #toolbarMobile:not(.hidden) { display: grid; }
+.mobile-layout #toolbarMobile .tbtn { pointer-events: auto; }
+.mobile-layout #tbtn-play { grid-area: play; width: 52px; }
+.mobile-layout #tbtn-sweep { grid-area: sweep; width: 44px; }
+.mobile-layout #tbtn-power { grid-area: power; width: 44px; }
+/* #toolbar-bottom itself stays mounted in #stage-wrap on mobile (its buttons
+   are the ones that move, not the container) — hidden rather than left as an
+   empty box, since an empty flex container with no children still occupies
+   the desktop `top:80%` slot even with nothing to show. */
+.mobile-layout #toolbar-bottom { display: none; }
+
+/* Shared shell for mobile-only full-screen intro gates (see main.js): plain
+   dark scrim + one big centered icon + caption, shown before #modeOverlay so
+   it's the very first thing a phone player sees. Two gates use this —
+   #rotateOverlay (always on for now, dismisses itself once the device
+   actually rotates to landscape) and #fsRecommendOverlay (parked behind
+   IOS_FULLSCREEN_FIX_ENABLED, see main.js) — each keeps its own scoped
+   `.hidden` rule, same convention as #overlay/#modeOverlay/etc. above,
+   rather than a shared utility class. */
+.gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6,14,18,0.92);
+}
+#rotateOverlay.hidden, #fsRecommendOverlay.hidden { display: none; }
+.gate-box {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  width: 150px;
+  align-items: center;
+  gap: 14px;
 }
-.sound-log-row {
-  padding: 3px 6px;
-  border-radius: 4px;
-  background: #10182e;
-  border: 1px solid #263259;
-  color: #8fb4ff;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0;
-  transition: opacity 200ms ease;
+.gate-icon {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 2px solid rgba(159,184,188,0.6);
+  background: rgba(20,56,68,0.65);
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.sound-log-row.show { opacity: 1; }
+.gate-icon svg { width: 34px; height: 34px; }
+/* #fsRecommendIcon is an actual tappable control (requests fullscreen);
+   #rotateIcon is purely decorative — that gate dismisses on rotation, not
+   on tap, so it gets neither cursor nor hover/active feedback. */
+#fsRecommendIcon { cursor: pointer; transition: transform .12s ease, background .12s ease; }
+#fsRecommendIcon:hover { transform: translateY(-1px); background: rgba(20,56,68,0.85); }
+#fsRecommendIcon:active { transform: translateY(0); }
+/* Wider drawing (two phones + a rotate arrow) than the single-glyph icons
+   above, so it gets its own bigger circle/viewport instead of the shared 76/34. */
+#rotateIcon { width: 132px; height: 132px; }
+#rotateIcon svg { width: 78px; height: 49px; }
+.gate-box p {
+  margin: 0;
+  max-width: 240px;
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-align: center;
+}
+
+/* Title/splash screen — the very first thing a non-magic-link entry sees
+   (see index.html's own comment + revealMenu() in main.js). Sits above every
+   other overlay, including #game-card itself, since it gates the whole app.
+   PLAY is baked into home-screen.webp (design/ecran acceuil.png) rather than
+   a separate DOM button — the entire overlay is the tap target. */
+#homeOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+}
+#homeOverlay.hidden { display: none; }
 
 #game-card {
   position: fixed;
   z-index: 1;
   top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  left: var(--card-left-gap);
+  transform: translateY(-50%);
   width: var(--card-w);
-  aspect-ratio: 2400 / 1450;
+  aspect-ratio: 3312 / 1896;
   border: 1px solid #232838;
   border-radius: 14px;
   overflow: hidden;
@@ -222,11 +473,36 @@ html, body {
      at 1.4 the board's bottom ran ~7px past the card's fixed-size box).
      1.32 keeps a small safety margin at the bottom while still reading
      bigger than the original 1.25. */
-  transform: scale(1);
+  transform: scale(1.3);
   transform-origin: center;
+}
+/* Mobile-only: zoom in tighter on the gameplay, less surrounding forest —
+   card size itself is untouched, only what's rendered inside it. Anchored at
+   "center top" instead of #scene's own default "center" so the top edge (and
+   the score HUD just under it) never moves — everything grows downward from
+   that fixed line instead of expanding symmetrically and eating into the
+   score's distance from the card's top edge. 1.75 is untested territory (the
+   comment above found clipping issues at just 1.4 on desktop's proportions),
+   so check the board's bottom/sides against the card's overflow:hidden once
+   built for real content, not just the mode-select screen. */
+.mobile-layout #scene {
+  transform: scale(1.75);
+  transform-origin: center top;
 }
 
 #app { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; }
+/* Mobile: pull the board (and its baked-in score plank) up flush against
+   #game-card's top instead of vertically centering it in #scene — desktop's
+   centered layout leaves generous top/bottom margin by design, but mobile
+   wants the score readable as close to the card's own top edge as possible
+   (a few px), trading the bottom margin away since .mobile-layout #scene's
+   1.75x zoom already crops aggressively there anyway. */
+.mobile-layout #app { justify-content: flex-start; padding-top: 0; }
+/* Was translateY(-8.2%): cropped away frame.webp's own baked-in empty
+   margin above the old scoreboard plank. The V2 art has no such margin (no
+   plank at all — score moved onto the ice, see the score-under-ice
+   rendering in game.js) and fills #game-card exactly, so no crop
+   correction is needed here any more — left as the default (no transform). */
 
 /* Board width as a fraction of the CARD (validated in the mockup at 74%),
    not the viewport — #game-card's own min(70vw,1100px) already handles the
@@ -245,7 +521,20 @@ html, body {
    overflow:hidden — the real "seam" being reported. 70% restores a safe
    margin on both edges; still bigger in absolute px than the board was
    before this session's #game-card enlargement. */
-#stage-wrap { position: relative; width: 70%; transform: translateY(6.52%); }
+/* container-type lets .tbtn (see #toolbar-top/#toolbar-bottom below) size
+   itself in cqw units off THIS box's width no matter how deeply it's nested
+   inside — e.g. chat/exit sit inside .tbtn-group, a plain flex item with no
+   width of its own, and a plain % width there would resolve against that
+   group's own indefinite size (silently landing at the wrong, smaller size)
+   rather than the toolbar's actual full-width bar. */
+/* Was 70% width + translateY(6.52%): the old frame.webp had a big
+   asymmetric transparent margin (~8% above the scoreboard plank, ~21%
+   below) that those numbers corrected for, centering the art actually
+   visible inside an oversized transparent canvas. The V2 art has no
+   transparent margin at all (fully opaque self-contained scene, see
+   #game-card above) — it fills #game-card exactly by design, so the board
+   is simply the whole card now, no correction needed. */
+#stage-wrap { position: relative; width: 100%; container-type: inline-size; }
 canvas {
   display: block; width: 100%; height: auto; touch-action: none;
 }
@@ -363,48 +652,78 @@ button:active { transform: scale(0.95); }
 button:disabled { opacity: 0.35; cursor: default; }
 
 /* Toolbar: 6 buttons pulled from design-lab's "boutons"/hand-supplied art, sat
-   above the board rather than baked into arena/frame.webp — rough placeholder
-   placement/functions, to be refined once the underlying features are all
-   actually implemented. Two rows of 3 (see .tbtn-row) — bottom row keeps the
-   original first 3 (play/sweep/power), so "sweep" (the middle one) lands
-   centered on the board's own median line; sound/exit/chat sit above it. */
-/* top:7% sits the block's bottom edge just above the scoreboard plaque baked
-   into arena/frame.webp (plaque top row 73/905 = 8.07%, see the SCORE_SLOT_CY
-   comment in game.js) and the turn-timer bar drawn just inside it
-   (TIMER_BAR_Y=96), without overlapping either. left:0/right:0 (rather than
-   left:50%+translateX(-50%)) gives #toolbar itself a definite width (100% of
-   #stage-wrap) so .tbtn-row/.tbtn's own percentage widths below have
-   something definite to resolve against — with width:auto here, percentages
-   resolve against a stray shrink-to-fit box instead, leaving buttons packed
-   at the left edge rather than centered. gap between the two rows is a vw
-   unit, not %, since #toolbar's own height is intrinsic/auto (a % row-gap
-   would need a definite height to resolve against, same class of bug as the
-   width one above, just silently resolving to 0 instead of breaking outright). */
-#toolbar {
+   above/below the board rather than baked into arena/frame.webp — rough
+   placeholder placement/functions, to be refined once the underlying features
+   are all actually implemented. Split into two bars: #toolbar-top rides the
+   same height as the scoreboard plaque, flanking it on each side (sound at
+   its left, chat+exit grouped at its right — see .tbtn-group); #toolbar-bottom
+   sits below the board, centered, with "sweep" in the middle so it lands on
+   the board's own median line. */
+/* #toolbar-top is just a non-visual positioning root (inset:0 — same box as
+   #stage-wrap/the canvas, so % coordinates below line up with canvas-space
+   pixels 1:1) with pointer-events:none so the empty space around the two
+   button clusters doesn't block drags on the ice underneath; the buttons
+   re-enable pointer-events on themselves. #tbtn-sound and .tbtn-group are
+   each absolutely positioned and self-centered (translate -50%/-50%) at:
+   - top: 14.7% = SCORE_SLOT_CY (133) / H (905) in game.js — same vertical
+     center the score digits/team icons themselves sit on.
+   - left: 23.96%/76.46% = the midpoint of the gap between the ice's own
+     left/right edges (FX0=159/FX1=1046) and the scoreboard plaque's left/
+     right edges (416/789, see the "plaque rect" comment in game.js),
+     i.e. dead center in the open wood band on each side of the plaque. */
+#toolbar-top {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+#toolbar-top .tbtn, #toolbar-top .tbtn-group { pointer-events: auto; }
+#tbtn-sound {
+  position: absolute;
+  left: 23.96%;
+  top: 14.7%;
+  transform: translate(-50%, -50%);
+}
+.tbtn-group {
+  position: absolute;
+  left: 76.46%;
+  top: 14.7%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  /* cqw, not % — this group has no width of its own (shrink-to-fit content),
+     so a % gap here would resolve against that indefinite size instead of
+     the toolbar's actual width. */
+  gap: 3cqw;
+}
+/* top:80% clears the board's own visible bottom edge (frame art's non-
+   transparent content ends at row 713/905 = 78.8%, see the #stage-wrap
+   art-correction comment further down) with a small margin, growing
+   downward (no translateY flip, unlike #toolbar-top above it). */
+#toolbar-bottom {
   position: absolute;
   left: 0;
   right: 0;
-  top: 7%;
-  transform: translateY(-100%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.6vw;
-  z-index: 5;
-}
-.tbtn-row {
+  top: 80%;
   display: flex;
   justify-content: center;
   gap: 3%;
-  width: 100%;
+  z-index: 5;
 }
-/* Toolbar reads as part of the arena graphics, not app chrome — stays hidden
-   through the local/LAN/solo mode-select screen and is only revealed once
-   main.js actually starts a game (see showToolbar() there). */
-#toolbar.hidden { display: none; }
+/* Retired for the V2 arena art: the 5 HUD rocks baked into frame.webp
+   replace these round buttons entirely (see game.js's ROCK_ZONES/
+   onPointerDown and main.js's rockHandlers) — unconditionally hidden now
+   regardless of showToolbar()'s hidden-class toggle in main.js, rather than
+   ripping out that JS (still harmlessly running, just with nothing visible
+   to show/hide). Revisit if a future skin goes back to needing an on-screen
+   toolbar. */
+#toolbar-top, #toolbar-bottom { display: none !important; }
 .tbtn {
   position: relative;
-  width: 6.3%;
+  /* cqw (of #stage-wrap, see its container-type), not % — keeps the same
+     absolute size regardless of how deeply a button ends up nested (e.g.
+     inside .tbtn-group), instead of resolving against whatever indefinite
+     wrapper happens to be its immediate parent. */
+  width: 6.3cqw;
   aspect-ratio: 1 / 1;
   padding: 0;
   border: none;
@@ -470,6 +789,16 @@ button:disabled { opacity: 0.35; cursor: default; }
   z-index: 10;
 }
 #overlay.hidden { display: none; }
+/* Same clipping risk as .team-select above (and the same fix) — #overlay
+   spans the *entire* #stage-wrap (not just a middle band), so once
+   .mobile-layout #scene zooms that whole subtree 1.75x from center-top, its
+   content (LAN address entry, goal/victory panels — all share #overlay) can
+   run past #game-card's fixed, un-zoomed height and get clipped/unreachable,
+   same as the ready-tap panel was. */
+.mobile-layout #overlay {
+  transform: scale(0.5);
+  transform-origin: center top;
+}
 #overlay h2 { margin: 0; font-size: 26px; }
 #overlay p { margin: 0; color: var(--ink-dim); max-width: 380px; font-size: 14px; line-height: 1.5; }
 .bigbtn { background: var(--accent); color: #3a2900; padding: 14px 30px; font-size: 16px; border-radius: 14px; }
@@ -510,6 +839,19 @@ button:disabled { opacity: 0.35; cursor: default; }
    (local vs LAN mode picker, shown first) — same two-column layout/palette. */
 .team-select { position: absolute; inset: 22.76% 12.83% 22.87% 13.25%; border-radius: 28px; display: flex; flex-direction: row; overflow: hidden; }
 .team-select.hidden { display: none; }
+/* .mobile-layout #scene zooms the whole scene (board + this overlay, both
+   live in the same #stage-wrap subtree) by 1.75x from a center-top origin —
+   great for the board, but it also pushed this panel's own bottom edge (the
+   actual tappable "prêt" prompt) past #game-card's fixed, un-zoomed height,
+   clipped by its overflow:hidden and unreachable. Counter-scaling it back
+   down (same center-top origin, so it shrinks toward the same anchor line
+   rather than drifting) keeps it reachable while still reading a bit bigger
+   than the pre-zoom baseline (0.7 * 1.75 = 1.225x). Verify against real
+   viewport heights if #game-card's own aspect ratio ever changes. */
+.mobile-layout .team-select {
+  transform: scale(0.5);
+  transform-origin: center top;
+}
 .half { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: background .25s ease; text-align: center; padding: 16px; }
 .half.a { background: rgba(31,111,168,0.55); }
 .half.b { background: rgba(168,50,71,0.55); }
@@ -521,6 +863,36 @@ button:disabled { opacity: 0.35; cursor: default; }
 .half .tag { font-weight: 800; font-size: 18px; letter-spacing: 0.5px; }
 .half .sub { font-size: 12px; color: rgba(255,255,255,0.85); max-width: 150px; }
 .half .check { font-size: 30px; }
+
+/* Mode-select right-drawer override, ID-scoped so #startOverlay (which
+   shares .team-select/.half for its own team-ready screen) is unaffected.
+   Full inset (was rink-only) since #modeOverlayBg now replaces the visible
+   arena art entirely instead of just tinting the ice; the four mode tiles
+   move from a full-width row into a vertical drawer docked to the right
+   (design/ecran acceuil empty.png as the darkened backdrop — see
+   src/background.js). Rough first pass per the brief — colors/spacing/
+   Nimiq branding for this column TBD later. */
+/* No display override here on purpose — children are all position:absolute
+   (out of flow), so .team-select's own display:flex is harmless, and
+   leaving display alone keeps .team-select.hidden's display:none (a plain
+   class selector) able to win over this ID-scoped rule instead of being
+   beaten by higher ID specificity. */
+#modeOverlay { inset: 0; border-radius: 0; }
+#modeOverlayBg { position: absolute; inset: 0; background-size: cover; background-position: center; }
+.mode-select-scrim { position: absolute; inset: 0; background: rgba(6,14,18,0.5); }
+.mode-drawer {
+  position: absolute;
+  top: 8%;
+  bottom: 8%;
+  right: 4%;
+  width: 30%;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 20px;
+  overflow: hidden;
+}
 
 #overlay input[type="text"] {
   font-family: inherit; font-size: 15px; color: var(--ink); background: var(--bg-mid);
@@ -538,7 +910,15 @@ button:disabled { opacity: 0.35; cursor: default; }
      (#game-card) is what handles the viewport-responsive sizing now, and
      .fond-layer's own background-size:cover fills whatever box this ends up
      being, same as before. */
+  /* Hidden for the V2 arena art: that art already bakes in its own forest
+     scene (see #game-card/#stage-wrap above), so this separate constellation
+     background would either be fully occluded behind the now fully-opaque
+     board or, worse, mismatch at the edges — rather than delete the whole
+     layer (and its JS wiring in background.js/main.js), just stop it from
+     rendering/animating. Revisit if a future skin goes back to a small inset
+     board with transparent margins. */
   #bg-stage {
+    display: none;
     position: absolute;
     inset: 0;
     background: #060716;
@@ -688,7 +1068,11 @@ button:disabled { opacity: 0.35; cursor: default; }
      up as a visible seam where the picture stops and the card's plain
      background starts. 130% pushes both edges safely outside the card at
      any .scene scale we're likely to use. */
+  /* Hidden for the V2 arena art, same reasoning as #bg-stage above — this
+     layer's own translateY(6.52%) also matched the old board's now-removed
+     offset, so it'd be stale even if shown. */
   #bg-nature {
+    display: none;
     position: absolute;
     top: 50%;
     left: 50%;
@@ -700,6 +1084,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   }
 
   #fg-stage {
+    display: none;
     position: absolute;
     top: 50%;
     left: 50%;
@@ -823,7 +1208,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   padding: 0;
 }
 .replay-rail-thumb.current { border-color: var(--accent); }
-.replay-rail-thumb img { display: block; width: 100%; aspect-ratio: 1200 / 905; object-fit: cover; background: var(--bg-mid); }
+.replay-rail-thumb img { display: block; width: 100%; aspect-ratio: 3312 / 1896; object-fit: cover; background: var(--bg-mid); }
 .replay-rail-thumb-meta { display: flex; align-items: center; gap: 6px; padding: 4px 8px 6px; }
 .replay-rail-thumb-team { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
 .replay-rail-thumb-team.a { background: var(--teamA); }
