@@ -1,0 +1,13 @@
+{
+  "name": "nim-ball",
+  "main": "party/index.js",
+  "compatibility_date": "2026-08-13",
+  "durable_objects": {
+    "bindings": [{ "name": "Arbiter", "class_name": "Arbiter" }],
+  },
+  // new_sqlite_classes (not new_classes) — required for Durable Objects on
+  // Cloudflare's free Workers plan, see git history: the old `partykit` CLI
+  // only knew how to generate the classic (paid-plan-only) migration type,
+  // which is what made this rewrite necessary in the first place.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Arbiter"] }],
+}

@@ -148,6 +148,9 @@ vite.config.ts.timestamp-*
 # PartyKit local dev state/cache (see `npm run party:dev`)
 .partykit/
 
+# wrangler local dev state/cache (see `npm run wrangler:dev`)
+.wrangler/
+
 # Local scratch labs (never pushed) — see CLAUDE.md for the lab-to-main workflow
 /design-lab/
 /physics-lab/

@@ -24,18 +24,23 @@ export function connectLan(base) {
   return connectSocket(arbiterUrl(base));
 }
 
-// Match Réseau: same arbiter logic (party/arbiter.js), hosted on PartyKit and
-// addressed by room id instead of a LAN address — the 4-character code
-// shown/typed on the host/join screen (see main.js) IS that room id (same
-// "first connection = A, second = B" assignment as connectLan, just routed
-// by code instead of connection order on a shared LAN address). In dev, this
-// points at a locally running `npm run party:dev` (localhost:1999) instead
-// of the deployed project — same "advanced two-process" pattern already used
-// for LAN dev (npm run lan-server + npm run dev -- --host).
-const PARTY_HOST = import.meta.env.DEV ? 'ws://localhost:1999' : 'wss://nim-ball.danyx11.partykit.dev';
+// Match Réseau: same arbiter logic (party/arbiter.js), self-hosted on
+// Cloudflare via partyserver/wrangler (see CLAUDE.md "Network match" — this
+// replaced the legacy `partykit` CLI/platform, which couldn't deploy a
+// free-plan-compatible Durable Object) and addressed by room name instead of
+// a LAN address — the 4-character code shown/typed on the host/join screen
+// (see main.js) IS that room name (same "first connection = A, second = B"
+// assignment as connectLan, just routed by code instead of connection order
+// on a shared LAN address). "arbiter" in the URL is partyserver's routing
+// namespace, derived from the Arbiter class/Durable Object binding name (see
+// party/index.js, wrangler.jsonc). In dev, this points at a locally running
+// `npm run wrangler:dev` (localhost:1999) instead of the deployed project —
+// same "advanced two-process" pattern already used for LAN dev (npm run
+// lan-server + npm run dev -- --host).
+const PARTY_HOST = import.meta.env.DEV ? 'ws://localhost:1999' : 'wss://nim-ball.nim-ball.workers.dev';
 
 export function connectMatch(code) {
-  return connectSocket(`${PARTY_HOST}/parties/main/${code}`);
+  return connectSocket(`${PARTY_HOST}/parties/arbiter/${code}`);
 }
 
 function connectSocket(url) {
