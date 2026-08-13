@@ -4,7 +4,7 @@ import '@fontsource/mulish/800.css';
 import { startGame } from './game.js';
 import { connectNimiq, chooseAddress, getStoredAddress } from './nimiq.js';
 import { initBackground } from './background.js';
-import { connectLan } from './net.js';
+import { connectLan, connectMatch } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
 import { audio } from './audio.js';
@@ -360,6 +360,7 @@ connectBtn.addEventListener('click', () => {
 const modeOverlay = document.getElementById('modeOverlay');
 const modeLocal = document.getElementById('modeLocal');
 const modeLan = document.getElementById('modeLan');
+const modeMatch = document.getElementById('modeMatch');
 const modeSolo = document.getElementById('modeSolo');
 const modeReplay = document.getElementById('modeReplay');
 const startOverlay = document.getElementById('startOverlay');
@@ -430,6 +431,12 @@ modeLan.addEventListener('click', () => {
   audio.play('button');
   modeOverlay.classList.add('hidden');
   showLanJoinScreen();
+});
+
+modeMatch.addEventListener('click', () => {
+  audio.play('button');
+  modeOverlay.classList.add('hidden');
+  showMatchChoiceScreen();
 });
 
 // Solo vs IA: only one human, controlling team A — no ready-tap lobby needed
@@ -523,13 +530,19 @@ async function joinLan(raw, joinBtn) {
   if (joinBtn) joinBtn.disabled = true;
   try {
     const net = await connectLan(addr);
-    showWaitingScreen(net);
+    showWaitingScreen(net, (msg) => showLanJoinScreen(msg));
   } catch (err) {
     showLanJoinScreen(err.message);
   }
 }
 
-function showWaitingScreen(net) {
+// Shared by Duel LAN and Match Réseau (see showMatchJoinScreen/hostMatch
+// below) — both connect the exact same way from here on (same net.js
+// interface, see CLAUDE.md "Network match"), only how `net` was obtained
+// differs. `onLost(msg)` decides where "opponent disconnected" sends the
+// player back to — each mode's own entry screen, so an error there offers
+// the right retry (LAN address vs. match code) rather than a generic dead end.
+function showWaitingScreen(net, onLost) {
   const teamLabel = net.myTeam === 'A' ? 'ÉQUIPE BLEUE' : 'ÉQUIPE JAUNE';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
   showLobby(`
@@ -537,10 +550,8 @@ function showWaitingScreen(net) {
     <h2>En attente de l'adversaire…</h2>
     <p>Partage le lien avec l'autre joueur si ce n'est pas déjà fait.</p>
   `);
-  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls));
-  net.onDisconnect(() => {
-    showLanJoinScreen("L'autre joueur s'est déconnecté.");
-  });
+  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, onLost));
+  net.onDisconnect(() => onLost("L'autre joueur s'est déconnecté."));
 }
 
 // One more explicit tap between "opponent joined" and startGame(), same
@@ -560,7 +571,7 @@ function showWaitingScreen(net) {
 // their own match (and start chatting) while the other is still sitting on
 // this screen with no startGame()/onChat() wired up yet to receive it —
 // those messages used to just silently vanish.
-function showReadyScreen(net, teamLabel, cls) {
+function showReadyScreen(net, teamLabel, cls, onLost) {
   showLobby(`
     <span class="team-pill ${cls}">${teamLabel}</span>
     <h2>Adversaire connecté !</h2>
@@ -581,9 +592,95 @@ function showReadyScreen(net, teamLabel, cls) {
     showToolbar();
     activeStopGame = startGame({ ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), mobile: IS_MOBILE });
   });
-  net.onDisconnect(() => {
-    showLanJoinScreen("L'autre joueur s'est déconnecté.");
+  net.onDisconnect(() => onLost("L'autre joueur s'est déconnecté."));
+}
+
+// ---- Match Réseau (see CLAUDE.md "Network match") — same lobby flow as Duel
+// LAN above (showWaitingScreen/showReadyScreen, same net.js interface), just
+// reached via a 4-character room code instead of typing a LAN address:
+// whoever taps "Créer" generates the code and is team A (first to connect to
+// that PartyKit room, see party/arbiter.js), whoever taps "Rejoindre" and
+// types it in is team B.
+//
+// Alphabet excludes visually ambiguous characters (0/O, 1/I) since the code
+// is read off one screen and typed on another, often by voice or a glance
+// across a room — a misread digit would just bounce off `full`/an empty room
+// instead of erroring clearly, so cutting the ambiguity avoids that class of
+// mistake at the source.
+const MATCH_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function generateMatchCode() {
+  let code = '';
+  for (let i = 0; i < 4; i++) code += MATCH_CODE_ALPHABET[Math.floor(Math.random() * MATCH_CODE_ALPHABET.length)];
+  return code;
+}
+
+function showMatchChoiceScreen() {
+  showLobby(`
+    <h2>Match réseau</h2>
+    <p>Crée une partie et partage le code, ou rejoins avec un code reçu.</p>
+    <div style="display:flex; gap:12px;">
+      <button class="bigbtn" id="matchHostBtn">Créer</button>
+      <button class="bigbtn" id="matchJoinBtn">Rejoindre</button>
+    </div>
+  `);
+  document.getElementById('matchHostBtn').onclick = () => { audio.play('button'); hostMatch(); };
+  document.getElementById('matchJoinBtn').onclick = () => { audio.play('button'); showMatchJoinScreen(); };
+}
+
+async function hostMatch() {
+  const code = generateMatchCode();
+  showLobby(`<h2>Match réseau</h2><p>Connexion…</p>`);
+  try {
+    const net = await connectMatch(code);
+    showMatchHostWaitingScreen(net, code);
+  } catch (err) {
+    showMatchChoiceScreen();
+  }
+}
+
+// Same shape as showWaitingScreen above, but also displays the code (the
+// host is the one waiting to share it — the joiner already typed it in to
+// get here, see joinMatch below) and sends a disconnected opponent back to
+// the choice screen (a fresh "Créer" gets a fresh code — the old one, tied
+// to this now-empty room, isn't reused).
+function showMatchHostWaitingScreen(net, code) {
+  const teamLabel = net.myTeam === 'A' ? 'ÉQUIPE BLEUE' : 'ÉQUIPE JAUNE';
+  const cls = net.myTeam === 'A' ? 'a' : 'b';
+  showLobby(`
+    <span class="team-pill ${cls}">${teamLabel}</span>
+    <h2>En attente de l'adversaire…</h2>
+    <p>Donne-lui ce code :</p>
+    <div class="match-code">${code}</div>
+  `);
+  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, () => showMatchChoiceScreen()));
+  net.onDisconnect(() => showMatchChoiceScreen());
+}
+
+function showMatchJoinScreen(errorMsg) {
+  showLobby(`
+    <h2>Rejoindre un match</h2>
+    <p>Code donné par l'autre joueur :</p>
+    <input id="matchCodeInput" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="XXXX" />
+    <button class="bigbtn" id="matchJoinSubmitBtn">Rejoindre</button>
+    ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
+  `);
+  const input = document.getElementById('matchCodeInput');
+  const joinBtn = document.getElementById('matchJoinSubmitBtn');
+  input.addEventListener('input', () => {
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
   });
+  joinBtn.onclick = () => { audio.play('button'); joinMatch(input.value, joinBtn); };
+}
+
+async function joinMatch(code, joinBtn) {
+  if (code.length !== 4) return;
+  if (joinBtn) joinBtn.disabled = true;
+  try {
+    const net = await connectMatch(code);
+    showWaitingScreen(net, (msg) => showMatchJoinScreen(msg));
+  } catch (err) {
+    showMatchJoinScreen(err.message);
+  }
 }
 
 // ---- Title/splash screen (see index.html's #homeOverlay comment) — the
