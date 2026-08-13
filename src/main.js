@@ -614,7 +614,7 @@ function generateMatchCode() {
   return code;
 }
 
-function showMatchChoiceScreen() {
+function showMatchChoiceScreen(errorMsg) {
   showLobby(`
     <h2>Match réseau</h2>
     <p>Crée une partie et partage le code, ou rejoins avec un code reçu.</p>
@@ -622,6 +622,7 @@ function showMatchChoiceScreen() {
       <button class="bigbtn" id="matchHostBtn">Créer</button>
       <button class="bigbtn" id="matchJoinBtn">Rejoindre</button>
     </div>
+    ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
   `);
   document.getElementById('matchHostBtn').onclick = () => { audio.play('button'); hostMatch(); };
   document.getElementById('matchJoinBtn').onclick = () => { audio.play('button'); showMatchJoinScreen(); };
@@ -634,7 +635,7 @@ async function hostMatch() {
     const net = await connectMatch(code);
     showMatchHostWaitingScreen(net, code);
   } catch (err) {
-    showMatchChoiceScreen();
+    showMatchChoiceScreen(err.message);
   }
 }
 
@@ -652,8 +653,8 @@ function showMatchHostWaitingScreen(net, code) {
     <p>Donne-lui ce code :</p>
     <div class="match-code">${code}</div>
   `);
-  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, () => showMatchChoiceScreen()));
-  net.onDisconnect(() => showMatchChoiceScreen());
+  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, (msg) => showMatchChoiceScreen(msg)));
+  net.onDisconnect(() => showMatchChoiceScreen("L'autre joueur s'est déconnecté."));
 }
 
 function showMatchJoinScreen(errorMsg) {

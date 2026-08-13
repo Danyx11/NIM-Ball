@@ -1,20 +1,35 @@
-// PartyKit port of server/arbiter.js (see CLAUDE.md "LAN mode" for the
-// original design this mirrors). Same relay-only arbiter logic — no physics
-// runs here, each client still simulates locally from the synced shot
-// vectors (see src/net.js / src/game.js) — just one instance per PartyKit
-// room instead of one process-wide singleton. The room id (this.room.id) is
-// the 4-character match code: whoever creates the code connects to that
-// room id first (team A), whoever joins with the code connects second
-// (team B), same "first two connections" assignment as the LAN arbiter.
+// partyserver port of server/arbiter.js (see CLAUDE.md "LAN mode" /
+// "Network match" for the original design this mirrors). Same relay-only
+// arbiter logic — no physics runs here, each client still simulates locally
+// from the synced shot vectors (see src/net.js / src/game.js) — just one
+// Durable Object instance per room instead of one process-wide singleton.
+// The room name (this.name, from the URL — see party/index.js) is the
+// 4-character match code: whoever creates the code connects to that room
+// name first (team A), whoever joins with the code connects second (team
+// B), same "first two connections" assignment as the LAN arbiter.
+//
+// Previously ran on the legacy `partykit` CLI/platform, ported here to
+// partyserver + wrangler (self-hosted on a Cloudflare account) because the
+// shared *.partykit.dev domain hit Cloudflare's global custom-domain-per-
+// zone cap — see git history. The API differs slightly from PartyKit's
+// (constructor → onStart, this.room.broadcast → this.broadcast, onMessage's
+// (connection, message) argument order) but the matchmaking logic itself is
+// unchanged.
+import { Server } from 'partyserver';
+
 const CHAT_COOLDOWN_MS = 30000;
 
 function otherTeam(team) {
   return team === 'A' ? 'B' : 'A';
 }
 
-export default class Arbiter {
-  constructor(room) {
-    this.room = room;
+export class Arbiter extends Server {
+  // Called once when the Durable Object instance is first started (see
+  // partyserver's Server#onStart) — the equivalent of PartyKit's
+  // constructor(room) for our purposes, since partyserver's own constructor
+  // takes Cloudflare's (ctx, env) and isn't meant to be overridden for
+  // plain per-room state like this.
+  onStart() {
     this.players = { A: null, B: null };
     this.shots = { A: null, B: null };
     this.sweeps = { A: null, B: null };
@@ -44,7 +59,7 @@ export default class Arbiter {
     }
     this.players[team] = connection;
     // Connection state survives for the life of this connection (see
-    // PartyKit's connection.setState) — used in onMessage/onClose below
+    // partyserver's connection.setState) — used in onMessage/onClose below
     // instead of re-deriving team from the raw ws connection identity.
     connection.setState({ team });
     this.send(connection, { type: 'joined', team });
@@ -55,11 +70,11 @@ export default class Arbiter {
     }
   }
 
-  onMessage(raw, sender) {
-    const team = sender.state?.team;
+  onMessage(connection, message) {
+    const team = connection.state?.team;
     if (team !== 'A' && team !== 'B') return;
     let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
+    try { msg = JSON.parse(message); } catch { return; }
     if (msg.type === 'shots') {
       this.shots[team] = msg.stones;
       this.sweeps[team] = msg.sweep || null;
@@ -99,7 +114,7 @@ export default class Arbiter {
     }
   }
 
-  onClose(connection) {
+  onClose(connection, code, reason, wasClean) {
     const team = connection.state?.team;
     if (team !== 'A' && team !== 'B') return;
     if (this.players[team] === connection) this.players[team] = null;
