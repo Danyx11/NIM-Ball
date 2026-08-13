@@ -11,6 +11,16 @@ import { audio } from './audio.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 
+// PWA offline shell (public/sw.js, public/manifest.json) — production only:
+// registering it during `npm run dev` would let it start intercepting fetch
+// requests and serving stale cached responses over Vite's own dev
+// server/HMR traffic.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(`${ASSET_BASE}sw.js`).catch(() => {});
+  });
+}
+
 // Mobile port (see CLAUDE.md/joystick design notes): detected once at load
 // via the standard coarse-vs-fine pointer media feature (true for
 // touch-primary devices, false for mouse/trackpad) rather than screen width,

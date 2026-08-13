@@ -12,11 +12,18 @@
      the GitHub Pages build. -->
 <link rel="icon" type="image/png" href="%BASE_URL%favicon.png">
 <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon.png">
+<!-- PWA manifest (public/manifest.json) — icon paths inside it are relative
+     to the manifest's own URL, so they resolve correctly under both the '/'
+     dev base and the '/NIM-Ball/' GitHub Pages build base (see
+     vite.config.js) without needing the %BASE_URL% substitution below. -->
+<link rel="manifest" href="%BASE_URL%manifest.json">
+<meta name="theme-color" content="#0b0d12">
 <!-- iOS Safari never implements Element.requestFullscreen() (see main.js's
      FULLSCREEN_SUPPORTED feature-detect) — true fullscreen there only comes
      from launching a home-screen-installed icon in standalone mode, which
      these two tags enable. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Nim-Curl">
 </head>
