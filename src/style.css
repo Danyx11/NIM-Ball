@@ -124,9 +124,18 @@ html, body {
    overriding --card-w here doesn't retroactively recompute them. So the
    whole derived chain is repeated here, verbatim, purely so each `var(...)`
    resolves against *this* rule's --card-w instead of :root's. Keep this in
-   sync with the :root block above if that formula ever changes. */
+   sync with the :root block above if that formula ever changes.
+   82vh (was 96vh): on a landscape phone the vh term is what actually binds
+   (width tops out well short of the 92vw cap — short viewport height, not
+   width, is the scarce dimension there), so it alone controls how much is
+   left over for --right-margin below. 96vh squeezed the joystick down to a
+   ~90px ring with barely any gap off the card's own edge ("colonne trop
+   étroite" feedback). Now that .mobile-layout #scene crops in tighter on the
+   gameplay itself (see that rule below), the card doesn't need to be this
+   large for the rink to still read as big — trading some of that box size
+   back to the right column is a net win, not a shrink. */
 .mobile-layout {
-  --card-w: min(92vw, 1300px, calc(96vh * 3312 / 1896));
+  --card-w: min(92vw, 1300px, calc(82vh * 3312 / 1896));
   --right-margin: calc(100vw - var(--card-w) - var(--card-left-gap));
   --joy-d-full: min(calc(var(--right-margin) - 48px), calc(var(--joy-free-h) - 32px), 260px);
   --joy-d: calc(var(--joy-d-full) * 0.9);
@@ -374,6 +383,15 @@ html, body {
    the desktop `top:80%` slot even with nothing to show. */
 .mobile-layout #toolbar-bottom { display: none; }
 
+/* "Duel LAN" requires typing the ws:// address a locally-run relay server
+   printed on someone's laptop (see CLAUDE.md's "LAN mode" — a dev/local-
+   testing flow, not the public online mode) — not a thing a phone player
+   would ever have to type in. "Match Réseau" (#modeMatch, host/join by a
+   4-char code over PartyKit) is the actual online mode and stays. The
+   remaining tiles' `flex:1` (.half, see .mode-drawer above) picks up the
+   freed space on its own, no layout changes needed here. */
+.mobile-layout #modeLan { display: none; }
+
 /* Shared shell for mobile-only full-screen intro gates (see main.js): plain
    dark scrim + one big centered icon + caption, shown before #modeOverlay so
    it's the very first thing a phone player sees. Two gates use this —
@@ -477,17 +495,22 @@ html, body {
   transform-origin: center;
 }
 /* Mobile-only: zoom in tighter on the gameplay, less surrounding forest —
-   card size itself is untouched, only what's rendered inside it. Anchored at
-   "center top" instead of #scene's own default "center" so the top edge (and
-   the score HUD just under it) never moves — everything grows downward from
-   that fixed line instead of expanding symmetrically and eating into the
-   score's distance from the card's top edge. 1.75 is untested territory (the
-   comment above found clipping issues at just 1.4 on desktop's proportions),
-   so check the board's bottom/sides against the card's overflow:hidden once
-   built for real content, not just the mode-select screen. */
+   card size itself is untouched, only what's rendered inside it. Was anchored
+   "center top" to protect a scoreboard plank that lived near the canvas's top
+   edge in the old V1 art; the V2 art has no plank at all (score is baked
+   "under the ice" near the field's own bottom half — see UNDERICE_SCORE_CY in
+   game.js, ~1158 of the 1896-tall canvas), so that constraint no longer
+   applies. The playing field (FX0..FY1 in game.js) sits close to dead-center
+   of the full 3312x1896 canvas either way, so a plain center-anchored zoom
+   crops forest evenly from all 4 sides instead of leaving the top's forest
+   band untouched while over-cropping the bottom — a straight improvement now
+   that nothing near the top edge needs protecting. Bumped from 1.75 per
+   feedback ("le terrain a l'air trop petit" on a real phone) — checked
+   against FX0/FY0/FX1/FY1's margin to the visible slice at this scale before
+   landing on 2.05, see the note above those constants in game.js. */
 .mobile-layout #scene {
-  transform: scale(1.75);
-  transform-origin: center top;
+  transform: scale(2.05);
+  transform-origin: center;
 }
 
 #app { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; }
