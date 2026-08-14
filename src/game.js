@@ -3119,10 +3119,14 @@ export function startGame(opts = {}) {
     // instant the laser finishes retracting, no fade of its own.
     const strength = mode === 'pulse' ? 0.2 + 0.6 * pulseStrength(g) : 1;
     ctx.save();
-    // clip to the ice rect so the halo tucks under the wood frame at wall
-    // contact instead of glowing over it (frame is baked into the background
-    // image and drawn first, so anything drawn after it normally sits on top)
-    ctx.beginPath(); ctx.rect(FX0, FY0, FX1 - FX0, FY1 - FY0); ctx.clip();
+    // clip to the ice rect (+goal pockets, see clipIceAndGoals) so the halo
+    // tucks under the wood frame at wall contact instead of glowing over it
+    // (frame is baked into the background image and drawn first, so anything
+    // drawn after it normally sits on top), but still reaches naturally out
+    // to the goal bar instead of guillotining on the invisible FX0/FX1 physics
+    // wall when a stone sits in the goal mouth (GY0..GY1) — plain ctx.rect
+    // stopped short of the bar there, reading as a cut on an imaginary line.
+    clipIceAndGoals();
     ctx.globalCompositeOperation = 'lighter';
     const grad = ctx.createRadialGradient(g.x, g.y, g.r * 0.4, g.x, g.y, R);
     grad.addColorStop(0, `rgba(${rgb},${(0.55 * strength).toFixed(3)})`);
