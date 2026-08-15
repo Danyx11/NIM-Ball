@@ -485,6 +485,15 @@ html, body {
 #scene {
   position: absolute;
   inset: 0;
+  /* Bare structural wrapper (bg-stage/fg-stage are both display:none —
+     retired for the V2 art — so #app is its only real content) — never
+     itself a click target. On mobile with the board detached out of #app
+     (see .stage-wrap-detached), #app opts out of pointer-events too, and
+     without this, #scene's own box (still auto by inheritance) is what
+     elementFromPoint() lands on next, same swallowing bug one level up.
+     #app explicitly sets its own pointer-events below so this doesn't
+     affect desktop, where #app needs to stay interactive. */
+  pointer-events: none;
   /* 1.4 clipped the board's own bottom edge against the card (the
      translateY(6.52%) art-correction on #stage-wrap shifts the board off
      .scene's true center, so scaling amplifies that downward offset —
@@ -550,14 +559,24 @@ html, body {
   z-index: 0;
 }
 
-#app { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; }
+#app { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; pointer-events: auto; }
 /* Mobile: pull #app's remaining flex content (just #chatBar now — the board
    used to live in this flow too, flush against #game-card's top instead of
    vertically centered, but it's a real 2.05x zoom now via
    .stage-wrap-detached (see above), detached from #app's flex flow
    entirely, so this rule only still matters for #chatBar) up rather than
    centering it in #scene. */
-.mobile-layout #app { justify-content: flex-start; padding-top: 0; }
+/* pointer-events:none — #app is `position:absolute;inset:0`, i.e. it still
+   covers the whole card even though #stage-wrap (canvas + every overlay
+   nested inside it — #overlay, .team-select, #replayUploadOverlay,
+   #replayBar) moved out to be a #game-card sibling instead (see main.js,
+   where .mobile-layout is set up). Transparent isn't the same as
+   click-through: without this, #app silently ate every tap/drag meant for
+   the stones underneath (confirmed via elementFromPoint() landing on #app,
+   not canvas). #chatBar is #app's only remaining real child on mobile and
+   gets its own pointer-events:auto back below — same pattern #toolbar-top
+   already uses to stay click-through except on its own buttons. */
+.mobile-layout #app { justify-content: flex-start; padding-top: 0; pointer-events: none; }
 /* Was translateY(-8.2%): cropped away frame.webp's own baked-in empty
    margin above the old scoreboard plank. The V2 art has no such margin (no
    plank at all — score moved onto the ice, see the score-under-ice
@@ -643,7 +662,7 @@ canvas {
    extreme portrait aspect ratios, not something this margin causes or
    fixes) — so don't chase a smaller visual gap by pushing this further
    without first giving the card more vertical room to work with. */
-#chatBar { width: 70%; display: flex; gap: 12px; margin-top: -4%; position: relative; z-index: 1; }
+#chatBar { width: 70%; display: flex; gap: 12px; margin-top: -4%; position: relative; z-index: 1; pointer-events: auto; }
 #chatBar.hidden { display: none; }
 .chat-window {
   flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px;
@@ -849,18 +868,20 @@ button:disabled { opacity: 0.35; cursor: default; }
   z-index: 10;
 }
 #overlay.hidden { display: none; }
-/* Same clipping risk as .team-select above (and the same fix) — #overlay
-   spans the *entire* #app (not just a middle band), so once .mobile-layout
-   #scene zooms that whole subtree 2.05x from center-top, its content (LAN
-   address entry, goal/victory panels — all share #overlay) can run past
-   #game-card's fixed, un-zoomed height and get clipped/unreachable, same as
-   the ready-tap panel was. Unaffected by the canvas's own detached real-size
-   zoom (see .stage-wrap-detached above) — #overlay is still a plain #app
-   child, still riding #scene's transform like before. */
-.mobile-layout #overlay {
-  transform: scale(0.5);
-  transform-origin: center top;
-}
+/* Used to need a mobile counter-scale here (like .team-select below) to
+   claw back space #scene's 2.05x zoom ate into. #overlay lives inside
+   #stage-wrap in the markup (index.html), but doesn't want the canvas's own
+   ~205%-real-zoomed size — its inset:0 is a plain full-card fill, no
+   ice-coordinate alignment need — so main.js detaches it straight to
+   #game-card at load instead, its true un-zoomed size, no ancestor
+   transform/oversized box left to compensate for. The counter-scale is
+   removed rather than left as dead weight: it was only ever an approximate
+   fix anyway (transform-origin mismatch between the two nested scales), and
+   wrong outright for the non-centered edges of other panels sharing this
+   nesting (see .team-select's own comment below for #modeOverlay's
+   right-docked drawer specifically) — together what let panels run
+   off-screen or half cut-off at some real phone aspect ratios despite
+   looking fine in a quick emulator check. */
 #overlay h2 { margin: 0; font-size: 26px; }
 #overlay p { margin: 0; color: var(--ink-dim); max-width: 380px; font-size: 14px; line-height: 1.5; }
 .bigbtn { background: var(--accent); color: #3a2900; padding: 14px 30px; font-size: 16px; border-radius: 14px; }
@@ -901,20 +922,27 @@ button:disabled { opacity: 0.35; cursor: default; }
    (local vs LAN mode picker, shown first) — same two-column layout/palette. */
 .team-select { position: absolute; inset: 22.76% 12.83% 22.87% 13.25%; border-radius: 28px; display: flex; flex-direction: row; overflow: hidden; }
 .team-select.hidden { display: none; }
-/* .mobile-layout #scene zooms the whole scene (board + this overlay, both
-   live in the same #app subtree — the board itself has since moved out to
-   its own real-size .stage-wrap-detached, see above, but this overlay
-   hasn't) by 2.05x from a center-top origin — great for the board, but it
-   also pushed this panel's own bottom edge (the actual tappable "prêt"
-   prompt) past #game-card's fixed, un-zoomed height, clipped by its
-   overflow:hidden and unreachable. Counter-scaling it back down (same
-   center-top origin, so it shrinks toward the same anchor line rather than
-   drifting) keeps it reachable. Verify against real viewport heights if
-   #game-card's own aspect ratio ever changes. */
-.mobile-layout .team-select {
-  transform: scale(0.5);
-  transform-origin: center top;
-}
+/* No mobile counter-scale needed here anymore. #startOverlay (ready-tap team
+   pick) uses this base ice-rect-aligned inset as-is — its team-color wash
+   needs to land on the ice exactly where it's drawn on the canvas, so it
+   stays nested inside #stage-wrap (main.js detaches that whole thing to
+   #game-card at load, same real ~205%-zoomed size as the canvas — see
+   .stage-wrap-detached below), tracking the board 1:1 same as before.
+   #modeOverlay (mode-select) overrides this inset entirely (`inset:0`, see
+   below) and doesn't want ice-alignment at all — its right-docked drawer is
+   edge-anchored, not centered, so sitting inside the same oversized zoomed
+   box as the canvas anchored it to that box's own right edge instead of
+   #game-card's (mostly outside #game-card's clipped viewport, only a sliver
+   ever visible) — main.js detaches #modeOverlay straight to #game-card
+   separately instead, its true un-zoomed size.
+   There used to be a counter-scale(0.5) trying to compensate for the first
+   problem (#scene's old 2.05x zoom pushing this panel's bottom edge past
+   #game-card's fixed height) but it only ever approximately worked
+   (transform-origin mismatch between the two nested scales) and did nothing
+   for the second (edge-anchored content needs real un-zoomed positioning,
+   not a smaller version of the same wrong anchor) — together what let
+   panels run off-screen or half cut-off at some real phone aspect ratios
+   despite looking fine in a quick emulator check. */
 .half { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: background .25s ease; text-align: center; padding: 16px; }
 .half.a { background: rgba(31,111,168,0.55); }
 .half.b { background: rgba(168,50,71,0.55); }
@@ -956,6 +984,14 @@ button:disabled { opacity: 0.35; cursor: default; }
   border-radius: 20px;
   overflow: hidden;
 }
+/* 5 tiles' natural content height (padding + two lines of text each) can
+   exceed the 84%-of-card-height (top:8%/bottom:8%) this drawer gets on a
+   short landscape phone — was invisible before (the whole drawer was
+   clipped off-card by the .team-select positioning bug fixed above, so
+   nobody could scroll far enough to notice tiles were also short on room),
+   now that it's positioned correctly this needs its own fix: let it scroll
+   instead of silently cutting off DUEL LAN/REPLAY at the bottom. */
+.mobile-layout .mode-drawer { overflow-y: auto; }
 
 #overlay input[type="text"] {
   font-family: inherit; font-size: 15px; color: var(--ink); background: var(--bg-mid);

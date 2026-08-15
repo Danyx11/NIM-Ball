@@ -146,8 +146,9 @@ export function startGame(opts = {}) {
   // drawContactShadow scales with pixel count) and ctx.scale()'d once so every
   // existing drawImage/fillRect/arc call keeps working unmodified.
   // Mobile gets a higher cap than desktop: on mobile the canvas's own CSS
-  // box (#stage-wrap.stage-wrap-detached, see the `mobile` branch below and
-  // its comment in style.css) is grown to ~205% of #game-card's width — a
+  // box (#stage-wrap.stage-wrap-detached, reparented in main.js at load —
+  // see its comment there and in style.css) is grown to ~205% of
+  // #game-card's width — a
   // real box size, not a CSS `transform: scale()` of a small one (that used
   // to be how this zoom worked; it rasterized the canvas at its small
   // pre-zoom size and blew the bitmap up, which read as soft on mobile GPUs
@@ -1301,23 +1302,9 @@ export function startGame(opts = {}) {
   // same side of the stone as the push so releaseDrag's own curX-startX math
   // reproduces that direction.
   if (mobile) {
-    // Detach the canvas itself from #app (and #scene's transform-scaled
-    // subtree) so it isn't rasterized-then-blown-up by CSS `transform:
-    // scale()` — see the .stage-wrap-detached comment in style.css for why
-    // that specifically blurs the arena art on mobile GPUs despite the
-    // canvas's own backing buffer being huge. #game-card is never
-    // transform-scaled (only ever translateY'd for vertical centering), so
-    // re-parenting stage-wrap there as its first child keeps it painting
-    // under #scene — which still holds #overlay/#modeOverlay/#fg-stage
-    // etc. — so those keep painting over the board exactly like before, no
-    // z-index changes needed. Known gap: #chatBar (LAN mode only) used to
-    // sit in flex flow right below stage-wrap inside #app; with stage-wrap
-    // gone from that flow it may render overlapping the board instead of
-    // under it — not fixed here, LAN mode on mobile is the rarer path.
-    const stageWrap = document.getElementById('stage-wrap');
-    stageWrap.classList.add('stage-wrap-detached');
-    document.getElementById('game-card').prepend(stageWrap);
-
+    // #stage-wrap (canvas + every DOM overlay nested inside it) is already
+    // detached to #game-card by main.js, before startGame() ever runs — see
+    // the comment there. Nothing to redo here.
     // Reparent the play/sweep/power toolbar buttons into #toolbarMobile (see
     // its comment in index.html/style.css) so they sit under the joystick
     // column instead of below the board — CSS alone can't do this because
