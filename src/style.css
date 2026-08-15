@@ -324,6 +324,32 @@ html, body {
   transition: transform .15s ease-out;
 }
 #joystickStick.dragging { transition: none; }
+/* Aim-lock indicator (see JOYSTICK_LOCK_MS in src/game.js's onJoystickMove):
+   a small dot on the ring's own contour, top-center, dark/invisible until
+   #joystickRing.locked lights it up with the accent gold + a slow pulse —
+   the player's cue that the stick has frozen and a deliberate held push is
+   now needed to regain aim control. */
+#joystickLockDot {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: calc(var(--joy-d) * 0.09);
+  height: calc(var(--joy-d) * 0.09);
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  box-shadow: 0 0 0 rgba(255,209,102,0);
+  transition: opacity .2s ease-out;
+}
+#joystickRing.locked #joystickLockDot {
+  opacity: 1;
+  animation: joyLockPulse 1.6s ease-in-out infinite;
+}
+@keyframes joyLockPulse {
+  0%, 100% { box-shadow: 0 0 4px 1px rgba(255,209,102,0.5); }
+  50% { box-shadow: 0 0 9px 3px rgba(255,209,102,0.95); }
+}
 
 /* Relocation target for #tbtn-play/#tbtn-sweep/#tbtn-power (mobile only — see
    src/game.js's mobile branch, which reparents those existing buttons here
