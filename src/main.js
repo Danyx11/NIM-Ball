@@ -31,6 +31,46 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
 const IS_MOBILE = window.matchMedia('(pointer: coarse)').matches;
 if (IS_MOBILE) document.body.classList.add('mobile-layout');
 
+// Detach #stage-wrap (the canvas, plus #startOverlay — the ready-tap team
+// pick, the one overlay whose team-color wash needs to align with the ice
+// rect *as drawn on the canvas*, see the .team-select comment in style.css)
+// out from under #app/#scene's transform-scaled subtree, onto #game-card
+// directly (never transform-scaled, only ever translateY'd for vertical
+// centering — see .stage-wrap-detached in style.css for the real-size CSS
+// this relies on and why: CSS `transform: scale()` rasterizes a layer at
+// ~its pre-transform size and blows that bitmap up for display, reading as
+// soft on mobile GPUs no matter how high-res the canvas backing buffer is).
+// #overlay, #modeOverlay, #replayUploadOverlay and #replayBar also live
+// inside #stage-wrap in the markup (index.html) but don't want the canvas's
+// own ~205%-zoomed real size — they're plain edge/corner-anchored panels
+// (e.g. #modeOverlay's right-docked drawer) meant to fill #game-card at its
+// true, un-zoomed size, not get stretched into the same oversized box as
+// the board and then have their non-centered edges clipped off by
+// #game-card's overflow:hidden. So those four get pulled out to their own
+// #game-card children instead, each keeping its own existing
+// position:absolute;inset:0 (now resolving against #game-card's real size).
+// Both moves happen once here at load, before #modeOverlay is ever shown,
+// rather than inside startGame()'s own `mobile` branch — mode-select is the
+// very first screen a mobile player sees and it's nested inside stage-wrap
+// too, so waiting until a match actually starts left it (and every other
+// overlay sharing that nesting) positioned against #scene's still-applied
+// 2.05x zoom on that first screen, which is what the old
+// `.mobile-layout #overlay`/`.mobile-layout .team-select` counter-scale(0.5)
+// rules were trying to compensate for — imprecisely (transform-origin
+// mismatches between the two nested scales, not a real cancellation, and
+// wrong entirely for edge-anchored content like the mode-select drawer),
+// which is why panels ran off-screen or half cut-off at some real phone
+// aspect ratios despite looking fine in a quick emulator check.
+if (IS_MOBILE) {
+  const gameCard = document.getElementById('game-card');
+  const stageWrap = document.getElementById('stage-wrap');
+  stageWrap.classList.add('stage-wrap-detached');
+  gameCard.prepend(stageWrap);
+  ['overlay', 'replayBar', 'modeOverlay', 'replayUploadOverlay'].forEach((id) => {
+    gameCard.appendChild(document.getElementById(id));
+  });
+}
+
 // iOS Safari never implements Element.requestFullscreen() for anything but a
 // <video> — document.fullscreenEnabled reads false there rather than the
 // call throwing, so this is a real feature-detect, not a UA sniff. The only
