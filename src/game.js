@@ -145,14 +145,18 @@ export function startGame(opts = {}) {
   // at 2 — Pixi/Phaser's standard tradeoff, since the per-frame shadow blur in
   // drawContactShadow scales with pixel count) and ctx.scale()'d once so every
   // existing drawImage/fillRect/arc call keeps working unmodified.
-  // Mobile gets a higher cap than desktop: .mobile-layout #scene stretches
-  // this canvas another 1.75x via CSS transform (style.css), which doesn't
-  // add any resolution of its own — it just magnifies whatever's already in
-  // the backing buffer. At the old 1.3 cap that left mobile rendering at an
-  // effective ~0.74x density (1.3/1.75), visibly softer than desktop's own
-  // capped-but-unstretched 1.3x. 2/1.75 ≈ 1.14x keeps it at least at native
-  // density post-zoom without paying for a full uncapped devicePixelRatio
-  // (3 on many phones) that the perf audit ruled out.
+  // Mobile gets a higher cap than desktop: on mobile the canvas's own CSS
+  // box (#stage-wrap.stage-wrap-detached, see the `mobile` branch below and
+  // its comment in style.css) is grown to ~205% of #game-card's width — a
+  // real box size, not a CSS `transform: scale()` of a small one (that used
+  // to be how this zoom worked; it rasterized the canvas at its small
+  // pre-zoom size and blew the bitmap up, which read as soft on mobile GPUs
+  // regardless of backing-buffer size). Since the box is genuinely bigger
+  // now, it needs genuinely more backing-buffer resolution to stay crisp
+  // than desktop's card-filling default — the 2 cap (vs desktop's 1.3)
+  // keeps comfortable headroom above 1x there without paying for a full
+  // uncapped devicePixelRatio (3 on many phones) that the perf audit ruled
+  // out.
   // A #qualityBtn toggle (localStorage 'nb-quality', reload-to-apply) used to
   // let a player switch this and two other spots (LASER_FAKE_GLOW below,
   // the atmosphere.draw/update calls near the main loop) between this eco
@@ -1297,6 +1301,23 @@ export function startGame(opts = {}) {
   // same side of the stone as the push so releaseDrag's own curX-startX math
   // reproduces that direction.
   if (mobile) {
+    // Detach the canvas itself from #app (and #scene's transform-scaled
+    // subtree) so it isn't rasterized-then-blown-up by CSS `transform:
+    // scale()` — see the .stage-wrap-detached comment in style.css for why
+    // that specifically blurs the arena art on mobile GPUs despite the
+    // canvas's own backing buffer being huge. #game-card is never
+    // transform-scaled (only ever translateY'd for vertical centering), so
+    // re-parenting stage-wrap there as its first child keeps it painting
+    // under #scene — which still holds #overlay/#modeOverlay/#fg-stage
+    // etc. — so those keep painting over the board exactly like before, no
+    // z-index changes needed. Known gap: #chatBar (LAN mode only) used to
+    // sit in flex flow right below stage-wrap inside #app; with stage-wrap
+    // gone from that flow it may render overlapping the board instead of
+    // under it — not fixed here, LAN mode on mobile is the rarer path.
+    const stageWrap = document.getElementById('stage-wrap');
+    stageWrap.classList.add('stage-wrap-detached');
+    document.getElementById('game-card').prepend(stageWrap);
+
     // Reparent the play/sweep/power toolbar buttons into #toolbarMobile (see
     // its comment in index.html/style.css) so they sit under the joystick
     // column instead of below the board — CSS alone can't do this because

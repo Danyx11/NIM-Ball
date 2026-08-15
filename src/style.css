@@ -512,14 +512,51 @@ html, body {
   transform: scale(2.05);
   transform-origin: center;
 }
+/* #stage-wrap (canvas only — see the `mobile` branch in game.js's
+   startGame(), which moves it here from its normal home inside #app) is
+   deliberately kept OUT of the transform above. `transform: scale()`
+   rasterizes a layer at (roughly) its pre-transform CSS size and then
+   blows that bitmap up for display — on mobile GPUs that reads as visibly
+   soft/blurry no matter how high-res the canvas's own backing buffer is
+   (see the dpr comment in game.js), because the extra resolution never
+   gets consulted once the bitmap is fixed. Giving the canvas a real
+   (non-transform) box size instead makes the browser paint at the correct
+   final resolution directly, sidestepping that step. #bg-stage/#fg-stage
+   (decorative, low detail — blur there is not the complaint) and
+   #overlay/#modeOverlay/#replayBar/etc. (real DOM text/panels, not a
+   raster image, and everything about how big they read on screen is
+   already tuned around the transform above) are staying on it unchanged —
+   only the arena art itself needed this.
+   calc(205% - 41px) replicates the old 2.05x zoom of #app's own content
+   box: #app has 10px padding on each side (width:100% resolves to
+   game-card's width minus 20px pre-zoom), so ×2.05 = 205% of game-card's
+   width minus 41px. translate(-50%,-50%) is a pure translation (no
+   resampling, unlike scale) anchored the same way transform-origin:center
+   above anchors the rest of the scene. Height is deliberately not set —
+   the canvas inside keeps its own width:100%;height:auto intrinsic ratio
+   (3312/1896, matching #game-card's own locked aspect-ratio), so it
+   already comes out close to a symmetric crop without needing a second
+   real-size axis. */
+/* #stage-wrap.stage-wrap-detached (ID + class), not .mobile-layout
+   .stage-wrap-detached — the plain #stage-wrap rule above already sets
+   position/width with ID specificity, which beats a 2-class selector and
+   silently no-ops position:absolute/width here otherwise. */
+.mobile-layout #stage-wrap.stage-wrap-detached {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(205% - 41px);
+  transform: translate(-50%, -50%);
+  z-index: 0;
+}
 
 #app { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; }
-/* Mobile: pull the board (and its baked-in score plank) up flush against
-   #game-card's top instead of vertically centering it in #scene — desktop's
-   centered layout leaves generous top/bottom margin by design, but mobile
-   wants the score readable as close to the card's own top edge as possible
-   (a few px), trading the bottom margin away since .mobile-layout #scene's
-   1.75x zoom already crops aggressively there anyway. */
+/* Mobile: pull #app's remaining flex content (just #chatBar now — the board
+   used to live in this flow too, flush against #game-card's top instead of
+   vertically centered, but it's a real 2.05x zoom now via
+   .stage-wrap-detached (see above), detached from #app's flex flow
+   entirely, so this rule only still matters for #chatBar) up rather than
+   centering it in #scene. */
 .mobile-layout #app { justify-content: flex-start; padding-top: 0; }
 /* Was translateY(-8.2%): cropped away frame.webp's own baked-in empty
    margin above the old scoreboard plank. The V2 art has no such margin (no
@@ -813,11 +850,13 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 #overlay.hidden { display: none; }
 /* Same clipping risk as .team-select above (and the same fix) — #overlay
-   spans the *entire* #stage-wrap (not just a middle band), so once
-   .mobile-layout #scene zooms that whole subtree 1.75x from center-top, its
-   content (LAN address entry, goal/victory panels — all share #overlay) can
-   run past #game-card's fixed, un-zoomed height and get clipped/unreachable,
-   same as the ready-tap panel was. */
+   spans the *entire* #app (not just a middle band), so once .mobile-layout
+   #scene zooms that whole subtree 2.05x from center-top, its content (LAN
+   address entry, goal/victory panels — all share #overlay) can run past
+   #game-card's fixed, un-zoomed height and get clipped/unreachable, same as
+   the ready-tap panel was. Unaffected by the canvas's own detached real-size
+   zoom (see .stage-wrap-detached above) — #overlay is still a plain #app
+   child, still riding #scene's transform like before. */
 .mobile-layout #overlay {
   transform: scale(0.5);
   transform-origin: center top;
@@ -863,14 +902,15 @@ button:disabled { opacity: 0.35; cursor: default; }
 .team-select { position: absolute; inset: 22.76% 12.83% 22.87% 13.25%; border-radius: 28px; display: flex; flex-direction: row; overflow: hidden; }
 .team-select.hidden { display: none; }
 /* .mobile-layout #scene zooms the whole scene (board + this overlay, both
-   live in the same #stage-wrap subtree) by 1.75x from a center-top origin —
-   great for the board, but it also pushed this panel's own bottom edge (the
-   actual tappable "prêt" prompt) past #game-card's fixed, un-zoomed height,
-   clipped by its overflow:hidden and unreachable. Counter-scaling it back
-   down (same center-top origin, so it shrinks toward the same anchor line
-   rather than drifting) keeps it reachable while still reading a bit bigger
-   than the pre-zoom baseline (0.7 * 1.75 = 1.225x). Verify against real
-   viewport heights if #game-card's own aspect ratio ever changes. */
+   live in the same #app subtree — the board itself has since moved out to
+   its own real-size .stage-wrap-detached, see above, but this overlay
+   hasn't) by 2.05x from a center-top origin — great for the board, but it
+   also pushed this panel's own bottom edge (the actual tappable "prêt"
+   prompt) past #game-card's fixed, un-zoomed height, clipped by its
+   overflow:hidden and unreachable. Counter-scaling it back down (same
+   center-top origin, so it shrinks toward the same anchor line rather than
+   drifting) keeps it reachable. Verify against real viewport heights if
+   #game-card's own aspect ratio ever changes. */
 .mobile-layout .team-select {
   transform: scale(0.5);
   transform-origin: center top;
