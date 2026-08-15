@@ -1251,7 +1251,17 @@ export function startGame(opts = {}) {
       }
       return;
     }
-    if (drag) {
+    // joystickDrag guard: on mobile, a touch that starts on the joystick
+    // still bubbles touchmove up to this same window listener (touch target
+    // capture keeps evt.target pinned to the ring, but bubbling still reaches
+    // window) — this branch used to run anyway and get silently overwritten
+    // a moment later by onJoystickMove's own correcting write every event.
+    // That masked the redundant write as long as onJoystickMove always ran
+    // its full update, but the aim-lock feature (see onJoystickMove) now
+    // skips that update on purpose while locked, so this write would
+    // otherwise clobber the frozen aim with a bogus position extrapolated
+    // from a joystick touch that's nowhere near the canvas.
+    if (drag && !joystickDrag) {
       evt.preventDefault();
       const pos = getPointerPos(evt);
       drag.curX = pos.x; drag.curY = pos.y;
@@ -1321,25 +1331,29 @@ export function startGame(opts = {}) {
     const joystick = document.getElementById('joystick');
     const joystickRing = document.getElementById('joystickRing');
     const joystickStick = document.getElementById('joystickStick');
+    // Aim lock: the virtual joystick is prone to a specific mobile-only
+    // annoyance direct canvas/desktop dragging never has — the thumb's own
+    // motion while lifting off at release can nudge the stick just before
+    // touchend fires, silently changing the aim from what was actually
+    // intended. Holding the stick still for JOYSTICK_LOCK_MS freezes curX/curY
+    // (ring lights up via joystickRing.locked, see style.css) so that release
+    // wobble can no longer reach it. Deliberately re-aiming out of a lock
+    // needs a real push: past JOYSTICK_UNLOCK_PX and *held* there for
+    // JOYSTICK_UNLOCK_MS, not just a brief poke, so a lock re-engaged by
+    // accident doesn't come loose from the same kind of stray touch it
+    // exists to filter out. Thresholds are plain CSS/client px — unlike
+    // TAP_MOVE_THRESHOLD above, joystickClientPos never converts into canvas
+    // space, since the joystick's own math (below) all happens in screen px
+    // relative to the ring's own getBoundingClientRect().
+    const JOYSTICK_LOCK_MS = 2000;
+    const JOYSTICK_UNLOCK_MS = 500;
+    const JOYSTICK_STILL_PX = 4;
+    const JOYSTICK_UNLOCK_PX = 8;
     function joystickClientPos(evt) {
       const t = evt.touches ? (evt.touches[0] || evt.changedTouches[0]) : evt;
       return { x: t.clientX, y: t.clientY };
     }
-    function onJoystickDown(evt) {
-      audio.unlock();
-      if (!isAimingPhase(phase)) return;
-      const g = selectedStone;
-      if (!g || !currentTeamStones().includes(g)) return;
-      evt.preventDefault();
-      const rect = joystickRing.getBoundingClientRect();
-      joystickDrag = { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, r: rect.width / 2 };
-      joystickStick.classList.add('dragging');
-      beginDrag(g, g.x, g.y);
-    }
-    function onJoystickMove(evt) {
-      if (!joystickDrag) return;
-      evt.preventDefault();
-      const p = joystickClientPos(evt);
+    function applyJoystickPos(p) {
       let dx = p.x - joystickDrag.cx, dy = p.y - joystickDrag.cy;
       const rawDist = Math.hypot(dx, dy);
       const clampedDist = Math.min(rawDist, joystickDrag.r);
@@ -1350,9 +1364,80 @@ export function startGame(opts = {}) {
       drag.curY = drag.startY + uy * pullDist;
       updateDragTickAudio(pullDist);
     }
+    function clearJoystickLockTimer() {
+      if (joystickDrag.lockTimer != null) { clearTimeout(joystickDrag.lockTimer); joystickDrag.lockTimer = null; }
+    }
+    function clearJoystickUnlockTimer() {
+      if (joystickDrag.unlockTimer != null) { clearTimeout(joystickDrag.unlockTimer); joystickDrag.unlockTimer = null; }
+    }
+    // (Re)starts the still-timer from `fromPos` — called on joystick-down and
+    // every time a move event proves the stick is still actively being aimed
+    // (see onJoystickMove), so JOYSTICK_LOCK_MS always measures time since the
+    // *last* real movement, not since the drag began.
+    function armJoystickLockTimer(fromPos) {
+      clearJoystickLockTimer();
+      joystickDrag.anchorPos = fromPos;
+      joystickDrag.lockTimer = trackedTimeout(engageJoystickLock, JOYSTICK_LOCK_MS);
+    }
+    function engageJoystickLock() {
+      if (!joystickDrag || joystickDrag.locked) return;
+      joystickDrag.locked = true;
+      joystickDrag.lockTimer = null;
+      joystickDrag.lockPos = joystickDrag.lastPos || joystickDrag.anchorPos;
+      joystickRing.classList.add('locked');
+    }
+    function disengageJoystickLock() {
+      if (!joystickDrag || !joystickDrag.locked) return;
+      joystickDrag.locked = false;
+      joystickDrag.unlockTimer = null;
+      joystickRing.classList.remove('locked');
+      const p = joystickDrag.lastPos || joystickDrag.lockPos;
+      applyJoystickPos(p);
+      armJoystickLockTimer(p);
+    }
+    function onJoystickDown(evt) {
+      audio.unlock();
+      if (!isAimingPhase(phase)) return;
+      const g = selectedStone;
+      if (!g || !currentTeamStones().includes(g)) return;
+      evt.preventDefault();
+      const rect = joystickRing.getBoundingClientRect();
+      const p = joystickClientPos(evt);
+      joystickDrag = {
+        cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, r: rect.width / 2,
+        locked: false, lockTimer: null, unlockTimer: null, lockPos: null, anchorPos: p, lastPos: p,
+      };
+      joystickStick.classList.add('dragging');
+      beginDrag(g, g.x, g.y);
+      armJoystickLockTimer(p);
+    }
+    function onJoystickMove(evt) {
+      if (!joystickDrag) return;
+      evt.preventDefault();
+      const p = joystickClientPos(evt);
+      joystickDrag.lastPos = p;
+      if (joystickDrag.locked) {
+        // Frozen: ignore the movement itself, only watch for a sustained
+        // deliberate push past JOYSTICK_UNLOCK_PX to earn control back.
+        const devDist = Math.hypot(p.x - joystickDrag.lockPos.x, p.y - joystickDrag.lockPos.y);
+        if (devDist > JOYSTICK_UNLOCK_PX) {
+          if (joystickDrag.unlockTimer == null) joystickDrag.unlockTimer = trackedTimeout(disengageJoystickLock, JOYSTICK_UNLOCK_MS);
+        } else {
+          clearJoystickUnlockTimer();
+        }
+        return;
+      }
+      applyJoystickPos(p);
+      if (Math.hypot(p.x - joystickDrag.anchorPos.x, p.y - joystickDrag.anchorPos.y) > JOYSTICK_STILL_PX) {
+        armJoystickLockTimer(p);
+      }
+    }
     function onJoystickUp(evt) {
       if (!joystickDrag) return;
       evt.preventDefault();
+      clearJoystickLockTimer();
+      clearJoystickUnlockTimer();
+      joystickRing.classList.remove('locked');
       joystickDrag = null;
       joystickStick.classList.remove('dragging');
       joystickStick.style.transform = '';
