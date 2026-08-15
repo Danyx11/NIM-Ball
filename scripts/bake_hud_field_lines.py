@@ -26,8 +26,12 @@ FILES = ["chat summer UPSCALED-0.png", "chat winter UPSCALED-0.png", "chat night
 # Same fractions (of the ice image's own height) as design-lab/main.js.
 HEX_R_FRAC = 0.153
 SMALL_HEX_R_FRAC = 0.05
-GOAL_R_FRAC = 0.27
-GOAL_ARC_FRACTION = 0.4
+# True semicircle (was 0.27/0.4 = a 144°-flattened cap) — radius chosen so the
+# tips still land at the exact same goal-mouth half-height as before
+# (0.27*sin(0.4*pi)), only the curvature/bulge changes, matching the fuller
+# crease arc from the pre-V1.2 art.
+GOAL_R_FRAC = 0.2568
+GOAL_ARC_FRACTION = 0.5
 STROKE_FRAC = 0.015
 LINE_ALPHA = 0.51
 LINE_BASE_GRAY = 20

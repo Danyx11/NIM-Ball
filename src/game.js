@@ -145,14 +145,18 @@ export function startGame(opts = {}) {
   // at 2 — Pixi/Phaser's standard tradeoff, since the per-frame shadow blur in
   // drawContactShadow scales with pixel count) and ctx.scale()'d once so every
   // existing drawImage/fillRect/arc call keeps working unmodified.
-  // Mobile gets a higher cap than desktop: .mobile-layout #scene stretches
-  // this canvas another 1.75x via CSS transform (style.css), which doesn't
-  // add any resolution of its own — it just magnifies whatever's already in
-  // the backing buffer. At the old 1.3 cap that left mobile rendering at an
-  // effective ~0.74x density (1.3/1.75), visibly softer than desktop's own
-  // capped-but-unstretched 1.3x. 2/1.75 ≈ 1.14x keeps it at least at native
-  // density post-zoom without paying for a full uncapped devicePixelRatio
-  // (3 on many phones) that the perf audit ruled out.
+  // Mobile gets a higher cap than desktop: on mobile the canvas's own CSS
+  // box (#stage-wrap.stage-wrap-detached, see the `mobile` branch below and
+  // its comment in style.css) is grown to ~205% of #game-card's width — a
+  // real box size, not a CSS `transform: scale()` of a small one (that used
+  // to be how this zoom worked; it rasterized the canvas at its small
+  // pre-zoom size and blew the bitmap up, which read as soft on mobile GPUs
+  // regardless of backing-buffer size). Since the box is genuinely bigger
+  // now, it needs genuinely more backing-buffer resolution to stay crisp
+  // than desktop's card-filling default — the 2 cap (vs desktop's 1.3)
+  // keeps comfortable headroom above 1x there without paying for a full
+  // uncapped devicePixelRatio (3 on many phones) that the perf audit ruled
+  // out.
   // A #qualityBtn toggle (localStorage 'nb-quality', reload-to-apply) used to
   // let a player switch this and two other spots (LASER_FAKE_GLOW below,
   // the atmosphere.draw/update calls near the main loop) between this eco
@@ -1297,6 +1301,23 @@ export function startGame(opts = {}) {
   // same side of the stone as the push so releaseDrag's own curX-startX math
   // reproduces that direction.
   if (mobile) {
+    // Detach the canvas itself from #app (and #scene's transform-scaled
+    // subtree) so it isn't rasterized-then-blown-up by CSS `transform:
+    // scale()` — see the .stage-wrap-detached comment in style.css for why
+    // that specifically blurs the arena art on mobile GPUs despite the
+    // canvas's own backing buffer being huge. #game-card is never
+    // transform-scaled (only ever translateY'd for vertical centering), so
+    // re-parenting stage-wrap there as its first child keeps it painting
+    // under #scene — which still holds #overlay/#modeOverlay/#fg-stage
+    // etc. — so those keep painting over the board exactly like before, no
+    // z-index changes needed. Known gap: #chatBar (LAN mode only) used to
+    // sit in flex flow right below stage-wrap inside #app; with stage-wrap
+    // gone from that flow it may render overlapping the board instead of
+    // under it — not fixed here, LAN mode on mobile is the rarer path.
+    const stageWrap = document.getElementById('stage-wrap');
+    stageWrap.classList.add('stage-wrap-detached');
+    document.getElementById('game-card').prepend(stageWrap);
+
     // Reparent the play/sweep/power toolbar buttons into #toolbarMobile (see
     // its comment in index.html/style.css) so they sit under the joystick
     // column instead of below the board — CSS alone can't do this because
@@ -1989,6 +2010,7 @@ export function startGame(opts = {}) {
     g.dead = true; g.deadMix = 1; stonesDestroyed++;
     reflectOffBar(g, bar);
     audio.play('stoneFall', { volume: 0.178, pan: xToPan(g.x) }); // -10dB, then another -5dB, ~-15dB total — same cue the old goal-fall path used
+    stoneBarFlash = { side: bar === BAR_LEFT ? 'left' : 'right', t0: performance.now() };
   }
   function collideBar(e, bar) {
     const cx = Math.max(bar.x0, Math.min(e.x, bar.x1));
@@ -2274,6 +2296,12 @@ export function startGame(opts = {}) {
   // what drawBarGlow needs to pick BAR_LEFT/BAR_RIGHT + the scoring team's
   // own HALO_RGB color (team B scores through the left bar, A through the right).
   let barGlowSide = null;
+  // A stone dying on the bar gets its own short flash (see killStoneOnBar
+  // below and drawStoneBarFlash) — independent of barGlowSide/drawBarGlow's
+  // goal-scored glow, which stays lit through the whole celebration pause.
+  // This is a one-shot timestamp + side, self-clears once FLASH_MS elapses.
+  const STONE_FLASH_MS = 260;
+  let stoneBarFlash = null; // { side: 'left'|'right', t0: number } | null
   function onGoal(scoringTeam, isWipeout) {
     if (isWipeout) audio.play('wipeout');
     else audio.play('goal', { volume: 0.447 }); // -7dB
@@ -3151,8 +3179,10 @@ export function startGame(opts = {}) {
   // gave the "still black at the back, lit toward the ice" look asked for.
   // This instead gradients ACROSS the bar's own thin depth: transparent at
   // the poutre/back edge (bar still reads as black there) ramping up to the
-  // lit color at 70% right at the ice-facing edge, plus the same short
-  // low-alpha sliver spilling onto the ice right in front of it.
+  // lit color at 70% right at the ice-facing edge. The ice-side spill used to
+  // be a tiny 60px rectangle sliver; it's now the full crease glow below
+  // (drawCreaseGlow), covering the whole "surface de réparation" arc baked
+  // into frame.webp instead of just the strip right against the bar.
   function drawBarGlow() {
     if (!barGlowSide) return;
     const isLeft = barGlowSide === 'left';
@@ -3167,17 +3197,69 @@ export function startGame(opts = {}) {
     coreGrad.addColorStop(1, `rgba(${rgb},${coreAlpha})`);
     ctx.fillStyle = coreGrad;
     ctx.fillRect(bar.x0, bar.y0, bar.x1 - bar.x0, bar.y1 - bar.y0);
-    const SPILL_PX = 60; // short reach: covers the goal-pocket depth + a small bit past the wall onto visible ice
-    const outerX = isLeft ? bar.x1 : bar.x0 - SPILL_PX;
-    ctx.beginPath(); ctx.rect(outerX, GY0, SPILL_PX, GY1 - GY0); ctx.clip();
-    ctx.globalCompositeOperation = 'lighter';
-    const grad = isLeft
-      ? ctx.createLinearGradient(bar.x1, 0, bar.x1 + SPILL_PX, 0)
-      : ctx.createLinearGradient(bar.x0, 0, bar.x0 - SPILL_PX, 0);
-    grad.addColorStop(0, `rgba(${rgb},0.14)`);
+    ctx.restore();
+  }
+  // Stone-on-bar flash — a single quick pulse on the bar itself (same
+  // poutre-to-ice linear gradient as drawBarGlow, none of the crease glow
+  // below) when a stone dies against BAR_LEFT/BAR_RIGHT, set in
+  // killStoneOnBar. Independent of barGlowSide's goal-scored glow, which
+  // stays lit through the whole celebration pause instead of one-shotting.
+  // Envelope is a plain sine bump over [0, STONE_FLASH_MS] (0 -> peak at the
+  // midpoint -> 0), self-clearing once elapsed so this stays a single flash.
+  function drawStoneBarFlash() {
+    if (!stoneBarFlash) return;
+    const t = (performance.now() - stoneBarFlash.t0) / STONE_FLASH_MS;
+    if (t >= 1) { stoneBarFlash = null; return; }
+    const isLeft = stoneBarFlash.side === 'left';
+    const bar = isLeft ? BAR_LEFT : BAR_RIGHT;
+    const rgb = HALO_RGB[isLeft ? 'B' : 'A'];
+    const coreAlpha = (isLeft ? 0.95 : 0.7) * Math.sin(Math.PI * t);
+    const iceX = isLeft ? bar.x1 : bar.x0;
+    const poutreX = isLeft ? bar.x0 : bar.x1;
+    ctx.save();
+    const grad = ctx.createLinearGradient(poutreX, 0, iceX, 0);
+    grad.addColorStop(0, `rgba(${rgb},0)`);
+    grad.addColorStop(1, `rgba(${rgb},${coreAlpha.toFixed(3)})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(bar.x0, bar.y0, bar.x1 - bar.x0, bar.y1 - bar.y0);
+    ctx.restore();
+  }
+  // Crease glow — lights the whole semicircular "surface de réparation"
+  // painted in front of each goal (xcf-field-lines.png), not just a sliver
+  // against the bar. Geometry isn't tracked anywhere else in this file (the
+  // crease is pure baked art, unlike FX0/GY0/etc.), so it was measured
+  // directly off frame.webp: a Kasa circle fit over the arc's dark pixels
+  // (mean residual ~2.5px on the 3312px-wide image) gives center (1054,950)
+  // r=161 on the left and (2297,950) r=160 on the right — both centers land
+  // within a couple px of the bar's own ice-facing edge (BAR_LEFT.x1=1052 /
+  // BAR_RIGHT.x0=2296) and CY (950), so the crease is simply a half-disc of
+  // radius CREASE_R centered on (iceX, CY), bulging into the field.
+  const CREASE_R = 160;
+  function drawCreaseGlow() {
+    if (!barGlowSide) return;
+    const isLeft = barGlowSide === 'left';
+    const bar = isLeft ? BAR_LEFT : BAR_RIGHT;
+    const rgb = HALO_RGB[isLeft ? 'B' : 'A'];
+    const iceX = isLeft ? bar.x1 : bar.x0;
+    ctx.save();
+    ctx.beginPath();
+    // half-disc bulging toward the field: left goal sweeps up->right->down,
+    // right goal sweeps down->left->up (canvas angle 0 = +x/east, π/2 = +y/south)
+    if (isLeft) ctx.arc(iceX, CY, CREASE_R, -Math.PI / 2, Math.PI / 2);
+    else ctx.arc(iceX, CY, CREASE_R, Math.PI / 2, Math.PI * 1.5);
+    ctx.closePath();
+    ctx.clip();
+    // Plain alpha blend, NOT 'lighter' — the ice is already near-white, so an
+    // additive blend just saturates toward white instead of reading as a
+    // color wash (tried first, see conversation). A normal source-over tint
+    // actually shifts the ice color, which is what "illuminated in blue/
+    // yellow" needs.
+    const grad = ctx.createRadialGradient(iceX, CY, 0, iceX, CY, CREASE_R);
+    grad.addColorStop(0, `rgba(${rgb},0.55)`);
+    grad.addColorStop(0.65, `rgba(${rgb},0.32)`);
     grad.addColorStop(1, `rgba(${rgb},0)`);
     ctx.fillStyle = grad;
-    ctx.fillRect(outerX, GY0, SPILL_PX, GY1 - GY0);
+    ctx.fillRect(iceX - CREASE_R, CY - CREASE_R, CREASE_R * 2, CREASE_R * 2);
     ctx.restore();
   }
   function isAimingTeamStone(g) {
@@ -4217,7 +4299,9 @@ export function startGame(opts = {}) {
 
   function render() {
     drawBackground();
+    drawCreaseGlow();
     drawBarGlow();
+    drawStoneBarFlash();
     // laser drawn before the bubbles/identicons so it reads as coming from
     // underneath the stone instead of overlapping its face
     const drawAimLaser = isBasicLaser() ? renderBasicLaser : renderAimCascade;
