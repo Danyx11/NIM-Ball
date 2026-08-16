@@ -382,8 +382,21 @@ export function startGame(opts = {}) {
   }
   // Under-ice hex turn-timer ring (see drawHexTimer below) — pre-baked once
   // by scripts/bake_hex_timer.py, same technique as scoreDigitImages above.
+  // The red variant (last 1/6 of the turn — see HEX_TIMER_RED_FRACTION) is a
+  // second bake from the same script, glyph color = BALL_LASER_RED.
   const hexTimerRingImage = new Image();
   hexTimerRingImage.src = `${ASSET_BASE}hex-timer/ring-full.png`;
+  const hexTimerRingRedImage = new Image();
+  hexTimerRingRedImage.src = `${ASSET_BASE}hex-timer/ring-full-red.png`;
+  // Under-ice "waiting…" label (see drawWaitingLabel below) — pre-baked once
+  // by scripts/bake_waiting_label.py, same technique as hexTimerRingImage
+  // above (real alpha, so the 3 dots can be faded in/out live).
+  const waitingWordImage = new Image();
+  waitingWordImage.src = `${ASSET_BASE}waiting-label/word.png`;
+  const waitingDotImages = [0, 1, 2].map(i => {
+    const img = new Image(); img.src = `${ASSET_BASE}waiting-label/dot-${i}.png`;
+    return img;
+  });
   // Click-driven state per rock:
   // - sound: no flash, pure state sync (see drawRockGlow) to audio.isMuted()
   // - ice: sweep[team].rockClicked (see triggerSweep) — lit by default each
@@ -1677,7 +1690,7 @@ export function startGame(opts = {}) {
       net.sendShots(stones, sw.active ? { x: sw.x, y: sw.y, r: sw.r } : null);
       phase = 'lanWait';
       // No full-screen overlay here on purpose — the arena stays visible while
-      // waiting; see drawWaitingLabel() for the small pulsing score-panel message.
+      // waiting; see drawWaitingLabel() for the small under-ice "waiting" label.
       return;
     }
     if (aiTeam) {
@@ -2897,18 +2910,25 @@ export function startGame(opts = {}) {
     drawHexTimer();
   }
 
-  // LAN mode, local shot already sent: used to be a full-screen overlay blocking
-  // the arena while waiting on the opponent's shot — now a small pulsing label
-  // tucked under the turn-timer bar so the board stays visible.
-  const WAITING_LABEL_FONT = `700 15px 'Mulish', Arial, sans-serif`;
+  // LAN mode, local shot already sent: "waiting" burned under the ice between
+  // the top beam and the hex timer, same baked technique as the score digits
+  // / hex ring (see scripts/bake_waiting_label.py) rather than a plain
+  // overlay — the word is static, the 3 trailing dots step through a
+  // classic loading-dots cycle by fading each baked dot patch in/out.
+  const WAITING_DOT_STEP_MS = 350; // time per cycle step (000 -> 100 -> 110 -> 111 -> repeat)
+  // Baked top-left draw positions — must match scripts/bake_waiting_label.py
+  // exactly (the ice grain at these exact pixels is baked into each PNG).
+  const WAITING_WORD_POS = [1551, 712];
+  const WAITING_DOT_POS = [[1743, 731], [1763, 731], [1783, 731]];
   function drawWaitingLabel() {
-    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * 2.4);
-    ctx.save();
-    ctx.font = WAITING_LABEL_FONT;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = `rgba(255,255,255,${(0.55 + 0.35 * pulse).toFixed(3)})`;
-    ctx.fillText('en attente…', CENTER_X, FY0 + 100);
-    ctx.restore();
+    if (!waitingWordImage.complete || !waitingWordImage.naturalWidth) return;
+    const step = Math.floor(performance.now() / WAITING_DOT_STEP_MS) % 4; // 0..3 dots lit
+    ctx.drawImage(waitingWordImage, ...WAITING_WORD_POS);
+    for (let i = 0; i < 3; i++) {
+      const img = waitingDotImages[i];
+      if (i >= step || !img.complete || !img.naturalWidth) continue;
+      ctx.drawImage(img, ...WAITING_DOT_POS[i]);
+    }
   }
 
   // 0..1 while a team is actively aiming, null the rest of the time (hides the bar).
@@ -2933,22 +2953,41 @@ export function startGame(opts = {}) {
   // — this defines the drawImage box the baked ring is stamped into, so any
   // mismatch would stretch it off its baked position.
   const HEX_TIMER_R_OUTER = 90, HEX_TIMER_MARGIN = 6;
+  // Last 1/6 of the turn (last 5s of TURN_TIMER_MS=30s) switches to the red
+  // ring instead of grey, pulsing for urgency — feedback from conversation.
+  const HEX_TIMER_RED_FRACTION = 5 / 6;
+  const HEX_TIMER_RED_PULSE_RATE = 5;
+
+  // Clips to the pie-slice wedge spanning fractions [f0, f1) of the clock
+  // (0 = 12 o'clock, growing clockwise) and stamps `image` into it — shared
+  // by the grey and red segments below, which only differ in image/range/alpha.
+  function drawHexTimerWedge(image, half, f0, f1, alphaMul) {
+    if (f1 <= f0) return;
+    const a0 = -Math.PI / 2 + Math.PI * 2 * f0, a1 = -Math.PI / 2 + Math.PI * 2 * f1;
+    ctx.save();
+    if (alphaMul !== undefined) ctx.globalAlpha = alphaMul;
+    ctx.beginPath();
+    ctx.moveTo(CENTER_X, CY);
+    ctx.lineTo(CENTER_X + half * Math.cos(a0), CY + half * Math.sin(a0));
+    ctx.arc(CENTER_X, CY, half, a0, a1);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(image, CENTER_X - half, CY - half, half * 2, half * 2);
+    ctx.restore();
+  }
   function drawHexTimer() {
     const t = turnTimerProgress();
     if (t === null || t <= 0) return;
     if (!hexTimerRingImage.complete || !hexTimerRingImage.naturalWidth) return;
     const half = HEX_TIMER_R_OUTER + HEX_TIMER_MARGIN;
+    const clampedT = Math.min(t, 1);
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(CENTER_X, CY);
-    ctx.lineTo(CENTER_X, CY - half);
-    const start = -Math.PI / 2, end = start + Math.PI * 2 * Math.min(t, 1);
-    ctx.arc(CENTER_X, CY, half, start, end);
-    ctx.closePath();
-    ctx.clip();
-    ctx.drawImage(hexTimerRingImage, CENTER_X - half, CY - half, half * 2, half * 2);
-    ctx.restore();
+    drawHexTimerWedge(hexTimerRingImage, half, 0, Math.min(clampedT, HEX_TIMER_RED_FRACTION));
+
+    if (clampedT > HEX_TIMER_RED_FRACTION && hexTimerRingRedImage.complete && hexTimerRingRedImage.naturalWidth) {
+      const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 1000 * HEX_TIMER_RED_PULSE_RATE);
+      drawHexTimerWedge(hexTimerRingRedImage, half, HEX_TIMER_RED_FRACTION, clampedT, pulse);
+    }
   }
 
   // PLAY: the red toolbar button (index.html #tbtn-play, see src/style.css

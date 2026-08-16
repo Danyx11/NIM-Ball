@@ -1,11 +1,11 @@
-"""Bakes the under-ice hex turn-timer ring (public/hex-timer/ring-full.png)
-against the real ice pixels in public/arena/frame.webp, at the center
-hexagon's exact position — same "engrave a flat grey glyph into the ice via
-GIMP Color Burn, at a chosen alpha, then flatten to one PNG" technique as
-scripts/bake_score_digits.py (see that script's docstring for why Burn and
-not Darken, and why this is baked once rather than composited live) — except
-this one keeps real alpha (transparent outside the ring) rather than being
-fully opaque; see the alpha-channel comment below for why.
+"""Bakes the under-ice hex turn-timer rings (public/hex-timer/ring-full.png
+and ring-full-red.png) against the real ice pixels in public/arena/frame.webp,
+at the center hexagon's exact position — same "engrave a flat glyph into the
+ice via GIMP Color Burn, at a chosen alpha, then flatten to one PNG"
+technique as scripts/bake_score_digits.py (see that script's docstring for
+why Burn and not Darken, and why this is baked once rather than composited
+live) — except these keep real alpha (transparent outside the ring) rather
+than being fully opaque; see the alpha-channel comment below for why.
 
 The glyph here isn't external art (no numeral shape to source) — it's a
 regular hexagonal RING, procedurally drawn: filled between HEX_TIMER_R_OUTER
@@ -17,10 +17,13 @@ frame.webp (ray-cast + grid-overlay crop against the actual pixels — see
 conversation) — same "hand-calibrated against the art" caveat as the arena's
 physics bounds: a rebake is needed if frame.webp's hex is ever moved/resized.
 
-game.js's drawHexTimer() reveals progressively more of this one fully-baked
-ring via a clock-wipe pie-slice ctx.clip() (growing clockwise from 12
-o'clock) — no per-percentage frames needed, since the bake is spatially
-uniform; only the runtime clip changes.
+game.js's drawHexTimer() reveals progressively more of the grey ring via a
+clock-wipe pie-slice ctx.clip() (growing clockwise from 12 o'clock) — no
+per-percentage frames needed, since each bake is spatially uniform; only the
+runtime clip changes. For the last 1/6 of the turn timer it switches to
+ring-full-red.png instead (same burn technique, same alpha, but glyph color
+= BALL_LASER_RED — the ball's own aim-laser red from game.js — for a visual
+family match), pulsing its opacity for urgency.
 
 Usage: python3 scripts/bake_hex_timer.py
 """
@@ -51,8 +54,13 @@ HEX_TIMER_R_INNER = 36
 HEX_TIMER_MARGIN = 6           # AA padding around the outer radius
 HEX_TIMER_ALPHA = 0.30         # same burn strength as the score filigrane's
                                 # UNDERICE_SCORE_ALPHA — kept identical per
-                                # feedback (was 0.70, read too strong)
-GLYPH_RGB = (0x62, 0x62, 0x62)  # same flat grey as the score digit glyphs
+                                # feedback (was 0.70, read too strong); also
+                                # used for the red variant per feedback (a
+                                # muted/desaturated red tested too subtle —
+                                # the raw laser red burns into a soft rose,
+                                # not the harsh tone its raw RGB suggests)
+GLYPH_RGB = (0x62, 0x62, 0x62)      # same flat grey as the score digit glyphs
+GLYPH_RGB_RED = (235, 24, 24)       # BALL_LASER_RED from game.js
 
 
 def hex_points(cx, cy, r):
@@ -73,22 +81,10 @@ def color_burn(base, blend):
     return np.clip(1 - (1 - base) / safe_blend, 0, 1)
 
 
-def main():
-    ice = Image.open(ICE_SRC).convert("RGB")
-
-    half = HEX_TIMER_R_OUTER + HEX_TIMER_MARGIN
-    x0, y0 = HEX_TIMER_CX - half, HEX_TIMER_CY - half
-    size = half * 2
-
-    # Ring alpha mask: outer hex filled, inner hex punched out.
-    mask = Image.new("L", (size, size), 0)
-    mdraw = ImageDraw.Draw(mask)
-    mdraw.polygon(hex_points(half, half, HEX_TIMER_R_OUTER), fill=255)
-    mdraw.polygon(hex_points(half, half, HEX_TIMER_R_INNER), fill=0)
-
+def bake_ring(ice, mask, glyph_rgb, half, x0, y0, size):
     ice_crop = ice.crop((x0, y0, x0 + size, y0 + size))
     ice_n = np.array(ice_crop).astype(np.float64) / 255.0
-    glyph_rgb_n = np.array(GLYPH_RGB, dtype=np.float64) / 255.0
+    glyph_rgb_n = np.array(glyph_rgb, dtype=np.float64) / 255.0
     glyph_a = (np.array(mask).astype(np.float64) / 255.0)[..., None] * HEX_TIMER_ALPHA
 
     burned = color_burn(ice_n, glyph_rgb_n)
@@ -107,12 +103,29 @@ def main():
     # outside the ring means those pixels are never touched at all, so no
     # seam is possible regardless of clip antialiasing.
     out[..., 3] = np.array(mask)
-    baked = Image.fromarray(out, "RGBA")
+    return Image.fromarray(out, "RGBA")
+
+
+def main():
+    ice = Image.open(ICE_SRC).convert("RGB")
+
+    half = HEX_TIMER_R_OUTER + HEX_TIMER_MARGIN
+    x0, y0 = HEX_TIMER_CX - half, HEX_TIMER_CY - half
+    size = half * 2
+
+    # Ring alpha mask: outer hex filled, inner hex punched out. Shared by
+    # both bakes below — same ring shape, different glyph color.
+    mask = Image.new("L", (size, size), 0)
+    mdraw = ImageDraw.Draw(mask)
+    mdraw.polygon(hex_points(half, half, HEX_TIMER_R_OUTER), fill=255)
+    mdraw.polygon(hex_points(half, half, HEX_TIMER_R_INNER), fill=0)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUT_DIR / "ring-full.png"
-    baked.save(out_path)
-    print(f"ring: {size}x{size} at ({x0},{y0}) -> {out_path}")
+    for glyph_rgb, filename in ((GLYPH_RGB, "ring-full.png"), (GLYPH_RGB_RED, "ring-full-red.png")):
+        baked = bake_ring(ice, mask, glyph_rgb, half, x0, y0, size)
+        out_path = OUT_DIR / filename
+        baked.save(out_path)
+        print(f"{filename}: {size}x{size} at ({x0},{y0}) -> {out_path}")
 
 
 if __name__ == "__main__":
