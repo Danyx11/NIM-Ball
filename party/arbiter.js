@@ -23,6 +23,33 @@ function otherTeam(team) {
   return team === 'A' ? 'B' : 'A';
 }
 
+// Sync-check Telegram alert — see server/arbiter.js's identical helper for
+// the full rationale, duplicated here rather than shared (this file is
+// already a hand-ported duplicate of that one, see the file header). Env
+// vars come from this.env (Cloudflare Worker bindings — see wrangler secrets
+// for production, .dev.vars for `npm run wrangler:dev`), not process.env.
+function summarizeMismatch(resultA, resultB) {
+  const lines = [];
+  for (const [key, team] of [['a', 'A'], ['b', 'B']]) {
+    (resultA?.[key] || []).forEach((exp, i) => {
+      const act = resultB?.[key]?.[i];
+      if (!act) return;
+      const [ex, ey, ehits, edead, eout] = exp;
+      const [ax, ay, ahits, adead, aout] = act;
+      if (ex !== ax || ey !== ay) lines.push(`${team}${i} position: ${ex},${ey} vs ${ax},${ay}`);
+      if (ehits !== ahits) lines.push(`${team}${i} hits: ${ehits} vs ${ahits}`);
+      if (edead !== adead) lines.push(`${team}${i} dead: ${edead} vs ${adead}`);
+      if (eout !== aout) lines.push(`${team}${i} out: ${eout} vs ${aout}`);
+    });
+  }
+  const [ebx, eby, ebout] = resultA?.ball || [];
+  const [abx, aby, about] = resultB?.ball || [];
+  if (ebx !== abx || eby !== aby) lines.push(`ball position: ${ebx},${eby} vs ${abx},${aby}`);
+  if (ebout !== about) lines.push(`ball out: ${ebout} vs ${about}`);
+  if (resultA?.result !== resultB?.result) lines.push(`result: ${resultA?.result} vs ${resultB?.result}`);
+  return lines.length ? lines.join('\n') : '(no field-level diff found — check payload shape)';
+}
+
 export class Arbiter extends Server {
   // Called once when the Durable Object instance is first started (see
   // partyserver's Server#onStart) — the equivalent of PartyKit's
@@ -39,6 +66,11 @@ export class Arbiter extends Server {
     // Same match-start handshake as server/arbiter.js's `ready` — both sides
     // must be ready before either actually starts.
     this.ready = { A: false, B: false };
+    // Sync-check (see server/arbiter.js for the full rationale) — same
+    // per-manche index + pending-results tracking, ported 1:1.
+    this.mancheIndex = 0;
+    this.pendingMancheIndex = null;
+    this.mancheResults = { A: null, B: null };
   }
 
   send(connection, msg) {
@@ -48,6 +80,26 @@ export class Arbiter extends Server {
   resetRound() {
     this.shots = { A: null, B: null };
     this.sweeps = { A: null, B: null };
+  }
+
+  resetManche() {
+    this.pendingMancheIndex = null;
+    this.mancheResults = { A: null, B: null };
+  }
+
+  async sendSyncMismatchAlert(mancheIndex, resultA, resultB) {
+    const token = this.env?.TELEGRAM_BOT_TOKEN, chatId = this.env?.TELEGRAM_CHAT_ID;
+    if (!token || !chatId) return;
+    const text = `⚠️ Nim-Ball — désynchro détectée\nmanche #${mancheIndex}\n${summarizeMismatch(resultA, resultB)}`;
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+    } catch (err) {
+      console.error('[sync] Telegram alert failed:', err); // never let this break the actual relay
+    }
   }
 
   onConnect(connection) {
@@ -79,10 +131,30 @@ export class Arbiter extends Server {
       this.shots[team] = msg.stones;
       this.sweeps[team] = msg.sweep || null;
       if (this.shots.A && this.shots.B) {
-        const payload = { type: 'launch', shotsA: this.shots.A, shotsB: this.shots.B, sweepA: this.sweeps.A, sweepB: this.sweeps.B };
+        this.mancheIndex++;
+        const payload = { type: 'launch', shotsA: this.shots.A, shotsB: this.shots.B, sweepA: this.sweeps.A, sweepB: this.sweeps.B, mancheIndex: this.mancheIndex };
         this.send(this.players.A, payload);
         this.send(this.players.B, payload);
         this.resetRound();
+        this.pendingMancheIndex = this.mancheIndex;
+        this.mancheResults = { A: null, B: null };
+      }
+    } else if (msg.type === 'mancheResult') {
+      // See server/arbiter.js's 'mancheResult' branch — same logic, ported.
+      if (msg.mancheIndex !== this.pendingMancheIndex) return;
+      this.mancheResults[team] = msg.result;
+      if (this.mancheResults.A !== null && this.mancheResults.B !== null) {
+        const valid = JSON.stringify(this.mancheResults.A) === JSON.stringify(this.mancheResults.B);
+        // See server/arbiter.js — echoing both raw results back on mismatch
+        // for client-side dev diagnostics (diffMancheResults), still just
+        // relaying opaque data either way.
+        const payload = valid
+          ? { type: 'mancheValid', mancheIndex: this.pendingMancheIndex }
+          : { type: 'mancheInvalid', mancheIndex: this.pendingMancheIndex, resultA: this.mancheResults.A, resultB: this.mancheResults.B };
+        this.send(this.players.A, payload);
+        this.send(this.players.B, payload);
+        if (!valid) this.sendSyncMismatchAlert(this.pendingMancheIndex, this.mancheResults.A, this.mancheResults.B);
+        this.resetManche();
       }
     } else if (msg.type === 'chat') {
       const now = Date.now();
@@ -119,6 +191,7 @@ export class Arbiter extends Server {
     if (team !== 'A' && team !== 'B') return;
     if (this.players[team] === connection) this.players[team] = null;
     this.resetRound();
+    this.resetManche();
     this.lastChatAt[team] = 0; // a fresh reconnect shouldn't inherit a stale cooldown
     this.ready[team] = false; // ditto for a stale "already tapped ready" from a dropped connection
     const remaining = this.players[otherTeam(team)];

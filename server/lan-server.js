@@ -7,6 +7,10 @@
 import { createArbiter } from './arbiter.js';
 import { lanAddresses } from './lan-addresses.js';
 
+// See server/duel-server.js's identical block — TELEGRAM_BOT_TOKEN/CHAT_ID
+// live in .env, gitignored.
+try { process.loadEnvFile(); } catch { /* no .env — alert stays silently off */ }
+
 const PORT = Number(process.env.PORT) || 8787;
 
 const wss = createArbiter({ port: PORT });

@@ -736,6 +736,40 @@ export function startGame(opts = {}) {
   let matchIntroStart = 0;
   let matchIntroAnimDone = false;
   let entities = { A: [], B: [], ball: null };
+  // Network sync-check (see CLAUDE.md determinism work / net.onLaunch below,
+  // computeMancheResult above). mancheValidated defaults true so local/AI/
+  // replay matches (no `net`) never gate on it. mancheStartSnapshot is what a
+  // 'mancheInvalid' rolls back to; currentMancheIndex is the arbiter-issued
+  // id the eventual mancheValid/mancheInvalid must match to apply (a late
+  // verdict for an already-superseded manche is ignored). pendingMancheAdvance
+  // holds whichever "go to the next aim phase" call (beginAimPhase, either
+  // direct for a plain manche or via maybeAdvanceRound for a scored one) is
+  // waiting on validation — see tryAdvanceAfterManche.
+  let mancheValidated = true;
+  let mancheStartSnapshot = null;
+  let currentMancheIndex = null;
+  let pendingMancheAdvance = null;
+  // Shown only if validation is still pending SYNC_WAIT_INDICATOR_MS after
+  // the local animation itself already reached this gate — in normal LAN
+  // conditions the arbiter's verdict arrives within milliseconds of launch
+  // (see computeMancheResult), so this should be a rare, real-network-hiccup
+  // indicator, not a routine one. syncWaitTimerActive just guards against
+  // scheduling a redundant timer if tryAdvanceAfterManche is called more than
+  // once for the same still-unvalidated manche (e.g. maybeAdvanceRound firing
+  // from both the slide animation and the goal panel dismiss).
+  const SYNC_WAIT_INDICATOR_MS = 1500;
+  let syncWaitTimerActive = false;
+  function tryAdvanceAfterManche(advanceFn) {
+    if (mancheValidated) { pendingMancheAdvance = null; advanceFn(); return; }
+    pendingMancheAdvance = advanceFn;
+    if (!syncWaitTimerActive) {
+      syncWaitTimerActive = true;
+      trackedTimeout(() => {
+        syncWaitTimerActive = false;
+        if (!mancheValidated) showSyncWaiting();
+      }, SYNC_WAIT_INDICATOR_MS);
+    }
+  }
   let drag = null;
   // Mobile only: the stone a tap has selected (see LONG_PRESS_MS above) —
   // the joystick's own drag reads/writes into this instead of whatever the
@@ -1472,6 +1506,23 @@ export function startGame(opts = {}) {
   const halfB = document.getElementById('halfB');
   const checkA = document.getElementById('checkA');
   const checkB = document.getElementById('checkB');
+  // Network sync-check toast (see tryAdvanceAfterManche/beginMancheRollback
+  // above) — only ever touched from LAN code paths, but the element itself
+  // is always in the DOM (index.html), so these are safe no-ops otherwise.
+  const syncToast = document.getElementById('syncToast');
+  function showSyncWaiting() {
+    syncToast.textContent = 'Synchronisation…';
+    syncToast.classList.remove('problem', 'hidden');
+  }
+  function hideSyncToast() {
+    syncToast.classList.remove('problem');
+    syncToast.classList.add('hidden');
+  }
+  function showSyncProblem() {
+    syncToast.textContent = 'Problème de synchronisation — la manche va être rejouée.';
+    syncToast.classList.add('problem');
+    syncToast.classList.remove('hidden');
+  }
 
   let controlsEnabled = false;
 
@@ -1786,6 +1837,12 @@ export function startGame(opts = {}) {
     glideLeaderId = pickGlideLeader('vx', 'vy').entity?.id || null;
     if (!isReplay) recordCurrentManche();
     phase = 'sim';
+    // Dev self-check (see diffMancheResults) — exercises the exact same
+    // headless path LAN uses, but works in solo/AI play too since it never
+    // needs a second machine: whatever the paced simulation actually
+    // converges to (checked in beginStraighten/resolveGoal) should be
+    // byte-identical to this.
+    if (import.meta.env.DEV && !isReplay) devHeadlessExpected = computeMancheResult(entities);
   }
   // Shared by the local-commit path above and the LAN net.onLaunch handler
   // below — both are "apply this {vx,vy,used}x3 per team" moments, just fed
@@ -1826,10 +1883,23 @@ export function startGame(opts = {}) {
       if (chatMuted && team !== myTeam) return;
       showChatMessage(team, muted ? 'Chat OFF' : '');
     });
-    net.onLaunch(({ shotsA, shotsB, sweepA, sweepB }) => {
+    net.onLaunch(({ shotsA, shotsB, sweepA, sweepB, mancheIndex }) => {
       hideOverlay();
       phase = 'pending';
       playLaunchEngine(myTeam);
+      // Sync-check: snapshot the resting state THIS manche started from
+      // (before any of its shot velocities are applied below) — this is
+      // exactly what a later 'mancheInvalid' rolls back to. mancheValidated
+      // gates the next aim phase (see maybeAdvanceRound/beginStraighten)
+      // until this manche's own 'mancheValid' comes back.
+      mancheStartSnapshot = {
+        entities: cloneEntityState(entities),
+        sweepUsed: { A: sweep.A.used, B: sweep.B.used },
+        sweepRockClicked: { A: sweep.A.rockClicked, B: sweep.B.rockClicked },
+      };
+      currentMancheIndex = mancheIndex;
+      mancheValidated = false;
+      syncWaitTimerActive = false;
       // Own patch is already active/committed locally from commitSweep() at
       // send time — this overwrites both sides fully from what the arbiter
       // actually relayed (same pattern as the `used` flag below) so both
@@ -1864,7 +1934,25 @@ export function startGame(opts = {}) {
         glideLeaderId = pickGlideLeader('vx', 'vy').entity?.id || null;
         recordCurrentManche();
         phase = 'sim';
+        // Headless fast-forward, right as the real (paced, on-screen) sim
+        // starts from this exact same state — see computeMancheResult. Ready
+        // to send within milliseconds, well before the real animation the
+        // player is watching gets anywhere near settling.
+        const headlessResult = computeMancheResult(entities);
+        if (import.meta.env.DEV) devHeadlessExpected = headlessResult; // see diffMancheResults
+        net.sendMancheResult(mancheIndex, headlessResult);
       }, PRE_SIM_DELAY);
+    });
+    net.onMancheValid(({ mancheIndex: idx }) => {
+      if (idx !== currentMancheIndex) return; // stale — already superseded
+      mancheValidated = true;
+      hideSyncToast();
+      if (pendingMancheAdvance) { const fn = pendingMancheAdvance; pendingMancheAdvance = null; fn(); }
+    });
+    net.onMancheInvalid(({ mancheIndex: idx, resultA, resultB }) => {
+      if (idx !== currentMancheIndex) return;
+      if (import.meta.env.DEV) diffMancheResults(`network mismatch (manche ${idx})`, resultA, resultB);
+      beginMancheRollback();
     });
     // Claim this slot away from the pre-match lobby's handler (main.js's
     // showReadyScreen, set via onOpponentJoined before startGame() ran): the
@@ -1976,13 +2064,13 @@ export function startGame(opts = {}) {
     const t = Math.max(0, Math.min(1, (x - FX0) / (FX1 - FX0)));
     return (t * 2 - 1) * PAN_MAX;
   }
-  function playWallHit(spd, x) {
-    if (spd < MIN_AUDIBLE_IMPACT) return;
+  function playWallHit(spd, x, silent = false) {
+    if (silent || spd < MIN_AUDIBLE_IMPACT) return;
     const t = Math.min(1, spd / MAX_SPEED);
     audio.play('hitWall', { volume: Math.sqrt(t) * IMPACT_VOLUME_TRIM * 0.8 * GOLF_LAYER_TRIM, rate: 0.9 + t * 0.2 + Math.random() * 0.08, group: 'impact', pan: xToPan(x) });
   }
-  function playBodyHit(impact, isBallHit, x) {
-    if (impact < MIN_AUDIBLE_IMPACT) return;
+  function playBodyHit(impact, isBallHit, x, silent = false) {
+    if (silent || impact < MIN_AUDIBLE_IMPACT) return;
     const t = Math.min(1, impact / MAX_SPEED);
     // same volume/reverb formula as stone-stone — only the clip differs
     audio.play(isBallHit ? 'hitStoneBall' : 'hitStone', { volume: Math.sqrt(t) * IMPACT_VOLUME_TRIM * GOLF_LAYER_TRIM, rate: 0.9 + t * 0.2 + Math.random() * 0.08, group: 'impact', pan: xToPan(x) });
@@ -2003,13 +2091,13 @@ export function startGame(opts = {}) {
   // deflection. Returns true (and applies the bounce) if the circle is
   // actually touching wall-or-post; false if it's clear (e.g. deep in the open
   // mouth, where the goal-fall check below takes over instead).
-  function collideGoalSide(e, wallX) {
+  function collideGoalSide(e, wallX, silent = false) {
     let closestY;
     if (e.y <= GY0) closestY = e.y;
     else if (e.y >= GY1) closestY = e.y;
     else closestY = (e.y - GY0 <= GY1 - e.y) ? GY0 : GY1;
     const dx = e.x - wallX, dy = e.y - closestY;
-    const dist = Math.hypot(dx, dy);
+    const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist === 0 || dist >= e.r) return false;
     const nx = dx / dist, ny = dy / dist;
     const vDotN = e.vx * nx + e.vy * ny;
@@ -2019,7 +2107,7 @@ export function startGame(opts = {}) {
     e.vx -= (1 + WALL_RESTITUTION) * vDotN * nx;
     e.vy -= (1 + WALL_RESTITUTION) * vDotN * ny;
     triggerSquish(e, nx, ny, spd);
-    playWallHit(spd, e.x);
+    playWallHit(spd, e.x, silent);
     return true;
   }
   // Corner chamfers: each of the 4 corners stores both diagonal endpoints
@@ -2031,7 +2119,7 @@ export function startGame(opts = {}) {
   // infinite-line-plus-box version drew/collided the wrong direction on some
   // corners; a version that let flat walls fire unconditionally could catch
   // an entity that was actually in the cut corner) — see conversation.
-  function cornerNorm(x, y) { const l = Math.hypot(x, y) || 1; return { x: x / l, y: y / l }; }
+  function cornerNorm(x, y) { const l = Math.sqrt(x * x + y * y) || 1; return { x: x / l, y: y / l }; }
   const CORNERS = [
     { p: { x: FX0, y: FY0 + CHAMFER_Y }, p2: { x: FX0 + CHAMFER_X, y: FY0 }, n: cornerNorm(-CHAMFER_Y, -CHAMFER_X), box: { x0: FX0 - 1, x1: FX0 + CHAMFER_X, y0: FY0 - 1, y1: FY0 + CHAMFER_Y } }, // TL
     { p: { x: FX1 - CHAMFER_X, y: FY0 }, p2: { x: FX1, y: FY0 + CHAMFER_Y }, n: cornerNorm(CHAMFER_Y, -CHAMFER_X), box: { x0: FX1 - CHAMFER_X, x1: FX1 + 1, y0: FY0 - 1, y1: FY0 + CHAMFER_Y } }, // TR
@@ -2043,14 +2131,14 @@ export function startGame(opts = {}) {
   // to circle-vs-point at the segment's own endpoints (p/p2), exactly where
   // the flat-wall checks in physicsStep stop applying, so the handoff
   // between the two collision models is continuous with no gap or overlap.
-  function collideCorner(e, c) {
+  function collideCorner(e, c, silent = false) {
     const dx0 = c.p2.x - c.p.x, dy0 = c.p2.y - c.p.y;
     const len2 = dx0 * dx0 + dy0 * dy0;
     let t = len2 > 0 ? ((e.x - c.p.x) * dx0 + (e.y - c.p.y) * dy0) / len2 : 0;
     t = Math.max(0, Math.min(1, t));
     const cx = c.p.x + dx0 * t, cy = c.p.y + dy0 * t;
     const dx = e.x - cx, dy = e.y - cy;
-    const dist = Math.hypot(dx, dy);
+    const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist === 0 || dist >= e.r) return false;
     const nx = dx / dist, ny = dy / dist;
     const vDotN = e.vx * nx + e.vy * ny;
@@ -2060,7 +2148,7 @@ export function startGame(opts = {}) {
     e.vx -= (1 + WALL_RESTITUTION) * vDotN * nx;
     e.vy -= (1 + WALL_RESTITUTION) * vDotN * ny;
     triggerSquish(e, nx, ny, spd);
-    playWallHit(spd, e.x);
+    playWallHit(spd, e.x, silent);
     return true;
   }
   // Goal bar: touching it kills a stone (same dead/falling path as an 8th
@@ -2075,11 +2163,11 @@ export function startGame(opts = {}) {
   // through it, only actually leaving play once the whole manche settles via
   // the shared dead/falling group animation further down) and by the ball on
   // a goal (see collideBar's call sites below).
-  function reflectOffBar(g, bar) {
+  function reflectOffBar(g, bar, silent = false) {
     const cx = Math.max(bar.x0, Math.min(g.x, bar.x1));
     const cy = Math.max(bar.y0, Math.min(g.y, bar.y1));
     const dx = g.x - cx, dy = g.y - cy;
-    const dist = Math.hypot(dx, dy) || 1;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
     const nx = dx / dist, ny = dy / dist;
     const vDotN = g.vx * nx + g.vy * ny;
     const spd = Math.abs(vDotN);
@@ -2088,19 +2176,29 @@ export function startGame(opts = {}) {
     g.vx -= (1 + WALL_RESTITUTION) * vDotN * nx;
     g.vy -= (1 + WALL_RESTITUTION) * vDotN * ny;
     triggerSquish(g, nx, ny, spd);
-    playWallHit(spd, g.x);
+    playWallHit(spd, g.x, silent);
   }
-  function killStoneOnBar(g, bar) {
+  // silent (see computeMancheResult's headless fast-forward): suppresses the
+  // audio cue + stoneBarFlash timestamp + the match-wide stonesDestroyed
+  // tally, so fast-forwarding a clone to its settled state can never
+  // double-fire a sound/flash the real paced run will trigger itself later,
+  // or double-count a stat. g.dead/deadMix (real physics state, needed for
+  // the checksum) are set either way.
+  function killStoneOnBar(g, bar, silent = false) {
     if (g.dead) return;
-    g.dead = true; g.deadMix = 1; stonesDestroyed++;
-    reflectOffBar(g, bar);
-    audio.play('stoneFall', { volume: 0.178, pan: xToPan(g.x) }); // -10dB, then another -5dB, ~-15dB total — same cue the old goal-fall path used
-    stoneBarFlash = { side: bar === BAR_LEFT ? 'left' : 'right', t0: performance.now() };
+    g.dead = true; g.deadMix = 1;
+    if (!silent) stonesDestroyed++;
+    reflectOffBar(g, bar, silent);
+    if (!silent) {
+      audio.play('stoneFall', { volume: 0.178, pan: xToPan(g.x) }); // -10dB, then another -5dB, ~-15dB total — same cue the old goal-fall path used
+      stoneBarFlash = { side: bar === BAR_LEFT ? 'left' : 'right', t0: performance.now() };
+    }
   }
   function collideBar(e, bar) {
     const cx = Math.max(bar.x0, Math.min(e.x, bar.x1));
     const cy = Math.max(bar.y0, Math.min(e.y, bar.y1));
-    return Math.hypot(e.x - cx, e.y - cy) < e.r;
+    const dx = e.x - cx, dy = e.y - cy;
+    return Math.sqrt(dx * dx + dy * dy) < e.r;
   }
   // Less per-tick speed loss inside a currently-committed sweep patch (see
   // the `sweep` state comment) — scales the friction DEFICIT rather than fr
@@ -2108,29 +2206,35 @@ export function startGame(opts = {}) {
   // would barely move the needle; this compounds into a clearly longer glide
   // over the many ticks of an actual shot.
   function withSweepBoost(fr) { return 1 - (1 - fr) * (1 - SWEEP_FRICTION_BONUS); }
-  function physicsStep() {
-    const list = allEntities();
+  // state/silent (see computeMancheResult): a headless fast-forward runs this
+  // against a cloned {A,B,ball} instead of the closure's own `entities`, and
+  // with silent=true so no audio/flash fires early and no match-wide stat
+  // counter double-counts — the real paced loop below still calls this with
+  // no args (state defaults to `entities`, silent defaults to false), fully
+  // unchanged from before.
+  function physicsStep(state = entities, silent = false) {
+    const list = [...state.A, ...state.B, state.ball];
     const boostZones = [sweep.A, sweep.B].filter(s => s.committed);
     let goalResult = null;
     for (const e of list) {
       if (e.falling) {
         // shrinking-into-the-void animation; frozen otherwise, no normal physics while it plays
-        audio.setGlide(e.id || 'ball', 0);
+        if (!silent) audio.setGlide(e.id || 'ball', 0);
         e.fallScale -= 0.045;
         if (e.fallScale <= 0) { e.fallScale = 0; e.falling = false; e.out = true; }
         continue;
       }
       e.x += e.vx; e.y += e.vy;
-      let fr = e === entities.ball ? BALL_FRICTION : FRICTION;
-      if (boostZones.some(z => Math.hypot(e.x - z.x, e.y - z.y) <= z.r)) fr = withSweepBoost(fr);
+      let fr = e === state.ball ? BALL_FRICTION : FRICTION;
+      if (boostZones.some(z => { const zdx = e.x - z.x, zdy = e.y - z.y; return Math.sqrt(zdx * zdx + zdy * zdy) <= z.r; })) fr = withSweepBoost(fr);
       e.vx *= fr; e.vy *= fr;
-      const spd0 = Math.hypot(e.vx, e.vy);
+      const spd0 = Math.sqrt(e.vx * e.vx + e.vy * e.vy);
       if (spd0 < STOP_THRESHOLD) { e.vx = 0; e.vy = 0; }
       else if (spd0 > MAX_SPEED) { const s = MAX_SPEED / spd0; e.vx *= s; e.vy *= s; }
       // Only the round's picked leader (see glideLeaderId) drives the single
       // glide voice — every other stone/the ball stays silent here even while
       // still sliding, so exactly one whoosh plays per round.
-      if ((e.id || 'ball') === glideLeaderId) audio.setGlide(e.id || 'ball', spd0 / MAX_SPEED, xToPan(e.x));
+      if (!silent && (e.id || 'ball') === glideLeaderId) audio.setGlide(e.id || 'ball', spd0 / MAX_SPEED, xToPan(e.x));
       if (e.squishPhase === 'in') {
         e.squishT += 1 / SQUISH_IN_FRAMES;
         const t = Math.min(1, e.squishT);
@@ -2174,8 +2278,8 @@ export function startGame(opts = {}) {
       // practice — the notch wall never gets a chance to block entry to the
       // bar it's guarding.
       let barHit = false;
-      if (collideBar(e, BAR_LEFT)) { barHit = true; if (e === entities.ball) { reflectOffBar(e, BAR_LEFT); goalResult = 'goalB'; barGlowSide = 'left'; } else killStoneOnBar(e, BAR_LEFT); }
-      if (collideBar(e, BAR_RIGHT)) { barHit = true; if (e === entities.ball) { reflectOffBar(e, BAR_RIGHT); goalResult = 'goalA'; barGlowSide = 'right'; } else killStoneOnBar(e, BAR_RIGHT); }
+      if (collideBar(e, BAR_LEFT)) { barHit = true; if (e === state.ball) { reflectOffBar(e, BAR_LEFT, silent); goalResult = 'goalB'; if (!silent) barGlowSide = 'left'; } else killStoneOnBar(e, BAR_LEFT, silent); }
+      if (collideBar(e, BAR_RIGHT)) { barHit = true; if (e === state.ball) { reflectOffBar(e, BAR_RIGHT, silent); goalResult = 'goalA'; if (!silent) barGlowSide = 'right'; } else killStoneOnBar(e, BAR_RIGHT, silent); }
       if (barHit) continue;
 
       // Corner boxes gate BOTH the flat-wall checks below AND the corner
@@ -2187,8 +2291,8 @@ export function startGame(opts = {}) {
       const inTL = inCornerBox(e, CORNERS[0].box), inTR = inCornerBox(e, CORNERS[1].box);
       const inBL = inCornerBox(e, CORNERS[2].box), inBR = inCornerBox(e, CORNERS[3].box);
 
-      if (!inTL && !inTR && e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, -1, spd); playWallHit(spd, e.x); }
-      if (!inBL && !inBR && e.y + e.r > FY1) { const spd = Math.abs(e.vy); e.y = FY1 - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); playWallHit(spd, e.x); }
+      if (!inTL && !inTR && e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, -1, spd); playWallHit(spd, e.x, silent); }
+      if (!inBL && !inBR && e.y + e.r > FY1) { const spd = Math.abs(e.vy); e.y = FY1 - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); playWallHit(spd, e.x, silent); }
       // See collideGoalSide above: posts are the corners of the two wall
       // segments flanking the goal mouth, so a stone grazing one bounces off
       // the post tip cleanly instead of the mouth/wall branches fighting over
@@ -2197,18 +2301,18 @@ export function startGame(opts = {}) {
       // (NOTCH_X0/X1) — same post/tip shape at a shallower depth (see
       // NOTCH_X0's own comment for why the goal mouth isn't simply open).
       let blockedByPost = false;
-      if (!inTL && !inBL && e.x - e.r < FX0) blockedByPost = collideGoalSide(e, FX0) || blockedByPost;
-      if (!inTR && !inBR && e.x + e.r > FX1) blockedByPost = collideGoalSide(e, FX1) || blockedByPost;
+      if (!inTL && !inBL && e.x - e.r < FX0) blockedByPost = collideGoalSide(e, FX0, silent) || blockedByPost;
+      if (!inTR && !inBR && e.x + e.r > FX1) blockedByPost = collideGoalSide(e, FX1, silent) || blockedByPost;
       if (!blockedByPost && Math.abs(e.y - CY) < GOAL_HALF_HEIGHT) {
-        if (e.x - e.r < NOTCH_X0) collideGoalSide(e, NOTCH_X0);
-        if (e.x + e.r > NOTCH_X1) collideGoalSide(e, NOTCH_X1);
+        if (e.x - e.r < NOTCH_X0) collideGoalSide(e, NOTCH_X0, silent);
+        if (e.x + e.r > NOTCH_X1) collideGoalSide(e, NOTCH_X1, silent);
       }
       for (const c of CORNERS) {
-        if (inCornerBox(e, c.box)) collideCorner(e, c);
+        if (inCornerBox(e, c.box)) collideCorner(e, c, silent);
       }
     }
     const activeList = list.filter(e => !e.out && !e.falling);
-    for (let i = 0; i < activeList.length; i++) for (let j = i + 1; j < activeList.length; j++) resolveCollision(activeList[i], activeList[j]);
+    for (let i = 0; i < activeList.length; i++) for (let j = i + 1; j < activeList.length; j++) resolveCollision(activeList[i], activeList[j], state, silent);
     // A knocked-dead stone (STONE_MAX_HITS, or bar contact, see
     // registerStoneHit/killStoneOnBar) doesn't play its shrink-into-the-void
     // animation the instant its own slide stops — the ball or other stones
@@ -2226,20 +2330,22 @@ export function startGame(opts = {}) {
     const deadPending = activeList.filter(e => e.dead);
     if (deadPending.length && activeList.every(e => e.vx === 0 && e.vy === 0)) {
       for (const g of deadPending) { g.falling = true; g.fallScale = 1; }
-      const deadPanX = deadPending.reduce((sum, g) => sum + g.x, 0) / deadPending.length;
-      audio.play('stoneDead', { volume: 0.159, pan: xToPan(deadPanX) }); // -5dB, -6dB, then another -5dB, ~-16dB total
+      if (!silent) {
+        const deadPanX = deadPending.reduce((sum, g) => sum + g.x, 0) / deadPending.length;
+        audio.play('stoneDead', { volume: 0.159, pan: xToPan(deadPanX) }); // -5dB, -6dB, then another -5dB, ~-16dB total
+      }
     }
     if (goalResult) return goalResult;
     // if every one of a team's stones is out of play — fallen into the goal or
     // knocked dead (STONE_MAX_HITS) — the other team scores the point, same as
     // a real goal
-    if (entities.A.every(g => g.out || g.dead)) return 'wipeoutB';
-    if (entities.B.every(g => g.out || g.dead)) return 'wipeoutA';
+    if (state.A.every(g => g.out || g.dead)) return 'wipeoutB';
+    if (state.B.every(g => g.out || g.dead)) return 'wipeoutA';
     return null;
   }
-  function resolveCollision(a, b2) {
+  function resolveCollision(a, b2, state = entities, silent = false) {
     const dx = b2.x - a.x, dy = b2.y - a.y;
-    const dist = Math.hypot(dx, dy);
+    const dist = Math.sqrt(dx * dx + dy * dy);
     const minDist = a.r + b2.r;
     if (dist === 0 || dist >= minDist) return;
     const rvx = b2.vx - a.vx, rvy = b2.vy - a.vy;
@@ -2263,7 +2369,7 @@ export function startGame(opts = {}) {
       if (D >= 0) {
         const t = Math.max(0, Math.min(1, (pv + Math.sqrt(D)) / A));
         const cdx = dx - rvx * t, cdy = dy - rvy * t;
-        const cdist = Math.hypot(cdx, cdy);
+        const cdist = Math.sqrt(cdx * cdx + cdy * cdy);
         if (cdist > 1e-6) { nx = cdx / cdist; ny = cdy / cdist; }
       }
     }
@@ -2272,7 +2378,7 @@ export function startGame(opts = {}) {
     b2.x += nx * overlap; b2.y += ny * overlap;
     const velAlongNormal = rvx * nx + rvy * ny;
     if (velAlongNormal > 0) return;
-    totalCollisions++;
+    if (!silent) totalCollisions++;
     const invMassA = 1 / a.mass, invMassB = 1 / b2.mass;
     let j = -(1 + BODY_RESTITUTION) * velAlongNormal;
     j /= (invMassA + invMassB);
@@ -2285,23 +2391,113 @@ export function startGame(opts = {}) {
     // point (toward the other body), so the "far" side can be anchored in place
     triggerSquish(a, nx, ny, impact);
     triggerSquish(b2, -nx, -ny, impact);
-    playBodyHit(impact, a === entities.ball || b2 === entities.ball, (a.x + b2.x) / 2);
+    playBodyHit(impact, a === state.ball || b2 === state.ball, (a.x + b2.x) / 2, silent);
     // stone-vs-opposing-stone impact: each side takes one hit (see STONE_MAX_HITS)
     if (a.team && b2.team && a.team !== b2.team) {
-      registerStoneHit(a);
-      registerStoneHit(b2);
+      registerStoneHit(a, silent);
+      registerStoneHit(b2, silent);
     }
   }
   // Knocks out the next LED (top first, then clockwise — see LED_RECTS) and
   // kills the stone on the 4th hit. Cooldown-gated so one prolonged/grazing
   // contact spanning several physics frames only ever counts as a single hit.
-  function registerStoneHit(g) {
+  function registerStoneHit(g, silent = false) {
     if (g.dead || g._hitCooldown > 0) return;
     g._hitCooldown = HIT_COOLDOWN_FRAMES;
     g.hits = Math.min(STONE_MAX_HITS, g.hits + 1);
-    if (g.hits >= STONE_MAX_HITS) { g.dead = true; g.deadMix = 1; stonesDestroyed++; }
+    if (g.hits >= STONE_MAX_HITS) { g.dead = true; g.deadMix = 1; if (!silent) stonesDestroyed++; }
   }
-  function allSettled() { return allEntities().every(e => e.vx === 0 && e.vy === 0 && !e.falling); }
+  function allSettled(state = entities) { return [...state.A, ...state.B, state.ball].every(e => e.vx === 0 && e.vy === 0 && !e.falling); }
+
+  // ---------- Network sync-check (see CLAUDE.md determinism work) ----------
+  // Plain per-field copy — every entity field is a primitive (see makeStone),
+  // no nested objects/arrays, so this is a real independent snapshot, safe to
+  // fast-forward without touching whatever `entities` itself is doing.
+  function cloneEntityState(state = entities) {
+    return { A: state.A.map(g => ({ ...g })), B: state.B.map(g => ({ ...g })), ball: { ...state.ball } };
+  }
+  // Quantized to the nearest px — real divergence compounds to way more than
+  // that by settle time, so this just absorbs harmless last-bit float noise
+  // (see the Math.hypot -> Math.sqrt pass) rather than flagging it as a
+  // mismatch. Fixed field order (not just "whatever JSON.stringify does with
+  // the live objects") since the two clients' own key-insertion order for a
+  // spread clone is already identical here (same makeStone shape both
+  // sides), but being explicit costs nothing and removes any doubt.
+  function quantizeMancheResult(state, goalResult) {
+    const stone = g => [Math.round(g.x), Math.round(g.y), g.hits, g.dead ? 1 : 0, g.out ? 1 : 0];
+    return {
+      a: state.A.map(stone),
+      b: state.B.map(stone),
+      ball: [Math.round(state.ball.x), Math.round(state.ball.y), state.ball.out ? 1 : 0],
+      result: goalResult || null,
+    };
+  }
+  // Headless fast-forward: runs silent physicsStep() on a clone of
+  // initialState until it settles, fully decoupled from the real paced
+  // rAF/accumulator loop that will separately animate the same manche on
+  // screen (see net.onLaunch) — so the checksum is ready to send within
+  // milliseconds of the shot launching, regardless of how many real seconds
+  // the on-screen animation itself takes to play out. Only the FIRST
+  // goal/wipeout result is kept (matches runSimTick's 'goal' phase, which
+  // likewise ignores every physicsStep() return after the first once a point
+  // is already decided). MAX_TICKS is a generous safety net, not a tuned
+  // value — real shots settle in well under 100 ticks; it only guards against
+  // a genuinely pathological/never-converging state.
+  const MANCHE_COMPUTE_MAX_TICKS = 3000;
+  function computeMancheResult(initialState) {
+    const state = cloneEntityState(initialState);
+    let goalResult = null;
+    for (let i = 0; i < MANCHE_COMPUTE_MAX_TICKS; i++) {
+      const result = physicsStep(state, true);
+      if (result && !goalResult) goalResult = result;
+      if (allSettled(state) && !deadStonesStillAnimating(state)) break;
+    }
+    return quantizeMancheResult(state, goalResult);
+  }
+  // Dev-only diagnostic (see CLAUDE.md determinism work / conversation) — a
+  // per-field breakdown of two quantizeMancheResult() payloads, in the
+  // console only, never surfaced to the player. Used two ways: (1) a local
+  // self-check comparing computeMancheResult()'s headless outcome against
+  // what the real, paced, on-screen simulation actually converges to for
+  // every single manche (LAN AND solo/AI play, no network needed at all) —
+  // this is what would catch a mistake in the silent/state threading itself,
+  // independent of any cross-client concern; (2) an actual network mismatch,
+  // where the arbiter echoes both sides' results back on 'mancheInvalid' (see
+  // net.onMancheInvalid) so a real divergence can be diagnosed field-by-field
+  // instead of just "the manche was invalid".
+  function diffMancheResults(label, expected, actual) {
+    if (!expected || !actual) return;
+    const lines = [];
+    const stoneLabel = (team, i) => `${team}${i}`;
+    ['a', 'b'].forEach((key, ti) => {
+      const team = key === 'a' ? 'A' : 'B';
+      (expected[key] || []).forEach((exp, i) => {
+        const act = (actual[key] || [])[i];
+        if (!act) return;
+        const [ex, ey, ehits, edead, eout] = exp;
+        const [ax, ay, ahits, adead, aout] = act;
+        if (ex !== ax || ey !== ay) lines.push(`  stone ${stoneLabel(team, i)}: position expected=(${ex},${ey}) actual=(${ax},${ay})`);
+        if (ehits !== ahits) lines.push(`  stone ${stoneLabel(team, i)}: hits expected=${ehits} actual=${ahits}`);
+        if (edead !== adead) lines.push(`  stone ${stoneLabel(team, i)}: dead expected=${edead} actual=${adead}`);
+        if (eout !== aout) lines.push(`  stone ${stoneLabel(team, i)}: out expected=${eout} actual=${aout}`);
+      });
+    });
+    const [ebx, eby, ebout] = expected.ball || [];
+    const [abx, aby, about] = actual.ball || [];
+    if (ebx !== abx || eby !== aby) lines.push(`  ball: position expected=(${ebx},${eby}) actual=(${abx},${aby})`);
+    if (ebout !== about) lines.push(`  ball: out expected=${ebout} actual=${about}`);
+    if (expected.result !== actual.result) lines.push(`  result: expected=${expected.result} actual=${actual.result}`);
+    if (lines.length) {
+      console.error(`[sync] MISMATCH — ${label}\n${lines.join('\n')}`);
+    } else if (import.meta.env.DEV) {
+      console.debug(`[sync] OK — ${label}`);
+    }
+  }
+  // Set right at launch (both the LAN path in net.onLaunch and the local/AI
+  // path in launchSimulation below), consumed once at whichever of
+  // beginStraighten()/resolveGoal() first sees the manche as truly settled —
+  // see those two functions for the actual comparison call.
+  let devHeadlessExpected = null;
 
   // ---------- Post-shot straighten ----------
   // Contact torque (see rotVel in physicsStep) leaves stones spun away from
@@ -2317,6 +2513,13 @@ export function startGame(opts = {}) {
   let straightenStart = 0;
   function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
   function beginStraighten() {
+    // Dev self-check (see diffMancheResults) — this is the "manche settled
+    // without scoring" side of the comparison; goalResult is null here by
+    // construction (a scoring settle goes through resolveGoal() instead).
+    if (import.meta.env.DEV && !isReplay && devHeadlessExpected) {
+      diffMancheResults('headless vs real (no-goal settle)', devHeadlessExpected, quantizeMancheResult(entities, null));
+      devHeadlessExpected = null;
+    }
     // This function only ever runs when a manche settles *without* scoring
     // (see runSimTick) — i.e. "continue to the next manche of the same
     // point", the manche-level counterpart to onGoal's replayPointAdvancePending
@@ -2325,7 +2528,7 @@ export function startGame(opts = {}) {
     // pointing at "the manche actually on screen" for that manche's whole
     // lifetime instead of jumping ahead the instant it launches.
     if (isReplay) replayCursor.mancheIdx++;
-    if (!STRAIGHTEN_ENABLED) { beginAimPhase(); return; }
+    if (!STRAIGHTEN_ENABLED) { tryAdvanceAfterManche(beginAimPhase); return; }
     const stones = [...entities.A, ...entities.B].filter(g => !g.out);
     let anyWork = false;
     for (const g of stones) {
@@ -2337,7 +2540,10 @@ export function startGame(opts = {}) {
       g._straightenDuration = STRAIGHTEN_DURATION_MS;
       if (Math.abs(to - from) > 1e-4) anyWork = true;
     }
-    if (!anyWork) { beginAimPhase(); return; }
+    // Dead code while STRAIGHTEN_ENABLED is false (the branch above always
+    // returns first) — routed through the same sync-check gate as that
+    // branch so this stays correct if the feature is ever re-enabled.
+    if (!anyWork) { tryAdvanceAfterManche(beginAimPhase); return; }
     straightenStart = performance.now();
     phase = 'straighten';
   }
@@ -2355,7 +2561,7 @@ export function startGame(opts = {}) {
       for (const g of [...entities.A, ...entities.B]) {
         g._straightenFrom = g._straightenTo = g._straightenDelay = g._straightenDuration = undefined;
       }
-      beginAimPhase();
+      tryAdvanceAfterManche(beginAimPhase);
     }
   }
 
@@ -2369,8 +2575,8 @@ export function startGame(opts = {}) {
   // deadPending block in physicsStep) and takes a few hundred ms to finish —
   // gates resolveGoal() below so the "point won" panel can never appear while
   // one is still visibly mid-vanish.
-  function deadStonesStillAnimating() {
-    return entities.A.some(g => g.dead && !g.out) || entities.B.some(g => g.dead && !g.out);
+  function deadStonesStillAnimating(state = entities) {
+    return state.A.some(g => g.dead && !g.out) || state.B.some(g => g.dead && !g.out);
   }
   let goalPauseElapsed = false;
   let goalPending = null;
@@ -2411,6 +2617,14 @@ export function startGame(opts = {}) {
   function resolveGoal() {
     const { scoringTeam, isWipeout } = goalPending;
     goalPending = null;
+    // Dev self-check (see diffMancheResults) — the scoring-settle side of the
+    // comparison; reconstructs the same 'goalA'/'wipeoutB'/etc string
+    // physicsStep() itself returns, matching what computeMancheResult stored.
+    if (import.meta.env.DEV && !isReplay && devHeadlessExpected) {
+      const actualGoalResult = (isWipeout ? 'wipeout' : 'goal') + scoringTeam;
+      diffMancheResults('headless vs real (goal settle)', devHeadlessExpected, quantizeMancheResult(entities, actualGoalResult));
+      devHeadlessExpected = null;
+    }
     barGlowSide = null; // bar stays lit through the whole pause/settle wait, cut right as the point is actually displayed below
     if (!isReplay) recorder.finishPoint(scoringTeam, isWipeout);
     if (scoringTeam === 'A') scoreA++; else scoreB++;
@@ -2486,7 +2700,7 @@ export function startGame(opts = {}) {
   let roundResetAnimDone = false;
   let goalPanelDismissed = false;
   function maybeAdvanceRound() {
-    if (roundResetAnimDone && goalPanelDismissed) beginAimPhase();
+    if (roundResetAnimDone && goalPanelDismissed) tryAdvanceAfterManche(beginAimPhase);
   }
   function showGoalPanel(scoringTeam) {
     const cls = scoringTeam === 'A' ? 'a' : 'b';
@@ -2761,6 +2975,108 @@ export function startGame(opts = {}) {
       // phase/turn timer should only start once that's been dismissed too.
       roundResetAnimDone = true;
       maybeAdvanceRound();
+    }
+  }
+
+  // ---------- Network sync rollback (see CLAUDE.md determinism work) ----------
+  // Same slide/revive tween as beginRoundReset/updateRoundReset above, but
+  // targeting the manche's own pre-shot snapshot (mancheStartSnapshot)
+  // instead of the round's fixed kickoff formation — a manche invalidated
+  // mid-round can leave stones with accumulated hits/lost stones from
+  // *earlier* manches of the same point, so "go back to the start" here means
+  // "back to this manche's own start", not hits=0/everyone alive. Kept as its
+  // own separate function rather than parameterizing beginRoundReset() itself
+  // — that one is a delicate, already-tuned round boundary (sweep/goal-panel
+  // gating) this shouldn't risk disturbing for what's meant to be a rare,
+  // narrowly-scoped correction path.
+  const MANCHE_ROLLBACK_MOVE_MS = 2000;
+  const MANCHE_ROLLBACK_REVIVE_MS = 1000;
+  let mancheRollbackStart = 0;
+  function beginMancheRollback() {
+    // Always interrupt, unconditionally (see conversation) — even if the
+    // local player has already started dragging the next manche's shot by
+    // the time this rare verdict arrives.
+    if (drag && !mobile) document.body.style.cursor = '';
+    drag = null; selectedStone = null; pendingTap = null; joystickDrag = null;
+    // This invalidated manche never got (and now never will get) its own
+    // mancheValid — clear its gate state so we don't sit permanently blocked
+    // waiting on a verdict that's not coming, and so a stray already-scheduled
+    // "still waiting" toast (see tryAdvanceAfterManche) can't reappear after
+    // we've already moved on to re-aiming.
+    mancheValidated = true;
+    pendingMancheAdvance = null;
+    syncWaitTimerActive = false;
+    currentMancheIndex = null;
+    audio.stopAllGlides(); // whatever glide voice was mid-shot has nothing left to animate toward
+    hideSyncToast();
+    showSyncProblem();
+    const snap = mancheStartSnapshot;
+    if (!snap) { beginAimPhase(); return; } // defensive: never hang if there's somehow nothing to roll back to
+    sweep.A.used = snap.sweepUsed.A; sweep.B.used = snap.sweepUsed.B;
+    sweep.A.rockClicked = snap.sweepRockClicked.A; sweep.B.rockClicked = snap.sweepRockClicked.B;
+    for (const g of [...entities.A, ...entities.B]) {
+      const idx = parseInt(g.id.slice(1), 10) || 0;
+      const target = snap.entities[g.team][idx];
+      // Only "grow back in place" if the snapshot says it should be visible
+      // but it isn't right now (this manche made it fall/die) — a stone
+      // already out at snapshot time (lost in an earlier manche of the same
+      // point) stays out, no animation; one still on the ice both before and
+      // after just slides to its snapshot spot.
+      g._resetGrow = !target.out && g.out;
+      g._resetFromX = g._resetGrow ? target.x : g.x;
+      g._resetFromY = g._resetGrow ? target.y : g.y;
+      g._resetFromRot = g._resetGrow ? 0 : (g.rot || 0);
+      g._resetToX = target.x; g._resetToY = target.y;
+      g.out = target.out; g.falling = false;
+      g.fallScale = g._resetGrow ? 0 : 1;
+      g.vx = 0; g.vy = 0;
+      g.used = false; g.pendingVx = 0; g.pendingVy = 0;
+      g.hits = target.hits; g._hitCooldown = 0;
+      g.squish = 0; g.squishPhase = null; g.squishT = 0; g.squishPeak = 0;
+      g._reviveFrom = g.dead ? 1 : g.deadMix;
+      g.dead = target.dead;
+    }
+    const b = entities.ball;
+    const ballTarget = snap.entities.ball;
+    b._resetGrow = !ballTarget.out && b.out;
+    b._resetFromX = b._resetGrow ? ballTarget.x : b.x;
+    b._resetFromY = b._resetGrow ? ballTarget.y : b.y;
+    b._resetToX = ballTarget.x; b._resetToY = ballTarget.y;
+    b.out = ballTarget.out; b.falling = false;
+    b.fallScale = b._resetGrow ? 0 : 1;
+    b.vx = 0; b.vy = 0;
+    mancheRollbackStart = performance.now();
+    phase = 'mancheRollback';
+    // Safety net, same reasoning as beginRoundReset's own — a backgrounded
+    // tab can starve rAF for the whole animation window.
+    trackedTimeout(() => { if (phase === 'mancheRollback') updateMancheRollback(); }, MANCHE_ROLLBACK_MOVE_MS + 150);
+  }
+  function updateMancheRollback() {
+    if (phase !== 'mancheRollback') return; // already finalized (safety-net timeout firing after the real thing)
+    const elapsed = performance.now() - mancheRollbackStart;
+    const moveT = easeInOutQuad(Math.min(1, elapsed / MANCHE_ROLLBACK_MOVE_MS));
+    const reviveT = easeInOutQuad(Math.min(1, elapsed / MANCHE_ROLLBACK_REVIVE_MS));
+    for (const g of [...entities.A, ...entities.B]) {
+      g.x = g._resetFromX + (g._resetToX - g._resetFromX) * moveT;
+      g.y = g._resetFromY + (g._resetToY - g._resetFromY) * moveT;
+      g.rot = g._resetFromRot * (1 - moveT);
+      if (g._resetGrow) g.fallScale = moveT;
+      g.deadMix = g._reviveFrom * (1 - reviveT);
+    }
+    const b = entities.ball;
+    b.x = b._resetFromX + (b._resetToX - b._resetFromX) * moveT;
+    b.y = b._resetFromY + (b._resetToY - b._resetFromY) * moveT;
+    if (b._resetGrow) b.fallScale = moveT;
+    if (moveT >= 1) {
+      for (const g of [...entities.A, ...entities.B]) {
+        g.x = g._resetToX; g.y = g._resetToY; g.rot = 0; g.fallScale = g.out ? 0 : 1; g.deadMix = 0;
+        g._resetFromX = g._resetFromY = g._resetToX = g._resetToY = undefined;
+        g._resetFromRot = g._resetGrow = g._reviveFrom = undefined;
+      }
+      b.x = b._resetToX; b.y = b._resetToY; b.fallScale = b.out ? 0 : 1;
+      b._resetFromX = b._resetFromY = b._resetToX = b._resetToY = b._resetGrow = undefined;
+      hideSyncToast();
+      beginAimPhase();
     }
   }
 
@@ -4614,6 +4930,8 @@ export function startGame(opts = {}) {
       updateRoundReset();
     } else if (phase === 'matchIntro') {
       updateMatchIntro();
+    } else if (phase === 'mancheRollback') {
+      updateMancheRollback();
     }
     if (isReplay) updateReplayBar();
     if (net) { maybeAutoSyncMute(); syncChatCompose(); }

@@ -60,11 +60,20 @@ function connectSocket(url) {
     let chatCb = null;
     let chatMuteCb = null;
     let bothReadyCb = null;
+    let mancheValidCb = null;
+    let mancheInvalidCb = null;
 
     const net = {
       myTeam: null,
       sendShots(stones, sweep = null) {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'shots', stones, sweep }));
+      },
+      // Sync-check (see CLAUDE.md determinism work / game.js's
+      // computeMancheResult): the settled outcome each client's own headless
+      // fast-forward reaches right at launch, tagged with the same
+      // mancheIndex the arbiter stamped that launch with — see onLaunch below.
+      sendMancheResult(mancheIndex, result) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'mancheResult', mancheIndex, result }));
       },
       // Sent when the local player taps the LAN lobby's "Prêt" button (see
       // main.js's showReadyScreen) — the arbiter only tells either side to
@@ -97,6 +106,8 @@ function connectSocket(url) {
       onChat(cb) { chatCb = cb; },
       onChatMute(cb) { chatMuteCb = cb; },
       onBothReady(cb) { bothReadyCb = cb; },
+      onMancheValid(cb) { mancheValidCb = cb; },
+      onMancheInvalid(cb) { mancheInvalidCb = cb; },
       close() { ws.close(); },
     };
 
@@ -124,13 +135,17 @@ function connectSocket(url) {
       } else if (msg.type === 'opponentLeft') {
         if (disconnectCb) disconnectCb();
       } else if (msg.type === 'launch') {
-        if (launchCb) launchCb({ shotsA: msg.shotsA, shotsB: msg.shotsB, sweepA: msg.sweepA, sweepB: msg.sweepB });
+        if (launchCb) launchCb({ shotsA: msg.shotsA, shotsB: msg.shotsB, sweepA: msg.sweepA, sweepB: msg.sweepB, mancheIndex: msg.mancheIndex });
       } else if (msg.type === 'chat') {
         if (chatCb) chatCb({ team: msg.team, text: msg.text });
       } else if (msg.type === 'chatMute') {
         if (chatMuteCb) chatMuteCb({ team: msg.team, muted: !!msg.muted });
       } else if (msg.type === 'bothReady') {
         if (bothReadyCb) bothReadyCb();
+      } else if (msg.type === 'mancheValid') {
+        if (mancheValidCb) mancheValidCb({ mancheIndex: msg.mancheIndex });
+      } else if (msg.type === 'mancheInvalid') {
+        if (mancheInvalidCb) mancheInvalidCb({ mancheIndex: msg.mancheIndex, resultA: msg.resultA, resultB: msg.resultB });
       }
     });
   });
