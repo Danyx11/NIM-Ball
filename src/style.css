@@ -894,6 +894,18 @@ button:disabled { opacity: 0.35; cursor: default; }
   z-index: 10;
 }
 #overlay.hidden { display: none; }
+/* Network sync-check toast (see index.html/game.js) — translucent pill, not
+   #overlay's near-opaque backdrop, since the rollback tween needs the stones
+   underneath to stay visible while it plays. Non-interactive: it only ever
+   reports state, nothing to click. */
+#syncToast {
+  position: absolute; left: 50%; top: 6%; transform: translateX(-50%);
+  background: rgba(6,16,20,0.85); color: var(--ink, #eef4f6);
+  padding: 10px 22px; border-radius: 18px; font-size: 14px; font-weight: 600;
+  text-align: center; max-width: 85%; box-sizing: border-box; pointer-events: none; z-index: 11;
+}
+#syncToast.hidden { display: none; }
+#syncToast.problem { color: #ffb3a7; }
 /* Used to need a mobile counter-scale here (like .team-select below) to
    claw back space #scene's 2.05x zoom ate into. #overlay lives inside
    #stage-wrap in the markup (index.html), but doesn't want the canvas's own

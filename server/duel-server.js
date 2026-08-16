@@ -10,6 +10,11 @@ import { createServer as createViteServer } from 'vite';
 import { createArbiter, ARBITER_PATH } from './arbiter.js';
 import { lanAddresses } from './lan-addresses.js';
 
+// TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID (see createArbiter's sync-check alert)
+// live in .env, gitignored — try/catch since a fresh checkout without one
+// yet shouldn't crash the server, just run without the alert.
+try { process.loadEnvFile(); } catch { /* no .env — alert stays silently off */ }
+
 const PORT = Number(process.env.PORT) || 5173;
 
 // Created bare first, then handed to Vite as its HMR upgrade target and

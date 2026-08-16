@@ -151,6 +151,11 @@ vite.config.ts.timestamp-*
 # wrangler local dev state/cache (see `npm run wrangler:dev`)
 .wrangler/
 
+# wrangler local secrets (Telegram alert token/chat id for party/arbiter.js —
+# see server/arbiter.js's equivalent .env). Production uses `wrangler secret
+# put` instead, never this file.
+.dev.vars
+
 # Local scratch labs (never pushed) — see CLAUDE.md for the lab-to-main workflow
 /design-lab/
 /physics-lab/

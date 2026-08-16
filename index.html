@@ -684,6 +684,11 @@
       </button>
     </div>
     <div id="overlay" class="hidden"><div id="ovContent"></div></div>
+    <!-- Network sync-check toast (see CLAUDE.md determinism work / game.js's
+         showSyncWaiting/showSyncProblem) — deliberately NOT #overlay: it has
+         to stay visible on top of the ice while the stones underneath keep
+         animating (the rollback tween), not hide them behind a backdrop. -->
+    <div id="syncToast" class="hidden"></div>
     <div id="replayBar" class="hidden">
       <button id="replayExitBtn" type="button" aria-label="Quitter le replay">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M5 5l14 14M19 5L5 19"/></svg>
