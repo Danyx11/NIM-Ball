@@ -1392,7 +1392,7 @@ export function startGame(opts = {}) {
     // TAP_MOVE_THRESHOLD above, joystickClientPos never converts into canvas
     // space, since the joystick's own math (below) all happens in screen px
     // relative to the ring's own getBoundingClientRect().
-    const JOYSTICK_LOCK_MS = 2000;
+    const JOYSTICK_LOCK_MS = 1500;
     const JOYSTICK_UNLOCK_MS = 500;
     const JOYSTICK_STILL_PX = 4;
     const JOYSTICK_UNLOCK_PX = 8;
@@ -2313,6 +2313,21 @@ export function startGame(opts = {}) {
     }
     const activeList = list.filter(e => !e.out && !e.falling);
     for (let i = 0; i < activeList.length; i++) for (let j = i + 1; j < activeList.length; j++) resolveCollision(activeList[i], activeList[j], state, silent);
+    // Re-clamp to MAX_SPEED right after collisions, not just at the top of
+    // the next tick's move step. An entity hit by two overlapping pairwise
+    // collisions in the SAME tick (e.g. a stone+ball pile-up wedged in the
+    // goal-mouth recess, tight enough that a stone's own radius roughly
+    // equals the recess depth) can leave this loop with a velocity well past
+    // MAX_SPEED, since resolveCollision's impulses stack uncapped. Left
+    // unclamped, next tick's `e.x += e.vx` (line ~2227) would apply that
+    // whole spike in one uncapped jump — easily wider than the bar's
+    // detection window — tunneling the entity clean through the goal bar
+    // with no collision ever firing. Clamping here closes that gap: nothing
+    // downstream of this point ever moves on an unclamped velocity.
+    for (const e of activeList) {
+      const spd = Math.sqrt(e.vx * e.vx + e.vy * e.vy);
+      if (spd > MAX_SPEED) { const s = MAX_SPEED / spd; e.vx *= s; e.vy *= s; }
+    }
     // A knocked-dead stone (STONE_MAX_HITS, or bar contact, see
     // registerStoneHit/killStoneOnBar) doesn't play its shrink-into-the-void
     // animation the instant its own slide stops — the ball or other stones
