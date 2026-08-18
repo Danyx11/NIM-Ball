@@ -9,27 +9,27 @@
 // module instance, never this file's real in-game singleton below.
 const ASSET_BASE = import.meta.env.BASE_URL;
 export const SFX_SRC = {
-  hitWall: `${ASSET_BASE}sfx/golf layer/golf wall.wav`,   // stone/ball bouncing off a rail
-  hitStone: `${ASSET_BASE}sfx/golf layer/golf stone.wav`,   // stone-stone collision
-  hitStoneBall: `${ASSET_BASE}sfx/golf layer/golf ball.wav`,   // stone-ball collision
+  hitWall: `${ASSET_BASE}sfx/golf layer/golf wall.m4a`,   // stone/ball bouncing off a rail
+  hitStone: `${ASSET_BASE}sfx/golf layer/golf stone.m4a`,   // stone-stone collision
+  hitStoneBall: `${ASSET_BASE}sfx/golf layer/golf ball.m4a`,   // stone-ball collision
   shot: `${ASSET_BASE}sfx/shot.wav`,          // drag released, a stone launches
-  stoneSelect: `${ASSET_BASE}sfx/stone select.wav`, // a stone is grabbed to start a drag
-  dragTick: `${ASSET_BASE}sfx/drag tick.wav`, // retriggered while dragging, see onPointerMove in game.js
-  goal: `${ASSET_BASE}sfx/goal.wav`,          // ball crosses into the goal mouth
+  stoneSelect: `${ASSET_BASE}sfx/stone select.m4a`, // a stone is grabbed to start a drag
+  dragTick: `${ASSET_BASE}sfx/drag tick.m4a`, // retriggered while dragging, see onPointerMove in game.js
+  goal: `${ASSET_BASE}sfx/goal.m4a`,          // ball crosses into the goal mouth
   wipeout: `${ASSET_BASE}sfx/wipeout.wav`,    // a whole team has fallen in
-  button: `${ASSET_BASE}sfx/button.wav`,      // PLAY cap pressed
-  exitPanel: `${ASSET_BASE}sfx/exit-panel.wav`, // "Oui" on a live-match quit confirm (not replay)
+  button: `${ASSET_BASE}sfx/button.m4a`,      // PLAY cap pressed
+  exitPanel: `${ASSET_BASE}sfx/exit-panel.m4a`, // "Oui" on a live-match quit confirm (not replay)
   win: `${ASSET_BASE}sfx/win.wav`,            // match point reached
-  matchStart: `${ASSET_BASE}sfx/Match start.wav`, // played once, right as a live match begins
-  whistle: `${ASSET_BASE}sfx/whistle 2.wav`,  // played right before each turn timer starts (not the match's very first one, see beginAimPhase in game.js)
-  launchEngine: `${ASSET_BASE}sfx/launch engine.wav`, // small machinery cue, first sound in the reveal — before the glide whoosh and the stones' departure
-  stoneDead: `${ASSET_BASE}sfx/stone dead.wav`, // a knocked-out stone's shrink-into-the-void animation starts
-  stoneFall: `${ASSET_BASE}sfx/stone fall 3.wav`, // a stone (not the ball) drops into the goal mouth
-  pointOk: `${ASSET_BASE}sfx/Point ok.wav`,   // the +1 point-result panel appearing (mid-match, non-deciding point)
-  ticket2: `${ASSET_BASE}sfx/ticket 2.wav`,   // the match-winning ticket screen appearing
-  sweepAppear: `${ASSET_BASE}sfx/ice sphere 3.wav`, // balai patch placed, played right after the toolbar's button.wav, see sweepBtn in game.js
-  chatIn: `${ASSET_BASE}sfx/message IN.wav`,   // a real chat message arrives from the opponent (not our own echo, not the mute toggle) — see net.onChat in game.js
-  chatOut: `${ASSET_BASE}sfx/message OUT.wav`, // local player's own chat message send, played optimistically at submit time
+  matchStart: `${ASSET_BASE}sfx/Match start.m4a`, // played once, right as a live match begins
+  whistle: `${ASSET_BASE}sfx/whistle 2.m4a`,  // played right before each turn timer starts (not the match's very first one, see beginAimPhase in game.js)
+  launchEngine: `${ASSET_BASE}sfx/launch engine.m4a`, // small machinery cue, first sound in the reveal — before the glide whoosh and the stones' departure
+  stoneDead: `${ASSET_BASE}sfx/stone dead.m4a`, // a knocked-out stone's shrink-into-the-void animation starts
+  stoneFall: `${ASSET_BASE}sfx/stone fall 3.m4a`, // a stone (not the ball) drops into the goal mouth
+  pointOk: `${ASSET_BASE}sfx/Point ok.m4a`,   // the +1 point-result panel appearing (mid-match, non-deciding point)
+  ticket2: `${ASSET_BASE}sfx/ticket 2.m4a`,   // the match-winning ticket screen appearing
+  sweepAppear: `${ASSET_BASE}sfx/ice sphere 3.m4a`, // balai patch placed, played right after the toolbar's button.m4a, see sweepBtn in game.js
+  chatIn: `${ASSET_BASE}sfx/message IN.m4a`,   // a real chat message arrives from the opponent (not our own echo, not the mute toggle) — see net.onChat in game.js
+  chatOut: `${ASSET_BASE}sfx/message OUT.m4a`, // local player's own chat message send, played optimistically at submit time
 };
 export const AMBIENCE_SRC = `${ASSET_BASE}sfx/ambience-forest.m4a`;
 export const AMBIENCE_VOLUME = 0.622; // was 1.107, -5dB
@@ -37,7 +37,7 @@ export const AMBIENCE_FADE_MS = 1000; // playAmbience()'s fade-in length
 export const AMBIENCE_LOOP_CROSSFADE_S = 2; // overlap between consecutive loop-point copies, see scheduleAmbienceVoice()
 const SCHEDULE_LOOKAHEAD_S = 1; // schedule the next scheduled copy/leg (ambience or laser) this long before it's due
 
-export const LASER_SRC = `${ASSET_BASE}sfx/laser sample.wav`;
+export const LASER_SRC = `${ASSET_BASE}sfx/laser sample.m4a`;
 export const LASER_LOOP_POINT_S = 0.5; // ping-pong body starts here; the 0..this attack only ever plays once, right as a stone is grabbed
 export const LASER_END_TRIM_S = 0.3; // clip's last 300ms is never played — trimmed off both the attack and the loop's far turnaround
 export const LASER_VOLUME_MIN_DB = -37; // was -40, +3dB — discrete, right at grab (drag distance 0)
@@ -55,7 +55,7 @@ export const LASER_LP_GAIN_DIP_DB = -5; // extra gain riding the same sweep: 0dB
 // of the forest reverb bus for now; other one-shot SFX stay dry.
 export const REVERB_SEND = { hitWall: 0, hitStone: 0, hitStoneBall: 0 };
 
-export const GLIDE_SAMPLE_SRC = `${ASSET_BASE}sfx/whoosh layer.wav`;
+export const GLIDE_SAMPLE_SRC = `${ASSET_BASE}sfx/whoosh layer.m4a`;
 
 // "Glide" launch whoosh, a short cue at the moment stones are released: a
 // recorded one-shot sample (GLIDE_SAMPLE_SRC), not a synthesized loop — v3
@@ -162,7 +162,7 @@ function createAudio() {
   let laserTimer = null;  // schedules the next ping-pong leg ahead of time, mirrors ambience's lookahead pattern
   let laserToken = 0;     // bumped on every startLaser()/stopLaser() so a leg scheduled for a previous drag can never fire over a new one
 
-  let glideSampleBuffer = null; // the "whoosh layer.wav" recording, decoded once in load() — see startGlideVoice()
+  let glideSampleBuffer = null; // the "whoosh layer.m4a" recording, decoded once in load() — see startGlideVoice()
   const glideVoices = {};       // { [entityId]: { src, lowpass1, lowpass2, gain, panner, stopping } }, see setGlide()
 
   function ensureContext() {

@@ -3369,7 +3369,7 @@ export function startGame(opts = {}) {
     void sweepBtnCap.offsetWidth; // restart the animation if pressed again mid-tween
     sweepBtnCap.classList.add('pressed');
     audio.play('button');
-    if (sw.active) audio.play('sweepAppear', { volume: 0.251 }); // -12dB, right after button.wav
+    if (sw.active) audio.play('sweepAppear', { volume: 0.251 }); // -12dB, right after button.m4a
   }
   sweepBtn.addEventListener('click', triggerSweep, { signal });
   // Called every rendered frame (see render()) rather than only from the
