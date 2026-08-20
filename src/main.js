@@ -11,6 +11,19 @@ import { audio } from './audio.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 
+// Branded loading screen (index.html's #loadingOverlay, self-contained/
+// inline there since it must render before this module's own CSS/JS have
+// finished downloading — see the comment above it). Visible by default in
+// the raw HTML; dismissed here as the first thing this module does since by
+// this point style.css is already applied (static imports resolve before
+// any other top-level code runs) and the real UI is ready to paint. Reused
+// below (showLoadingOverlay/hideLoadingOverlay) for the LAN/match connection
+// wait and the replay-ticket decode wait.
+const loadingOverlay = document.getElementById('loadingOverlay');
+function showLoadingOverlay() { loadingOverlay.classList.remove('hidden'); }
+function hideLoadingOverlay() { loadingOverlay.classList.add('hidden'); }
+hideLoadingOverlay();
+
 // PWA offline shell (public/sw.js, public/manifest.json) — production only:
 // registering it during `npm run dev` would let it start intercepting fetch
 // requests and serving stale cached responses over Vite's own dev
@@ -30,6 +43,42 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
 // mouse drag) — passed into every startGame() call below.
 const IS_MOBILE = window.matchMedia('(pointer: coarse)').matches;
 if (IS_MOBILE) document.body.classList.add('mobile-layout');
+
+// TEMP debug readout (?debuglayout) — on-screen instead of devtools since
+// this is being diagnosed on a device we can't attach an inspector to
+// easily. Remove once the mobile #game-card sizing issue is confirmed fixed.
+if (new URLSearchParams(location.search).has('debuglayout')) {
+  const box = document.createElement('pre');
+  box.style.cssText = 'position:fixed;top:0;left:0;z-index:999999;background:#000;color:#0f0;font:11px monospace;padding:6px;margin:0;white-space:pre-wrap;max-width:100vw;';
+  document.body.appendChild(box);
+  function report() {
+    const gc = document.getElementById('game-card');
+    const r = gc ? gc.getBoundingClientRect() : null;
+    const cs = gc ? getComputedStyle(gc) : null;
+    const sw = document.getElementById('stage-wrap');
+    const swr = sw ? sw.getBoundingClientRect() : null;
+    const swcs = sw ? getComputedStyle(sw) : null;
+    const canvas = document.getElementById('stage');
+    const cr = canvas ? canvas.getBoundingClientRect() : null;
+    box.textContent = [
+      `IS_MOBILE=${IS_MOBILE}`,
+      `bodyClass=${document.body.className}`,
+      `win=${window.innerWidth}x${window.innerHeight}`,
+      `screen=${screen.width}x${screen.height}`,
+      `viewport-fit-cover=${document.querySelector('meta[name="viewport"]')?.content.includes('viewport-fit=cover')}`,
+      `pointer:coarse=${window.matchMedia('(pointer: coarse)').matches}`,
+      `orientation:portrait=${window.matchMedia('(orientation: portrait)').matches}`,
+      gc ? `game-card rect: left=${r.left.toFixed(1)} right=${r.right.toFixed(1)} top=${r.top.toFixed(1)} bottom=${r.bottom.toFixed(1)} w=${r.width.toFixed(1)} h=${r.height.toFixed(1)}` : 'game-card NOT FOUND',
+      cs ? `computed --card-w=${cs.getPropertyValue('--card-w')} width=${cs.width}` : '',
+      sw ? `stage-wrap class=${sw.className} rect: left=${swr.left.toFixed(1)} right=${swr.right.toFixed(1)} top=${swr.top.toFixed(1)} bottom=${swr.bottom.toFixed(1)} w=${swr.width.toFixed(1)} h=${swr.height.toFixed(1)}` : 'stage-wrap NOT FOUND',
+      swcs ? `stage-wrap computed width=${swcs.width}` : '',
+      cr ? `canvas#stage rect: left=${cr.left.toFixed(1)} right=${cr.right.toFixed(1)} w=${cr.width.toFixed(1)} h=${cr.height.toFixed(1)}` : 'canvas NOT FOUND',
+    ].join('\n');
+  }
+  report();
+  window.addEventListener('resize', report);
+  setInterval(report, 1000);
+}
 
 // Detach #stage-wrap (the canvas, plus #startOverlay — the ready-tap team
 // pick, the one overlay whose team-color wash needs to align with the ice
@@ -127,6 +176,11 @@ TOOLBAR_BUTTONS.forEach((id) => {
   document.getElementById(`tbtn-${id}-img`).src = `${ASSET_BASE}ui/btn-${id}.png`;
   document.getElementById(`tbtn-${id}-cap`).src = `${ASSET_BASE}ui/btn-${id}-cap.png`;
 });
+// Mobile-only unified controller art (see index.html's #mobileController
+// comment) — two pieces, not one, so the top strip can be hidden per-mode
+// later without touching the rest of the panel.
+document.getElementById('mcTopImg').src = `${ASSET_BASE}ui/controller-top.webp`;
+document.getElementById('mcBodyImg').src = `${ASSET_BASE}ui/controller-body.webp`;
 // Routed through the shared WebAudio singleton (see src/audio.js) rather
 // than a standalone <audio> element — keeps the toolbar's click in sync
 // with the "sound" mute toggle instead of always playing regardless of it.
@@ -442,14 +496,14 @@ function beginAmbience() {
 // toggle together, there's no case where one should show without the other.
 const toolbarTop = document.getElementById('toolbar-top');
 const toolbarBottom = document.getElementById('toolbar-bottom');
-// Mobile relocation target for #tbtn-play/#tbtn-sweep/#tbtn-power (see
-// style.css's #toolbarMobile and game.js's mobile branch, which reparents
-// those buttons here) — starts hidden like the other two, revealed together.
-const toolbarMobile = document.getElementById('toolbarMobile');
+// Mobile relocation target for all 6 toolbar buttons (see style.css's
+// #mobileController and game.js's mobile branch, which reparents those
+// buttons here) — starts hidden like the other two, revealed together.
+const mobileController = document.getElementById('mobileController');
 function showToolbar() {
   toolbarTop.classList.remove('hidden');
   toolbarBottom.classList.remove('hidden');
-  toolbarMobile.classList.remove('hidden');
+  mobileController.classList.remove('hidden');
 }
 
 // "Now show mode-select" half of the exit flow — the actual match teardown
@@ -464,7 +518,7 @@ function returnToModeSelect() {
   activeStopGame = null;
   toolbarTop.classList.add('hidden');
   toolbarBottom.classList.add('hidden');
-  toolbarMobile.classList.add('hidden');
+  mobileController.classList.add('hidden');
   startOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
 }
@@ -538,9 +592,10 @@ replayUploadBox.addEventListener('drop', (e) => {
   if (file) handleReplayFile(file);
 });
 async function handleReplayFile(file) {
-  replayUploadStatus.textContent = 'Lecture du ticket…';
+  showLoadingOverlay();
   try {
     const points = await decodePointsFromTicketImage(file);
+    hideLoadingOverlay();
     if (points.length === 0) {
       replayUploadStatus.textContent = 'Aucun point trouvé sur ce ticket.';
       return;
@@ -549,6 +604,7 @@ async function handleReplayFile(file) {
     beginAmbience();
     activeStopGame = startGame({ ...rockHandlers, replayPoints: points, mobile: IS_MOBILE });
   } catch (err) {
+    hideLoadingOverlay();
     replayUploadStatus.textContent = 'Impossible de lire ce fichier.';
     console.log('[replay] decode failed:', err);
   }
@@ -578,10 +634,13 @@ async function joinLan(raw, joinBtn) {
   if (!raw) return;
   const addr = /^wss?:\/\//.test(raw) ? raw : `ws://${raw}`;
   if (joinBtn) joinBtn.disabled = true;
+  showLoadingOverlay();
   try {
     const net = await connectLan(addr);
+    hideLoadingOverlay();
     showWaitingScreen(net, (msg) => showLanJoinScreen(msg));
   } catch (err) {
+    hideLoadingOverlay();
     showLanJoinScreen(err.message);
   }
 }
@@ -680,11 +739,13 @@ function showMatchChoiceScreen(errorMsg) {
 
 async function hostMatch() {
   const code = generateMatchCode();
-  showLobby(`<h2>Match réseau</h2><p>Connexion…</p>`);
+  showLoadingOverlay();
   try {
     const net = await connectMatch(code);
+    hideLoadingOverlay();
     showMatchHostWaitingScreen(net, code);
   } catch (err) {
+    hideLoadingOverlay();
     showMatchChoiceScreen(err.message);
   }
 }
@@ -726,10 +787,13 @@ function showMatchJoinScreen(errorMsg) {
 async function joinMatch(code, joinBtn) {
   if (code.length !== 4) return;
   if (joinBtn) joinBtn.disabled = true;
+  showLoadingOverlay();
   try {
     const net = await connectMatch(code);
+    hideLoadingOverlay();
     showWaitingScreen(net, (msg) => showMatchJoinScreen(msg));
   } catch (err) {
+    hideLoadingOverlay();
     showMatchJoinScreen(err.message);
   }
 }
@@ -768,6 +832,5 @@ if (replayFromLink) {
   activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], mobile: IS_MOBILE });
 } else if (new URLSearchParams(location.search).has('duel')) {
   homeOverlay.classList.add('hidden');
-  showLobby(`<h2>Connexion…</h2><p>Connexion au serveur du duel.</p>`);
   joinLan(defaultLanAddress(), null);
 }

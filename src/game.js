@@ -397,6 +397,14 @@ export function startGame(opts = {}) {
     const img = new Image(); img.src = `${ASSET_BASE}waiting-label/dot-${i}.png`;
     return img;
   });
+  // Pass & Play hand-off mask (see drawHandoffMask below) — a blurred,
+  // white-blended crop of the real ice (public/arena/frame.webp), pre-baked
+  // by scripts/bake_handoff_mask.py so it's guaranteed pixel-aligned with
+  // FX0..FY1 (see that script's docstring for why it crops the shipped art
+  // rather than compositing design/arena/xcf-terrain.png, the pre-lines
+  // layer, which lives in a different/older coordinate space).
+  const handoffMaskImage = new Image();
+  handoffMaskImage.src = `${ASSET_BASE}handoff/ice-mask.webp`;
   // Click-driven state per rock:
   // - sound: no flash, pure state sync (see drawRockGlow) to audio.isMuted()
   // - ice: sweep[team].rockClicked (see triggerSweep) — lit by default each
@@ -693,6 +701,144 @@ export function startGame(opts = {}) {
     }
   }
 
+  // "Hand-off" screen (Pass & Play local mode only, see beginAimPhase/
+  // onValidate): a mask hides the ice between aim phases so the other player
+  // can't see it while the device is passed over, and once more before the
+  // shared reveal. Visually the same family as the sweep patch above (a
+  // white ice sprite + a light-band "shine" sweeping across), just covering
+  // the whole rink instead of one circle, and drawn fully opaque (source-
+  // over, not soft-light) since this has to hide the board, not tint it.
+  // handoff.stage: 'in' (mask fading in, shine playing) -> 'shown' (fully
+  // opaque, label up, waiting for a tap anywhere) -> 'out' (mask fading out,
+  // shine playing again) -> null once completeHandoff() applies the real
+  // phase transition it was deferring.
+  let handoff = null;
+  const HANDOFF_IN_MS = 550;
+  const HANDOFF_OUT_MS = 550;
+  // Same chamfered-octagon shape the physics CORNERS array above collides
+  // against — traces the real ice boundary (not the FX0..FY1 bounding rect),
+  // with the two flat side walls detouring out to NOTCH_X0/NOTCH_X1 across
+  // the goal-mouth y-range (GY0..GY1) so the mask also covers the ice inside
+  // each goal recess, right up to the black bar (per feedback: the physical
+  // ice extends that far, not just to FX0/FX1) — GY0..GY1 sits entirely
+  // within each flat wall segment (clear of the corner chamfers), so this
+  // stays one simple, non-self-intersecting polygon.
+  function traceHandoffMaskPath() {
+    ctx.beginPath();
+    ctx.moveTo(FX0 + CHAMFER_X, FY0);
+    ctx.lineTo(FX1 - CHAMFER_X, FY0);
+    ctx.lineTo(FX1, FY0 + CHAMFER_Y);
+    ctx.lineTo(FX1, GY0);
+    ctx.lineTo(NOTCH_X1, GY0);
+    ctx.lineTo(NOTCH_X1, GY1);
+    ctx.lineTo(FX1, GY1);
+    ctx.lineTo(FX1, FY1 - CHAMFER_Y);
+    ctx.lineTo(FX1 - CHAMFER_X, FY1);
+    ctx.lineTo(FX0 + CHAMFER_X, FY1);
+    ctx.lineTo(FX0, FY1 - CHAMFER_Y);
+    ctx.lineTo(FX0, GY1);
+    ctx.lineTo(NOTCH_X0, GY1);
+    ctx.lineTo(NOTCH_X0, GY0);
+    ctx.lineTo(FX0, GY0);
+    ctx.lineTo(FX0, FY0 + CHAMFER_Y);
+    ctx.closePath();
+  }
+  // Same left-to-right glint idea as drawSweepShine, stretched across the
+  // whole rink instead of one patch's circle.
+  function drawHandoffShine(t) {
+    ctx.save();
+    traceHandoffMaskPath();
+    ctx.clip();
+    const bandW = (FX1 - FX0) * 0.35;
+    const travel = (FX1 - FX0) + bandW * 2;
+    const bandCx = (FX0 - bandW) + t * travel;
+    const grad = ctx.createLinearGradient(bandCx - bandW / 2, 0, bandCx + bandW / 2, 0);
+    grad.addColorStop(0, 'rgba(255,255,255,0)');
+    grad.addColorStop(0.5, 'rgba(255,255,255,0.85)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = grad;
+    ctx.fillRect(FX0 - bandW, FY0, (FX1 - FX0) + bandW * 2, FY1 - FY0);
+    ctx.restore();
+  }
+  // Label text is plain canvas fillText, unlike the rest of this file's UI
+  // text (baked PNG glyphs, see CLAUDE.md) — placeholder styling, same spirit
+  // as the LED stone-damage feature: mechanic ships now, art pass later.
+  const HANDOFF_LABEL = { handoffA: 'BLUE TEAM PLAY', handoffB: 'YELLOW TEAM PLAY', handoffWatch: 'WATCH' };
+  function drawHandoffLabel(alpha) {
+    const label = HANDOFF_LABEL[phase];
+    if (!label) return;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // Same flat grey as the score digit/hex-timer glyphs (GLYPH_RGB in
+    // scripts/bake_hex_timer.py) at partial opacity, per feedback — reads
+    // closer to the ice's own baked line art than a solid dark-ink label.
+    ctx.fillStyle = '#626262';
+    ctx.globalAlpha = alpha * 0.55;
+    ctx.font = "700 56px 'Mulish', -apple-system, sans-serif";
+    ctx.fillText(label, CENTER_X, CY - 14);
+    ctx.globalAlpha = alpha * 0.45;
+    ctx.font = "600 24px 'Mulish', -apple-system, sans-serif";
+    ctx.fillText('Touchez pour continuer', CENTER_X, CY + 48);
+    ctx.restore();
+  }
+  function drawHandoffMask() {
+    if (!handoff) return;
+    if (!handoffMaskImage.complete || !handoffMaskImage.naturalWidth) return;
+    const elapsed = performance.now() - handoff.stageStart;
+    let maskAlpha = 1, shineT = null;
+    if (handoff.stage === 'in') {
+      shineT = Math.min(1, elapsed / HANDOFF_IN_MS);
+      maskAlpha = shineT;
+    } else if (handoff.stage === 'out') {
+      shineT = Math.min(1, elapsed / HANDOFF_OUT_MS);
+      maskAlpha = 1 - shineT;
+    }
+    ctx.save();
+    traceHandoffMaskPath();
+    ctx.clip();
+    ctx.globalAlpha = maskAlpha;
+    // Baked wider than FX0..FX1 on purpose (NOTCH_X0..NOTCH_X1, see
+    // scripts/bake_handoff_mask.py) to cover the goal-notch detours above —
+    // the clip above discards whatever of that width falls outside the
+    // actual mask shape (the wood corners at each notch's far edges).
+    ctx.drawImage(handoffMaskImage, NOTCH_X0, FY0, NOTCH_X1 - NOTCH_X0, FY1 - FY0);
+    ctx.restore();
+    if (shineT !== null) drawHandoffShine(shineT);
+    drawHandoffLabel(maskAlpha);
+  }
+  // Kicks off the 'in' stage; completeHandoff() (see onValidate/beginAimPhase)
+  // applies whatever real phase transition was deferred once 'out' finishes.
+  // skipWhistle only matters for the handoffA->aimA leg (see beginAimPhase's
+  // fromMatchIntro case, where the match-start SFX already covers this cue).
+  function startHandoff(skipWhistle = false) {
+    handoff = { stage: 'in', stageStart: performance.now(), skipWhistle };
+  }
+  function updateHandoff() {
+    if (!handoff) return;
+    const elapsed = performance.now() - handoff.stageStart;
+    if (handoff.stage === 'in' && elapsed >= HANDOFF_IN_MS) {
+      handoff.stage = 'shown';
+    } else if (handoff.stage === 'out' && elapsed >= HANDOFF_OUT_MS) {
+      completeHandoff();
+    }
+  }
+  function completeHandoff() {
+    if (phase === 'handoffA') {
+      phase = 'aimA';
+      if (!handoff.skipWhistle) audio.play('whistle', { volume: 0.6 });
+    } else if (phase === 'handoffB') {
+      phase = 'aimB';
+    } else if (phase === 'handoffWatch') {
+      phase = 'pending';
+      playLaunchEngine('B');
+      scheduleGlideLeadIn(PRE_SIM_DELAY);
+      trackedTimeout(launchSimulation, PRE_SIM_DELAY);
+    }
+    handoff = null;
+  }
+
   let scoreA = 0, scoreB = 0;
   let round = 1;
   // Match-ticket stats (see src/ticket.js) — not gameplay state, just tallies
@@ -849,6 +995,15 @@ export function startGame(opts = {}) {
       }
       phase = 'replayAim';
       maybeAdvanceReplay();
+      return;
+    }
+    // Pass & Play (two humans sharing one screen, no net/aiTeam): mask the
+    // ice before either team's aim starts — see startHandoff/completeHandoff
+    // above. The whistle/turn-timer-start that used to happen right here now
+    // fire once the mask actually lifts into 'aimA', not at this point.
+    if (!net && !aiTeam) {
+      phase = 'handoffA';
+      startHandoff(fromMatchIntro);
       return;
     }
     // Whistle cues every turn timer about to start, except the match's very
@@ -1243,6 +1398,18 @@ export function startGame(opts = {}) {
   }
   function onPointerDown(evt) {
     audio.unlock();
+    // Hand-off mask (Pass & Play, see startHandoff/completeHandoff above)
+    // swallows all input while up — the whole point is nothing underneath is
+    // reachable — and only reacts once fully opaque ('shown'), so a tap
+    // can't land mid-fade and double-fire the dismiss.
+    if (handoff) {
+      if (handoff.stage === 'shown') {
+        evt.preventDefault();
+        handoff.stage = 'out';
+        handoff.stageStart = performance.now();
+      }
+      return;
+    }
     const pos = getPointerPos(evt);
     // HUD rocks: checked before the isAimingPhase gate below (unlike stone
     // drag/sweep) since sound/exit/laser must stay reachable across every
@@ -1362,20 +1529,29 @@ export function startGame(opts = {}) {
     // #stage-wrap (canvas + every DOM overlay nested inside it) is already
     // detached to #game-card by main.js, before startGame() ever runs — see
     // the comment there. Nothing to redo here.
-    // Reparent the play/sweep/power toolbar buttons into #toolbarMobile (see
-    // its comment in index.html/style.css) so they sit under the joystick
-    // column instead of below the board — CSS alone can't do this because
-    // #stage-wrap (their desktop parent) is `transform`ed, which traps
-    // `position: fixed` descendants inside its own box instead of the
-    // viewport. Reparenting doesn't affect the getElementById lookups /
-    // listeners wired up below (playBtn etc.) — those resolve by id
-    // regardless of current DOM parent.
-    document.getElementById('toolbarMobile').append(
+    // Reparent all 6 toolbar buttons into #mobileController's #mcBody (see
+    // index.html/style.css) so they sit inside the panel instead of below/
+    // above the board — CSS alone can't do this because #stage-wrap (their
+    // desktop parent) is `transform`ed, which traps `position: fixed`
+    // descendants inside its own box instead of the viewport. Reparenting
+    // doesn't affect the getElementById lookups / listeners wired up below
+    // or in main.js (playBtn etc.) — those resolve by id regardless of
+    // current DOM parent. Each button is absolutely positioned on its own
+    // baked spot on the panel art (see style.css) — no grid/flex grouping
+    // needed, so they all land in the same #mcBody. sound/chat/exit
+    // previously never got this treatment and stayed trapped inside
+    // #toolbar-top (nested in the ~2.05x-zoomed canvas box, with no
+    // reparent of its own) — unreachable on mobile, since the
+    // .mobile-layout #scene crop pans their baked positions out of the
+    // visible viewport entirely.
+    document.getElementById('mcBody').append(
       document.getElementById('tbtn-play'),
       document.getElementById('tbtn-sweep'),
       document.getElementById('tbtn-power'),
+      document.getElementById('tbtn-chat'),
+      document.getElementById('tbtn-sound'),
+      document.getElementById('tbtn-exit'),
     );
-    const joystick = document.getElementById('joystick');
     const joystickRing = document.getElementById('joystickRing');
     const joystickStick = document.getElementById('joystickStick');
     // Aim lock: the virtual joystick is prone to a specific mobile-only
@@ -1392,7 +1568,7 @@ export function startGame(opts = {}) {
     // TAP_MOVE_THRESHOLD above, joystickClientPos never converts into canvas
     // space, since the joystick's own math (below) all happens in screen px
     // relative to the ring's own getBoundingClientRect().
-    const JOYSTICK_LOCK_MS = 1500;
+    const JOYSTICK_LOCK_MS = 1800;
     const JOYSTICK_UNLOCK_MS = 500;
     const JOYSTICK_STILL_PX = 4;
     const JOYSTICK_UNLOCK_PX = 8;
@@ -1766,8 +1942,12 @@ export function startGame(opts = {}) {
       trackedTimeout(launchSimulation, PRE_SIM_DELAY + think);
       return;
     }
-    if (phase === 'aimA') { commitSweep('A'); phase = 'aimB'; }
-    else if (phase === 'aimB') { commitSweep('B'); phase = 'pending'; playLaunchEngine('B'); scheduleGlideLeadIn(PRE_SIM_DELAY); trackedTimeout(launchSimulation, PRE_SIM_DELAY); }
+    // Pass & Play: hand-off mask before the other team's aim, and again
+    // before the shared reveal — completeHandoff() applies the deferred
+    // phase transition (and, for the 'watch' leg, the actual pending/launch
+    // sequence this used to fire immediately here) once each mask lifts.
+    if (phase === 'aimA') { commitSweep('A'); phase = 'handoffB'; startHandoff(); }
+    else if (phase === 'aimB') { commitSweep('B'); phase = 'handoffWatch'; startHandoff(); }
   }
   // Ticket stat (see src/ticket.js) — fastest stone launched all match, in the
   // same physics units as vx/vy (converted to a % of MAX_DRAG*POWER_SCALE for display).
@@ -4764,6 +4944,7 @@ export function startGame(opts = {}) {
     if (!entities.ball.out) drawBall(entities.ball);
     // atmosphere.draw(ctx); // neutralized for perf, see note at createAtmosphere()
     syncSweepButton();
+    drawHandoffMask();
   }
 
   // ---------- Dev perf logging (temporary — see perf audit, delete once done) ----------
@@ -4796,6 +4977,18 @@ export function startGame(opts = {}) {
   let physicsAccumMs = 0;
   let settleFrames = 0;
   let lastFrameTime = null;
+
+  // Idle-render throttle (perf/battery — see conversation): while a team is
+  // just deciding their shot (aimA/aimB/lanAim, per isAimingPhase) with no
+  // drag in progress, nothing on screen changes beyond slow decorative
+  // pulses (halo breathing, hex-timer glow) — repainting the full mobile
+  // canvas (~25 megapixels at the dpr cap) for that at 60fps is wasted GPU
+  // work/heat for no visible benefit. Dropped to 30fps only in that
+  // specific idle case; an active drag (the aim laser has to track the
+  // finger smoothly) or any other phase (sim, goal, straighten, etc. —
+  // real motion actually happening) still renders every rAF tick.
+  const IDLE_RENDER_INTERVAL_MS = 1000 / 30;
+  let lastRenderTime = 0;
 
   // Render interpolation (see perf audit conversation): the fixed-step
   // catch-up loop below can leave a leftover fraction of a tick's worth of
@@ -4947,6 +5140,8 @@ export function startGame(opts = {}) {
       updateMatchIntro();
     } else if (phase === 'mancheRollback') {
       updateMancheRollback();
+    } else if (phase === 'handoffA' || phase === 'handoffB' || phase === 'handoffWatch') {
+      updateHandoff();
     }
     if (isReplay) updateReplayBar();
     if (net) { maybeAutoSyncMute(); syncChatCompose(); }
@@ -4987,7 +5182,11 @@ export function startGame(opts = {}) {
         e.rot = lerpAngle(e.prevRot, e.rot, renderAlpha);
       }
     }
-    render();
+    const idleThrottled = isAimingPhase(phase) && !drag && (now - lastRenderTime < IDLE_RENDER_INTERVAL_MS);
+    if (!idleThrottled) {
+      lastRenderTime = now;
+      render();
+    }
     if (renderAlpha < 1) {
       for (const e of allEntities()) {
         if (e._trueX === undefined) continue;
@@ -4999,7 +5198,7 @@ export function startGame(opts = {}) {
   loop();
 
   // dev-only handle for physics-tuning scripts (position/phase readback)
-  if (import.meta.env.DEV) window.__nb = { entities: () => entities, phase: () => phase, step: () => physicsStep(), render: () => render(), sweep: () => sweep, aimingTeam: () => aimingTeam(), controlsEnabled: () => controlsEnabled, runAimCascade: (team) => runAimCascade(team) };
+  if (import.meta.env.DEV) window.__nb = { entities: () => entities, phase: () => phase, step: () => physicsStep(), render: () => render(), sweep: () => sweep, aimingTeam: () => aimingTeam(), controlsEnabled: () => controlsEnabled, runAimCascade: (team) => runAimCascade(team), handoff: () => handoff };
 
   // Handed back so a caller outside this closure (main.js's own "Quitter"/
   // logo-menu confirm dialogs) can tear this match down without a page
