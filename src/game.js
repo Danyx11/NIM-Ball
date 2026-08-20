@@ -832,7 +832,11 @@ export function startGame(opts = {}) {
       phase = 'aimB';
     } else if (phase === 'handoffWatch') {
       phase = 'pending';
-      playLaunchEngine('B');
+      // No team arg here on purpose (see playLaunchEngine's own retractTeam
+      // param): team B's laser was never visible under the mask, so there's
+      // nothing to visibly "retract" once it lifts — per feedback, still
+      // play the launch cue, just skip the retract animation for this leg.
+      playLaunchEngine();
       scheduleGlideLeadIn(PRE_SIM_DELAY);
       trackedTimeout(launchSimulation, PRE_SIM_DELAY);
     }
@@ -1572,6 +1576,17 @@ export function startGame(opts = {}) {
     const JOYSTICK_UNLOCK_MS = 500;
     const JOYSTICK_STILL_PX = 4;
     const JOYSTICK_UNLOCK_PX = 8;
+    // The visible ring shrank a lot in the white-panel redesign (now ~30-45px
+    // radius vs. the old full-size joystick's 100px+), but power still needs
+    // roughly that same physical finger travel to feel gradual rather than
+    // "full power the instant you touch it" — so power is measured against
+    // its own, bigger reference radius (joystickDrag.powerR, set in
+    // onJoystickDown below), completely decoupled from joystickDrag.r (the
+    // ring's actual radius, still used just to keep the visible stick pinned
+    // inside the ring). The player can keep pulling well past the ring's
+    // edge — the puck itself stops moving, but the shot keeps gaining power
+    // until powerR, exactly like the old, physically bigger ring did.
+    const JOYSTICK_POWER_RADIUS_MULT = 3;
     function joystickClientPos(evt) {
       const t = evt.touches ? (evt.touches[0] || evt.changedTouches[0]) : evt;
       return { x: t.clientX, y: t.clientY };
@@ -1582,7 +1597,8 @@ export function startGame(opts = {}) {
       const clampedDist = Math.min(rawDist, joystickDrag.r);
       const ux = rawDist > 0 ? dx / rawDist : 0, uy = rawDist > 0 ? dy / rawDist : 0;
       joystickStick.style.transform = `translate(calc(-50% + ${(ux * clampedDist).toFixed(1)}px), calc(-50% + ${(uy * clampedDist).toFixed(1)}px))`;
-      const pullDist = (clampedDist / joystickDrag.r) * MAX_DRAG;
+      const powerDist = Math.min(rawDist, joystickDrag.powerR);
+      const pullDist = (powerDist / joystickDrag.powerR) * MAX_DRAG;
       drag.curX = drag.startX + ux * pullDist;
       drag.curY = drag.startY + uy * pullDist;
       updateDragTickAudio(pullDist);
@@ -1628,6 +1644,7 @@ export function startGame(opts = {}) {
       const p = joystickClientPos(evt);
       joystickDrag = {
         cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, r: rect.width / 2,
+        powerR: (rect.width / 2) * JOYSTICK_POWER_RADIUS_MULT,
         locked: false, lockTimer: null, unlockTimer: null, lockPos: null, anchorPos: p, lastPos: p,
       };
       joystickStick.classList.add('dragging');
@@ -2507,6 +2524,29 @@ export function startGame(opts = {}) {
     for (const e of activeList) {
       const spd = Math.sqrt(e.vx * e.vx + e.vy * e.vy);
       if (spd > MAX_SPEED) { const s = MAX_SPEED / spd; e.vx *= s; e.vy *= s; }
+    }
+    // Last-resort backstop: no entity should ever persist outside the
+    // playfield's own outer envelope, goal pockets included, no matter the
+    // cause. This is deliberately not trying to model the exact legal shape
+    // (the octagon corners, the notch) — it's a generous rectangle a stone
+    // or the ball can only ever reach the edge of through an already-broken
+    // escape (the goal-bar tunneling above is one; a report of the ball/a
+    // stone sliding clean off the ice on a scored goal, seen on a live
+    // deploy with the tunneling fix already in place, suggests at least one
+    // more still-unidentified path exists). Every legitimate position
+    // (mid-ice, wedged in a corner cut, sitting in the goal pocket against
+    // the bar) sits comfortably inside this box, so it never fires during
+    // normal play — it only ever catches something that has already
+    // escaped, snapping it back in and killing the outward velocity
+    // component instead of letting it glide away forever, uncollided and
+    // unrendered-in-bounds.
+    const SAFE_X0 = BAR_LEFT.x0 - 4, SAFE_X1 = BAR_RIGHT.x1 + 4;
+    const SAFE_Y0 = FY0 - 4, SAFE_Y1 = FY1 + 4;
+    for (const e of activeList) {
+      if (e.x < SAFE_X0) { e.x = SAFE_X0; if (e.vx < 0) e.vx = -e.vx * WALL_RESTITUTION; }
+      else if (e.x > SAFE_X1) { e.x = SAFE_X1; if (e.vx > 0) e.vx = -e.vx * WALL_RESTITUTION; }
+      if (e.y < SAFE_Y0) { e.y = SAFE_Y0; if (e.vy < 0) e.vy = -e.vy * WALL_RESTITUTION; }
+      else if (e.y > SAFE_Y1) { e.y = SAFE_Y1; if (e.vy > 0) e.vy = -e.vy * WALL_RESTITUTION; }
     }
     // A knocked-dead stone (STONE_MAX_HITS, or bar contact, see
     // registerStoneHit/killStoneOnBar) doesn't play its shrink-into-the-void

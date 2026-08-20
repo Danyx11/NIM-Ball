@@ -99,16 +99,6 @@
     <svg class="nq-connect-icon" viewBox="0 0 54 54" aria-hidden="true"><path fill="currentColor" d="M26.95 0A27.05 27.05 0 0 0 .21 22.32a1.12 1.12 0 0 0 1.13 1.3h18.72c.62 0 1.12-.5 1.12-1.12v-8.1a2.25 2.25 0 0 1 3.66-1.76l15.75 12.6a2.25 2.25 0 0 1 0 3.52l-15.75 12.6a2.25 2.25 0 0 1-3.66-1.76v-8.1c0-.62-.5-1.12-1.12-1.12H1.35a1.14 1.14 0 0 0-1.13 1.3 27 27 0 0 0 53.55-5.78A27.25 27.25 0 0 0 26.95 0z"/></svg>
     <span id="connectBtnLabel">Connecter</span>
   </button>
-  <!-- Reserved, inactive placeholder for the desktop system column (top-right,
-       stacked under the logo) — menu (wallet/help/params/credits) is not
-       built yet, this just reserves its slot in the layout. Fullscreen
-       (below) is the real, wired-up toggle — see src/main.js. -->
-  <button id="menuBtn" class="reserved-slot" type="button" disabled aria-label="Menu (à venir)">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg>
-  </button>
-  <button id="fullscreenBtn" class="icon-btn" type="button" aria-label="Plein écran">
-    <img id="fullscreenIcon" alt="" width="20" height="20">
-  </button>
   <!-- Mobile-only unified controller — one flat white panel (the validated
        "remote control" mockup, design/ui/ChatGPT Image 19 août 2026,
        22_39_44.png, baked as two real assets: public/ui/controller-top.webp
@@ -129,10 +119,10 @@
        #joystickRing/#joystickStick keep their original ids/drag logic from
        src/game.js's mobile branch unchanged — #joystickStick is still
        actually drawn, as a small overlay showing live pull direction while
-       dragging (and glowing around its own contour while aim-locked, see
-       style.css) — the D-pad itself has no interactive chevrons, aiming is
-       one continuous analog drag across the whole ring, matching the
-       mockup's static look at rest. #mcBody reparents #tbtn-play/
+       dragging, and #joystickRing's own contour glows while aim-locked
+       (see style.css) — the D-pad itself has no interactive chevrons,
+       aiming is one continuous analog drag across the whole ring, matching
+       the mockup's static look at rest. #mcBody reparents #tbtn-play/
        #tbtn-sweep/#tbtn-power/#tbtn-sound/#tbtn-chat/#tbtn-exit in directly
        (see game.js) — each absolutely positioned on its own baked button,
        no grid/flex needed now that every position is a fixed measured %. -->

@@ -324,44 +324,6 @@ bgLogo.addEventListener('click', () => {
   document.getElementById('logoNoBtn').onclick = () => { audio.play('button'); hideLobby(); };
 });
 
-// ---- Fullscreen toggle (#fullscreenBtn, real counterpart to the still-
-// reserved #menuBtn) — baked PNG glyph (same pattern as the toolbar's
-// btn-*.png icons, see TOOLBAR_BUTTONS above) rather than inline SVG: the
-// source art (design/full screen.jpg) is a flattened external-link-style
-// icon with its transparency baked in as a visible checkerboard instead of
-// real alpha, so it's pre-processed into a proper white-on-transparent
-// cutout (icon-fullscreen-enter/exit.png, exit is just the enter glyph
-// rotated 180°) rather than inlined as markup like the other icon-btn/
-// reserved-slot glyphs.
-const FULLSCREEN_ICON_SRC = {
-  enter: `${ASSET_BASE}ui/icon-fullscreen-enter.png`,
-  exit: `${ASSET_BASE}ui/icon-fullscreen-exit.png`,
-};
-const fullscreenBtn = document.getElementById('fullscreenBtn');
-const fullscreenIcon = document.getElementById('fullscreenIcon');
-if (!FULLSCREEN_SUPPORTED) {
-  // iOS Safari: this button could never do anything (see FULLSCREEN_SUPPORTED
-  // above) — hiding it beats leaving a dead control in the chrome.
-  fullscreenBtn.style.display = 'none';
-} else {
-  function syncFullscreenButton() {
-    const active = !!document.fullscreenElement;
-    fullscreenIcon.src = active ? FULLSCREEN_ICON_SRC.exit : FULLSCREEN_ICON_SRC.enter;
-    fullscreenBtn.setAttribute('aria-label', active ? 'Quitter le plein écran' : 'Plein écran');
-  }
-  syncFullscreenButton();
-  document.addEventListener('fullscreenchange', syncFullscreenButton);
-  fullscreenBtn.addEventListener('click', () => {
-    audio.play('button');
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-    } else {
-      document.documentElement.requestFullscreen()
-        .catch((err) => console.log('[fullscreen] request failed:', err.message));
-    }
-  });
-}
-
 // ---- "Fullscreen recommended" intro gate (mobile only, see IS_MOBILE above)
 // — shown in front of #modeOverlay before the player ever sees a mode tile;
 // only actually revealed at the bottom of this file, once we know this isn't
