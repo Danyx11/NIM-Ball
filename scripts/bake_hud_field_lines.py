@@ -37,6 +37,14 @@ LINE_ALPHA = 0.51
 LINE_BASE_GRAY = 20
 GRAIN_BLUR_PX = 6
 GRAIN_STRENGTH = 10
+# detect_ice_rect's brightness threshold reads the true ice edge a couple px
+# conservative (antialiased ice/wood transition), so a line/arc tip drawn
+# exactly at the crop boundary can fall visibly short of the real wood edge
+# — a bright un-lined sliver of ice shows through right at the tip. Overdraw
+# every line/arc endpoint past the crop edge by this much (output px) so the
+# stroke always reaches the wood regardless of that detection slack; the
+# overdrawn bit is clipped away by the crop itself, so it's free.
+TIP_OVERDRAW_PX = 3
 
 SS = 4  # supersample factor for anti-aliasing
 
@@ -75,20 +83,26 @@ def build_shape_mask(w, h):
     small_hex_r = SMALL_HEX_R_FRAC * H
     goal_r = GOAL_R_FRAC * H
     arc_half_angle = GOAL_ARC_FRACTION * np.pi
+    overdraw = TIP_OVERDRAW_PX * SS
 
-    # halfway line, stopping at the big hexagon's own top/bottom vertices
-    draw.line([(cx, 0), (cx, cy - hex_r)], fill=255, width=stroke)
-    draw.line([(cx, cy + hex_r), (cx, H)], fill=255, width=stroke)
+    # halfway line, stopping at the big hexagon's own top/bottom vertices —
+    # overdrawn past 0/H so the tip still reaches the wood (see TIP_OVERDRAW_PX)
+    draw.line([(cx, -overdraw), (cx, cy - hex_r)], fill=255, width=stroke)
+    draw.line([(cx, cy + hex_r), (cx, H + overdraw)], fill=255, width=stroke)
 
     # center hexagons (pointy top/bottom), outline only
     for r in (hex_r, small_hex_r):
         pts = hex_vertices(cx, cy, r)
         draw.line(pts + [pts[0]], fill=255, width=stroke, joint="curve")
 
-    # goal creases: circle cap whose tips land exactly on the goal line
+    # goal creases: circle cap whose tips land exactly on the goal line —
+    # drawn angle range is widened by a hair past arc_half_angle (arc length
+    # overdraw/goal_r radians) so the tip overshoots past the goal line
+    # instead of landing exactly on it (same reasoning as the center line).
     cap_inset = goal_r * np.cos(arc_half_angle)
-    start_deg = -np.degrees(arc_half_angle)
-    end_deg = np.degrees(arc_half_angle)
+    draw_half_angle = arc_half_angle + overdraw / goal_r
+    start_deg = -np.degrees(draw_half_angle)
+    end_deg = np.degrees(draw_half_angle)
 
     left_cx = -cap_inset
     bbox = [left_cx - goal_r, cy - goal_r, left_cx + goal_r, cy + goal_r]

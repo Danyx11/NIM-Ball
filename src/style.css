@@ -132,8 +132,8 @@ html, body {
      the logo's own center sits at a quarter of (100vw - card-w) in from
      the right edge. Now shares that margin/column with #connectBtn (bottom)
      and the reserved menu/fullscreen slots stacked below (see .reserved-slot). */
-  right: calc(var(--right-margin) / 2 - 85px);
-  width: 170px;
+  right: calc(var(--right-margin) / 2 - 127.5px);
+  width: 255px;
   height: auto;
 }
 
@@ -196,7 +196,7 @@ html, body {
    ratio (557/128 ≈ 4.35) is much wider/shorter than the old logo's (≈1.96),
    fixing both dimensions would squish it. Width kept at 70px so the mobile
    column's horizontal footprint doesn't change. */
-.mobile-layout #bg-logo { top: auto; bottom: 54px; width: 70px; height: auto; right: calc(var(--controller-center-right) - 35px); }
+.mobile-layout #bg-logo { top: auto; bottom: 54px; width: 105px; height: auto; right: calc(var(--controller-center-right) - 52.5px); }
 
 /* Unified mobile controller — the validated white "remote control" mockup
    (design/ui/ChatGPT Image 19 août 2026, 22_39_44.png), baked as real art
