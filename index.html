@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Nim-Curl</title>
 <!-- Classic browser-tab/home-screen icon: the hex mark cropped out of
      bg/nimiq-logo-transparent.webp (see scripts/ — generated once, not
@@ -26,8 +26,71 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Nim-Curl">
+<!-- Branded loading screen: shown by default so a slow first paint (before
+     this page's real CSS/JS — imported via src/main.js — finishes
+     downloading) never flashes raw unstyled HTML (white background, default
+     browser button/joystick shapes) instead. Reused later at runtime
+     (src/main.js's showLoadingOverlay/hideLoadingOverlay) for the LAN/match
+     connection wait and the replay-ticket decode wait, so it's entirely
+     self-contained here (inline SVG + base64 font, no external requests) and
+     independent of style.css rather than living there. -->
+<style>
+  @font-face{
+    font-family:'Mulish Loading';
+    font-style:normal;
+    font-weight:600;
+    font-display:swap;
+    src:url(data:font/woff2;base64,d09GMgABAAAAAAUoAA8AAAAACegAAATQAAOaXgAAAAAAAAAAAAAAAAAAAAAAAAAAGhYbIBwwBmA/U1RBVEQAgRwRCAqIBIY7ATYCJANECyQABCAFhDQHIBv6ByAuB+zG8RtiwBhhwlHUavewXmgU9KmVxOLh/+fC7vtJKZMCMSk8HllVSDIGaAEtoNr5+zbtQZIaNVG6rUNFIarE7Gdd7WRz36uo/t+5P7sQGg60RKMZI0GT9/zHXWLAmPVGkNOq/F8FSKe7/en3m/U9TJpn+A08FI5EjA/x9Bu/YRIaJPFEpGRCUm/exbal3dJuIVmz1MpsrgVMdS2n0+gA+/TuSgIlIAmhnhAotJEJmzJtWAYhcqgCIJI+KvHeLn7zxFFeyNzDjfFDJhxqlqeUpCIgXV3ywOx6Yp3yKDcMg+lXj2fCDR2g7G21JnnPKIH9O8Vf6S064AmhtoQmcHSBH9/uHIMBO49wXiwOJtcABlEDVwGZkCIeIEBChiZ4Ak3wXQbaicZTTweVKN36DBgmxLFycPFCVUB0WeD/K6q/+d4br3xet8tpt1pMxgJrhKhSH6uh/TsBzUEMAvECgByQJJFoyap4EUFRkwjNzYPCo8vkMqEsKPl8fnKDkk94Kq5CMTK8ZYlRVRpRvIoQEItFXGAullUW++CiMwV39Z6Li95Xrkm25NDdv7jKcEHsNZ8MiDAsAr/AtgbBb3gEFNxVMCPM7daaWRwiIpxbnixeq69ymhIWysqGCVKBETs4x5iCpHcnT5DoPRGIlx+800z2peakNKu9wHVNsRmBG4KALSfxZi6pFXlx2sIDqdC4EFeaAps2nx5zoA0CipFvVrbf2K24dfnX85P97bp9nIXcNEjffumJWLZlZEC2dY9k/GLFvAVzZs+bN2fWgnlwTx29pxDuDARkO7cpA8zI0ttdFvx6/X/vk1OXzpozYeGsiuXRM/r1ZQLm3RxI3zpvHoRToy7PQXSiseWIjTeFxxubj9C8ATE71ygd9tVK0U4/Eu1ao7I5VqvYXV7fDLTc5x69bObMUUs9PrQUitpdm9vIo2IJOdrS3kVz1I9KnZGbKoczptsCxPdNEwpZitVqNKyGoiuqOKM14tJbvNZ2mkI1/F6u2PrAOio8hJtYbACFVCFgB5R/O8Wfdd3MJxck8maIt2d+2L9WDageayt5gGFItFylhzZ1fr9Ue/um9ta2R0dNGD+5mWbVEgmrpLsnIx1KDYP/bf1vzwbXWBcMfmd7ALPOZwxXmkNcpWN9c8dKDecYYavtGiQ7h9iuTMipPbS3veWIWEyIYkND/vbWW8SIGw2yNKPVaBgNTRGi6LAWWo4PMlwvkN3qn/4Yh6jWv1XGewGfZ+gGAPh6+sTs/1G1bd6eY0BNCQTfHucaAOgJpfMyDeML6RdF+mRxum90RC6dxR2808oIGJ04FcAq9tOk7zYridGpR4W3RgcBBBqSEJiAH8aimlZxFTKRhwKPwC0WhtiFJfW8wzIzPCnNYVgNraJcWtOg6JXBQBkTAMZrEHNwLO4Rdc0B4oXFDpgMCZhoFBcHpzGy1apWg5RNxskmG2MsrwuObp9NZBTEzcZiQlDGLmNOyChG2V3sihgjoEhtVqWKg0vajWVWyQLxPXhvBHHwsrFD/MYYrYovYKWS8K/tMcEYo3CGNx2TsvGp1GmIl5XE7WgfxxmlTiVStTotWEKsHi2us2f9FVBhekm3a7sl2VJod1BpBWTOiQFjcC6/nIUE4sPx4wHV62MA) format('woff2');
+  }
+  #loadingOverlay{
+    position:fixed; inset:0; z-index:100;
+    background:#000;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+  }
+  #loadingOverlay.hidden{ display:none; }
+  #loadingOverlay .wrap{ display:flex; flex-direction:column; align-items:center; gap:18px; }
+  #loadingOverlay .logo{ width:clamp(90px,16vmin,160px); height:clamp(90px,16vmin,160px); display:block; }
+  #loadingOverlay .label{
+    font-family:'Mulish Loading', sans-serif;
+    font-weight:600; font-size:16px; letter-spacing:.08em;
+    color:#fff; text-transform:uppercase;
+  }
+  #loadingOverlay .dots span{ animation: loading-blink 1.4s infinite; }
+  #loadingOverlay .dots span:nth-child(2){ animation-delay:.2s; }
+  #loadingOverlay .dots span:nth-child(3){ animation-delay:.4s; }
+  @keyframes loading-blink{ 0%, 20% { opacity:0; } 50% { opacity:1; } 100% { opacity:0; } }
+  #loadingOverlay .orb{
+    filter: drop-shadow(0 0 3px #fff) drop-shadow(0 0 8px #fff);
+    animation: loading-orb-fade 2.5s linear infinite;
+  }
+  @keyframes loading-orb-fade{ 0%, 52% { opacity:1; } 54%, 100% { opacity:0; } }
+</style>
 </head>
 <body>
+  <div id="loadingOverlay">
+    <div class="wrap">
+      <svg class="logo" viewBox="0 0 544 544" xmlns="http://www.w3.org/2000/svg">
+        <path id="hexGuide" fill="none" stroke="none"
+              d="M147,222 L147,191 L279,115 L411,191 L411,344 L279,420 L147,344 L147,339 Z"/>
+        <path d="M147,222 L147,191 L279,115 L411,191 L411,344 L279,420 L147,344 L147,339"
+              fill="none" stroke="#fff" stroke-width="14"
+              stroke-linejoin="round" stroke-linecap="round"/>
+        <line x1="60"  y1="250" x2="177" y2="250" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+        <line x1="82"  y1="278" x2="169" y2="278" stroke="#fff" stroke-width="9"  stroke-linecap="round"/>
+        <line x1="108" y1="307" x2="184" y2="307" stroke="#fff" stroke-width="9"  stroke-linecap="round"/>
+        <rect x="189" y="231" width="182" height="86" rx="43" ry="43"
+              fill="none" stroke="#fff" stroke-width="15"/>
+        <circle class="orb" r="13" fill="#fff">
+          <animateMotion dur="2.5s" repeatCount="indefinite" rotate="auto"
+                         keyPoints="0;1;1" keyTimes="0;0.6;1" calcMode="linear">
+            <mpath href="#hexGuide"/>
+          </animateMotion>
+        </circle>
+      </svg>
+      <div class="label">Loading<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>
+    </div>
+  </div>
   <img id="bg-logo" alt="logo">
   <!-- Nimiq wallet identity: real "nq-login" glyph from @nimiq/style's icon
        sprite (see src/nimiq.js's chooseAddress()), inlined rather than
@@ -46,27 +109,40 @@
   <button id="fullscreenBtn" class="icon-btn" type="button" aria-label="Plein écran">
     <img id="fullscreenIcon" alt="" width="20" height="20">
   </button>
-  <!-- Mobile-only virtual joystick (see src/style.css's .mobile-layout rules
-       and src/game.js's joystick wiring in startGame()) — sits in the same
-       right-margin column as the buttons above, only shown once main.js
-       detects a coarse pointer and adds .mobile-layout to <body>. Ring is the
-       fixed track, stick is the draggable puck (translated via inline
-       transform in game.js, not real drag-and-drop). -->
-  <div id="joystick" aria-hidden="true">
-    <div id="joystickRing"><div id="joystickStick"></div><div id="joystickLockDot"></div></div>
+  <!-- Mobile-only unified controller — one flat white panel (the validated
+       "remote control" mockup, design/ui/ChatGPT Image 19 août 2026,
+       22_39_44.png, baked as two real assets: public/ui/controller-top.webp
+       for the L/R + chat/OFF switches, public/ui/controller-body.webp for
+       the D-pad/play/sweep/power/bottom-bar — split in two, not one image,
+       specifically so the top strip can be hidden per-mode later via CSS
+       without touching the rest of the panel; both start visible in every
+       mode for now, that per-mode split is a follow-up) — replaces the old
+       separate joystick + relocated-toolbar pair, and an earlier hand-coded
+       CSS-glass attempt (see git history) that didn't match the mockup
+       closely enough. Only shown once main.js detects a coarse pointer and
+       adds .mobile-layout to <body>, and only revealed once a match starts
+       (see main.js's showToolbar()).
+       Every interactive element here is an invisible hit-zone positioned in
+       % over the baked artwork (see src/style.css's .mobile-layout
+       #mobileController rules for the exact measured coordinates) — real
+       DOM so clicks/drags still work, but drawing nothing of their own.
+       #joystickRing/#joystickStick keep their original ids/drag logic from
+       src/game.js's mobile branch unchanged — #joystickStick is still
+       actually drawn, as a small overlay showing live pull direction while
+       dragging (and glowing around its own contour while aim-locked, see
+       style.css) — the D-pad itself has no interactive chevrons, aiming is
+       one continuous analog drag across the whole ring, matching the
+       mockup's static look at rest. #mcBody reparents #tbtn-play/
+       #tbtn-sweep/#tbtn-power/#tbtn-sound/#tbtn-chat/#tbtn-exit in directly
+       (see game.js) — each absolutely positioned on its own baked button,
+       no grid/flex needed now that every position is a fixed measured %. -->
+  <div id="mobileController" class="hidden" aria-hidden="true">
+    <img id="mcTopImg" alt="">
+    <div id="mcBody">
+      <img id="mcBodyImg" alt="">
+      <div id="joystickRing"><div id="joystickStick"></div></div>
+    </div>
   </div>
-  <!-- Mobile-only relocation target for the play/sweep/power toolbar buttons,
-       stacked directly under #joystick above (see src/style.css's
-       .mobile-layout rules). Starts empty — src/game.js's mobile branch
-       reparents the existing #tbtn-play/#tbtn-sweep/#tbtn-power elements
-       from #toolbar-bottom into here rather than duplicating them, since
-       #toolbar-bottom's own board-relative (cqw) positioning only works
-       while its buttons stay nested inside #stage-wrap; on desktop nothing
-       ever moves them here, so this stays empty and hidden. Starts with the
-       same `hidden` class as #toolbar-top/#toolbar-bottom (see main.js's
-       showToolbar(), which reveals all three together once a match actually
-       starts) so the relocated buttons don't show up early on mode-select. -->
-  <div id="toolbarMobile" class="hidden" aria-hidden="true"></div>
   <!-- "Rotate to landscape" intro gate, mobile-only (see main.js) — the whole
        mobile layout (right-margin joystick column) only works in landscape,
        so this is the very first thing a phone player in portrait sees,
@@ -725,7 +801,7 @@
       <div class="mode-select-scrim"></div>
       <div class="mode-drawer">
         <div class="half a" id="modeLocal">
-          <div class="tag">JOUER EN LOCAL</div>
+          <div class="tag">PASS & PLAY</div>
           <div class="sub">Les deux joueurs sur le même écran</div>
         </div>
         <div class="half b" id="modeLan">

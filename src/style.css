@@ -57,62 +57,25 @@ html, body {
   --card-left-gap: 16px;
   --right-margin: calc(100vw - var(--card-w) - var(--card-left-gap));
 
-  /* Mobile joystick column geometry (see .mobile-layout #joystick / #joystickRing
-     / #toolbarMobile further down) — hoisted to :root, not scoped to
-     #joystickRing, so #toolbarMobile can share the same numbers without
-     re-deriving them.
-     --toolbar-mobile-h: reserved height for the relocated play/sweep/power
-     pyramid stacked under the ring (52px play + 8px row-gap + 44px sweep/
-     power row + a little breathing room).
-     --joy-free-h / --joy-d-full: the ring's own box height and its "natural"
-     diameter — kept independent of --toolbar-mobile-h (the ring never
-     shrinks to make room for the toolbar; it's sized purely off the existing
-     menu/logo/connect stack, 146px, same as before #toolbarMobile existed).
-     --joy-d: the ring's actual rendered diameter — 90% of --joy-d-full (asked
-     to shrink the ring 10% while keeping its center exactly where it was).
-     --joy-center-y / --joy-shift-x are deliberately computed from
-     --joy-d-full, not --joy-d, and only the final ring rule (#joystickRing)
-     uses --joy-d for the actual width/height — that's what "locks" the
-     center: the point being centered on doesn't move just because the thing
-     rendered there got smaller. (--joy-shift-x's own MAX_DRAG safety margin,
-     see below, ends up slightly more conservative than strictly needed for
-     the smaller ring's actual radius — harmless, just unused slack.)
-     --joy-center-y / --joy-bottom-y: where the ring's own center and bottom
-     edge actually land, in viewport px from the top — reverse-engineered
-     from #joystickRing's box (top:16px, align-items:center) and its own
-     `translateY(-9%)` nudge (a % transform is relative to the element's own
-     size, hence `* var(--joy-d-full)`, matching the lock-center rationale
-     above — not the box height, and not the shrunk --joy-d). #toolbarMobile's
-     `top` is anchored off --joy-bottom-y (see its rule below) instead of a
-     fixed offset from the bottom stack, precisely because the ring is no
-     longer size-constrained by the toolbar: on a short viewport the ring can
-     render large enough to reach well past the old fixed 146px anchor, and a
-     fixed anchor would then sit the toolbar right under/inside the ring
-     instead of below it. This still isn't airtight on a viewport too short
-     for both a full-size ring AND 3 more buttons above the reserved stack —
-     on that edge case the toolbar block runs into the reserved stack instead
-     (the lesser regression, per explicit product call: ring size wins;
-     accepted as a known issue for now, see project memory).
-     --joy-shift-x: how far the ring (and the toolbar block under it) shift
-     right from centered — up to half the ring's own diameter, but never more
-     than the slack already sitting to its right minus a 12px safety margin,
-     otherwise a rightward drag would run out of screen before reaching
-     MAX_DRAG (onJoystickMove in game.js clamps pull distance to the ring's
-     own radius, so the ring needs that radius of physical room on every
-     side). Clamped to 0 (never shifts left) if a viewport is too narrow to
-     spare any slack at all. */
-  --toolbar-mobile-h: 112px;
+  /* Leftover half of what used to be the full mobile joystick column
+     geometry — the ring/toolbar-sizing half (--joy-d, --joy-center-y,
+     --joy-bottom-y, --toolbar-mobile-h) is gone now that #mobileController
+     (further down) sizes itself in plain % of its own panel instead. What's
+     left (--joy-free-h through --joy-center-right) survives purely because
+     #bg-logo/#connectBtn still align to this same horizontal line in
+     mobile (see their rules further down) — --joy-d-full's old "ring's
+     natural diameter" meaning is now just "how far right that alignment
+     line sits", kept so their positions don't jump if this ever gets
+     re-tuned. --joy-shift-x: how far right of dead-center that line sits —
+     up to half of --joy-d-full, but never more than the slack already
+     sitting to its right minus a 12px safety margin; clamped to 0 on a
+     viewport too narrow to spare any slack at all. */
   --joy-free-h: calc(100vh - 16px - 146px);
   --joy-d-full: min(calc(var(--right-margin) - 48px), calc(var(--joy-free-h) - 32px), 260px);
-  --joy-d: calc(var(--joy-d-full) * 0.9);
-  --joy-center-y: calc(16px + (var(--joy-free-h) / 2) - (0.09 * var(--joy-d-full)));
-  --joy-bottom-y: calc(var(--joy-center-y) + (var(--joy-d) / 2));
   --joy-shift-x: max(0px, min(calc(var(--joy-d-full) / 2), calc((var(--right-margin) - var(--joy-d-full)) / 2 - 12px)));
-  /* Distance from the viewport's right edge to the joystick ring's actual
-     rendered center (its container is centered in --right-margin, then
-     nudged further right by --joy-shift-x — see #joystickRing below) — so
-     #bg-logo/#connectBtn can align to the same vertical line in mobile
-     instead of the plain --right-margin/2 midpoint everyone else uses. */
+  /* Distance from the viewport's right edge to that alignment line, so
+     #bg-logo/#connectBtn can share it instead of the plain --right-margin/2
+     midpoint everyone else uses. */
   --joy-center-right: calc(var(--right-margin) / 2 - var(--joy-shift-x));
 }
 
@@ -135,14 +98,28 @@ html, body {
    large for the rink to still read as big — trading some of that box size
    back to the right column is a net win, not a shrink. */
 .mobile-layout {
-  --card-w: min(92vw, 1300px, calc(82vh * 3312 / 1896));
+  /* max(), not min(): covers the full viewport on both axes instead of
+     fitting inside it, so there's no letterboxing on either side — the
+     3312/1896 aspect ratio is kept (#game-card's own aspect-ratio below),
+     the excess is cropped by the viewport's own overflow:hidden (see
+     .mobile-layout #game-card further down, centered + overflowing instead
+     of flush-left) rather than shown as empty margin. Was min(92vw, 1300px,
+     82vh*aspect), reserving the leftover width as --right-margin for the
+     old joystick/toolbar column (#mobileController) — that column's moving
+     to its own overlay, so the reserved margin no longer applies. */
+  --card-w: max(100vw, calc(100dvh * 3312 / 1896));
   --right-margin: calc(100vw - var(--card-w) - var(--card-left-gap));
-  --joy-d-full: min(calc(var(--right-margin) - 48px), calc(var(--joy-free-h) - 32px), 260px);
-  --joy-d: calc(var(--joy-d-full) * 0.9);
-  --joy-center-y: calc(16px + (var(--joy-free-h) / 2) - (0.09 * var(--joy-d-full)));
-  --joy-bottom-y: calc(var(--joy-center-y) + (var(--joy-d) / 2));
-  --joy-shift-x: max(0px, min(calc(var(--joy-d-full) / 2), calc((var(--right-margin) - var(--joy-d-full)) / 2 - 12px)));
-  --joy-center-right: calc(var(--right-margin) / 2 - var(--joy-shift-x));
+  /* #bg-logo/#connectBtn's own alignment reference (see their rules further
+     down) — the old --joy-d-full/--joy-shift-x/--joy-center-right chain
+     this replaces computed a joystick-ring diameter/offset out of
+     --right-margin, which went negative/meaningless the moment --card-w
+     above became a full-viewport max() (no more leftover margin to size a
+     ring into). #mobileController (the actual joystick/toolbar panel now,
+     see its own rule below) sizes and positions itself directly instead —
+     `right: 7px; width: clamp(145px, 22.6vw, 222px)` — so its horizontal
+     center as a same-units `right` offset is just half that width plus the
+     7px gap. */
+  --controller-center-right: calc(7px + clamp(145px, 22.6vw, 222px) / 2);
 }
 
 #bg-logo {
@@ -248,7 +225,7 @@ html, body {
    this class on <body>): the same right-margin column, but #bg-logo/#menuBtn/
    #connectBtn are regrouped into one compact bottom-anchored stack (top to
    bottom: menu, logo, connect) instead of spanning the whole column
-   top-to-bottom — freeing the upper part of the column for #joystick below.
+   top-to-bottom — freeing the upper part of the column for #mobileController.
    #fullscreenBtn is dropped from the mobile column entirely (see main.js —
    parked alongside the rest of the mobile-fullscreen feature, hidden
    unconditionally here rather than behind that flag since there's nothing to
@@ -261,53 +238,77 @@ html, body {
    MOBILE_STACK_H (joystick's own comment below) if any of these sizes
    change. */
 .mobile-layout #fullscreenBtn { display: none; }
-/* Aligned to the joystick's own horizontal center (--joy-center-right) rather
-   than the plain right-margin midpoint, per explicit request — overlap with
-   the joystick/toolbar column is expected/acceptable for now, not fixed up
-   yet. */
-.mobile-layout #connectBtn { height: 32px; right: calc(var(--joy-center-right) - 50px); }
-.mobile-layout #bg-logo { top: auto; bottom: 54px; width: 70px; height: 36px; right: calc(var(--joy-center-right) - 35px); }
+/* Aligned to the joystick/controller panel's own horizontal center
+   (--controller-center-right) rather than the plain right-margin midpoint,
+   per explicit request — overlap with the controller is expected/acceptable
+   for now, not fixed up yet. The -50px/-35px are each element's own
+   half-width-ish nudge so its visual center (not its own right edge) lands
+   on that line — unrelated to --controller-center-right's own math. */
+.mobile-layout #connectBtn { height: 32px; right: calc(var(--controller-center-right) - 50px); }
+/* height:auto (not a fixed 36px like before) — logo v2.png's own aspect
+   ratio (557/128 ≈ 4.35) is much wider/shorter than the old logo's (≈1.96),
+   fixing both dimensions would squish it. Width kept at 70px so the mobile
+   column's horizontal footprint doesn't change. */
+.mobile-layout #bg-logo { top: auto; bottom: 54px; width: 70px; height: auto; right: calc(var(--controller-center-right) - 35px); }
 .mobile-layout #menuBtn { top: auto; bottom: 96px; width: 40px; height: 40px; }
 
-/* Virtual joystick (mobile only — see src/game.js's joystick wiring in
-   startGame() for the drag logic, this is purely the visual shell). Fills the
-   column strip freed by the bottom stack above: MOBILE_STACK_H (96px
-   menu-bottom + 40px its own height + 10px breathing room = 146px) is how
-   much of the column's bottom the stack above reserves. #toolbarMobile below
-   floats independently right above that same 146px mark instead of eating
-   into this box (see its own comment) — keeps the ring at its original full
-   size rather than shrinking it to make room. Ring is sized off both the
-   column's width and this leftover height so it stays a circle and never
-   crowds the frame (left) at any viewport size; nudged above dead-center of
-   that space per design (feels more natural under a mobile thumb than plein
-   centre), and nudged right by --joy-shift-x to rebalance the column now that
-   #toolbarMobile sits centered under it too. */
-#joystick { display: none; }
-.mobile-layout #joystick {
+/* Unified mobile controller — the validated white "remote control" mockup
+   (design/ui/ChatGPT Image 19 août 2026, 22_39_44.png), baked as real art
+   (public/ui/controller-top.webp + controller-body.webp) rather than
+   redrawn in CSS — a hand-coded glass version was tried first (see git
+   history) but couldn't match the mockup closely enough, per explicit
+   product call to prefer exact visual fidelity over a live-blurred
+   background. Replaces the old separate #joystick + #toolbarMobile pair.
+   Position/size were calibrated interactively (same drag/resize-tool
+   family as the arena-crop calibration tool) against the real
+   .mobile-layout #scene crop at a reference 852×343 viewport, then made
+   responsive via clamp() instead of kept as that tool's raw px output, so
+   it isn't pinned to one exact phone size. */
+#mobileController { display: none; }
+.mobile-layout #mobileController {
+  display: flex;
+  flex-direction: column;
+}
+.mobile-layout #mobileController:not(.hidden) {
   display: flex;
   position: fixed;
   z-index: 3;
-  top: 16px;
-  bottom: 146px;
-  right: 0;
-  width: var(--right-margin);
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
+  top: 13px;
+  right: 7px;
+  width: clamp(145px, 22.6vw, 222px);
 }
-#joystickRing {
-  width: var(--joy-d);
-  height: var(--joy-d);
-  position: relative;
+#mcTopImg, #mcBodyImg {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* #mcTopImg (L/R + chat/OFF switches) starts always visible — neither
+   switch is wired to a real function yet (see index.html's comment), and
+   which modes should hide this strip is still an open product question,
+   so nothing hides it yet. Toggle a class here (e.g. via a mode-specific
+   body/html class) once that's decided, rather than touching the markup
+   again. */
+#mcBody { position: relative; }
+
+/* #joystickRing/#joystickStick keep the exact ids src/game.js's mobile
+   branch already drags/animates. The ring itself draws nothing (the D-pad
+   art is already baked into #mcBodyImg) — it's purely an invisible
+   hit-zone, positioned/sized to the measured pixel bounds of the drawn
+   ring (left 30.7%/top 0.6%/width 38.7% of #mcBody, measured off
+   public/ui/controller-body.webp at its native 910×889). #joystickStick is
+   still a real, visible overlay — the mockup itself is a static reference
+   with no drag in progress, but the game needs live feedback of pull
+   direction while actually dragging, so it stays drawn on top of the art. */
+#mobileController #joystickRing {
+  position: absolute;
+  left: 30.7%;
+  top: 0.6%;
+  width: 38.7%;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
-  background: rgba(20,56,68,0.55);
-  border: 2px solid rgba(159,184,188,0.5);
-  /* translateY was `-9%` (relative to the ring's own size) before the ring
-     could shrink independently of its center — now a fixed px amount off
-     --joy-d-full so a smaller --joy-d doesn't also shrink this nudge and
-     drift the center down (see --joy-center-y's own comment, :root above,
-     for why this has to match that calc exactly). */
-  transform: translateY(calc(-0.09 * var(--joy-d-full))) translateX(var(--joy-shift-x));
   pointer-events: auto;
   touch-action: none;
 }
@@ -315,94 +316,53 @@ html, body {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 42%;
-  height: 42%;
+  width: 34%;
+  height: 34%;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 32%, rgba(238,246,244,0.95), rgba(159,184,188,0.4) 68%, rgba(20,56,68,0.25) 100%);
-  box-shadow: 0 4px 10px -2px rgba(0,0,0,0.5);
+  background: radial-gradient(circle at 35% 32%, #7b8794, #3f4553);
+  box-shadow: 0 3px 8px -2px rgba(0,0,0,0.45);
   transform: translate(-50%, -50%);
-  transition: transform .15s ease-out;
+  transition: transform .15s ease-out, box-shadow .2s ease-out;
 }
 #joystickStick.dragging { transition: none; }
-/* Aim-lock indicator (see JOYSTICK_LOCK_MS in src/game.js's onJoystickMove):
-   a small dot on the ring's own contour, top-center, dark/invisible until
-   #joystickRing.locked lights it up with the accent gold + a slow pulse —
-   the player's cue that the stick has frozen and a deliberate held push is
-   now needed to regain aim control. */
-#joystickLockDot {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  width: calc(var(--joy-d) * 0.09);
-  height: calc(var(--joy-d) * 0.09);
-  border-radius: 50%;
-  background: var(--accent);
-  transform: translate(-50%, -50%);
-  opacity: 0;
-  box-shadow: 0 0 0 rgba(255,209,102,0);
-  transition: opacity .2s ease-out;
-}
-#joystickRing.locked #joystickLockDot {
-  opacity: 1;
+/* Aim-lock (see JOYSTICK_LOCK_MS in src/game.js's onJoystickMove): the
+   stick's own contour glows accent gold + slow-pulses while
+   #joystickRing.locked — the player's cue that the stick has frozen and a
+   deliberate held push is now needed to regain aim control. Was a separate
+   small dot pinned to the ring's rim; moved onto the stick itself (as an
+   added glow layered on top of its existing depth shadow, not a
+   replacement) per explicit request — lights up the thing that's actually
+   frozen instead of a nearby indicator. */
+#joystickRing.locked #joystickStick {
   animation: joyLockPulse 1.6s ease-in-out infinite;
 }
 @keyframes joyLockPulse {
-  0%, 100% { box-shadow: 0 0 4px 1px rgba(255,209,102,0.5); }
-  50% { box-shadow: 0 0 9px 3px rgba(255,209,102,0.95); }
+  0%, 100% { box-shadow: 0 3px 8px -2px rgba(0,0,0,0.45), 0 0 6px 2px rgba(255,209,102,0.6); }
+  50% { box-shadow: 0 3px 8px -2px rgba(0,0,0,0.45), 0 0 13px 4px rgba(255,209,102,0.95); }
 }
 
-/* Relocation target for #tbtn-play/#tbtn-sweep/#tbtn-power (mobile only — see
-   src/game.js's mobile branch, which reparents those existing buttons here
-   instead of duplicating them, and index.html's comment on this div for why:
-   #toolbar-bottom's cqw sizing only works nested inside #stage-wrap, which is
-   `transform`ed and so traps `position: fixed` descendants inside its own
-   box instead of the viewport — moving the buttons' actual DOM parent is what
-   lets them anchor to this column like #joystick does). Sits directly under
-   the ring, in the same right-margin column, sharing its --joy-shift-x
-   horizontal offset so the pyramid stays centered under it: play on its own
-   row, sweep+power side by side below — via grid-area, not DOM order, so
-   #toolbar-bottom's own sweep/play/power source order (desktop) doesn't need
-   to change. justify-content: center is load-bearing, not decorative: Grid's
-   default justify-content computes to stretch, which would otherwise grow
-   the two `auto` columns to fill the whole --right-margin width and blow
-   sweep/power apart to opposite edges instead of packing them tight under
-   play. Positioned via `top: --joy-bottom-y + gap` (see :root above) rather
-   than anchored off the bottom stack, because the ring is intentionally NOT
-   sized to leave room for this block (kept at its original full size) — an
-   anchor fixed to the bottom would sit static while the ring's actual
-   rendered bottom edge moves with viewport size, overlapping it on shorter
-   screens. This computed anchor tracks the ring instead, so the two clear
-   each other by construction; the tradeoff (see :root comment) is that on a
-   viewport too short for both, this block runs into the reserved stack below
-   it rather than the ring shrinking. */
-#toolbarMobile { display: none; }
-/* display swapped in via a separate :not(.hidden)-gated rule (same specificity
-   trick as the `.hidden` toggle elsewhere) so main.js's showToolbar() —
-   which un-hides this alongside #toolbar-top/#toolbar-bottom, see there —
-   still wins over this unconditional positioning rule while a match hasn't
-   started yet. */
-.mobile-layout #toolbarMobile {
-  position: fixed;
-  z-index: 3;
-  right: 0;
-  top: calc(var(--joy-bottom-y) + 14px);
-  width: var(--right-margin);
-  height: var(--toolbar-mobile-h);
-  grid-template-columns: repeat(2, auto);
-  grid-template-areas: "play play" "sweep power";
-  justify-content: center;
-  justify-items: center;
-  align-content: center;
-  row-gap: 8px;
-  column-gap: 10px;
-  transform: translateX(var(--joy-shift-x));
-  pointer-events: none;
+/* play/sweep/power/chat/sound/exit — reparented in from #toolbar-bottom/
+   #toolbar-top (see src/game.js's mobile branch) straight into #mcBody,
+   each an invisible hit-zone over its own baked button in #mcBodyImg — no
+   grid/flex grouping needed now that every position is a fixed measured %
+   (same measurement method as #joystickRing above). sound/chat/exit
+   previously never got any mobile reparenting at all and stayed trapped
+   inside #toolbar-top (nested in the ~2.05x-zoomed canvas box) —
+   unreachable on mobile, since the .mobile-layout #scene crop pans their
+   baked positions out of the visible viewport entirely. */
+#mobileController .tbtn-base,
+#mobileController .tbtn-cap { display: none; }
+#mobileController .tbtn {
+  position: absolute;
+  background: transparent;
+  border: none;
 }
-.mobile-layout #toolbarMobile:not(.hidden) { display: grid; }
-.mobile-layout #toolbarMobile .tbtn { pointer-events: auto; }
-.mobile-layout #tbtn-play { grid-area: play; width: 52px; }
-.mobile-layout #tbtn-sweep { grid-area: sweep; width: 44px; }
-.mobile-layout #tbtn-power { grid-area: power; width: 44px; }
+#mobileController #tbtn-play  { left: 38.7%; top: 42.3%; width: 22.7%; }
+#mobileController #tbtn-sweep { left: 22.5%; top: 61.6%; width: 15.2%; }
+#mobileController #tbtn-power { left: 61.9%; top: 61.6%; width: 15.2%; }
+#mobileController #tbtn-chat  { left: 3.2%;  top: 82.7%; width: 29.5%; height: 17.1%; aspect-ratio: unset; }
+#mobileController #tbtn-sound { left: 34.9%; top: 82.7%; width: 29.5%; height: 17.1%; aspect-ratio: unset; }
+#mobileController #tbtn-exit  { left: 66.5%; top: 82.7%; width: 29.5%; height: 17.1%; aspect-ratio: unset; }
 /* #toolbar-bottom itself stays mounted in #stage-wrap on mobile (its buttons
    are the ones that move, not the container) — hidden rather than left as an
    empty box, since an empty flex container with no children still occupies
@@ -502,6 +462,15 @@ html, body {
   background: #060716;
   box-shadow: 0 30px 80px -30px rgba(0,0,0,0.6);
 }
+/* Mobile: --card-w now covers the full viewport (see .mobile-layout's own
+   --card-w above) instead of fitting inside it with room to spare on the
+   right for the old joystick column — centered on both axes so the excess
+   overflows evenly off all 4 edges instead of just the right, clipped by
+   the viewport's own overflow:hidden (html/body, top of this file). */
+.mobile-layout #game-card {
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
 
 /* Zooms the whole scene (constellation + forest + board) in together,
    uniformly, so the board reads bigger inside the card without the
@@ -530,22 +499,24 @@ html, body {
   transform-origin: center;
 }
 /* Mobile-only: zoom in tighter on the gameplay, less surrounding forest —
-   card size itself is untouched, only what's rendered inside it. Was anchored
-   "center top" to protect a scoreboard plank that lived near the canvas's top
-   edge in the old V1 art; the V2 art has no plank at all (score is baked
-   "under the ice" near the field's own bottom half — see UNDERICE_SCORE_CY in
-   game.js, ~1158 of the 1896-tall canvas), so that constraint no longer
-   applies. The playing field (FX0..FY1 in game.js) sits close to dead-center
-   of the full 3312x1896 canvas either way, so a plain center-anchored zoom
-   crops forest evenly from all 4 sides instead of leaving the top's forest
-   band untouched while over-cropping the bottom — a straight improvement now
-   that nothing near the top edge needs protecting. Bumped from 1.75 per
-   feedback ("le terrain a l'air trop petit" on a real phone) — checked
-   against FX0/FY0/FX1/FY1's margin to the visible slice at this scale before
-   landing on 2.05, see the note above those constants in game.js. */
+   card size itself is untouched, only what's rendered inside it. Was a plain
+   centered crop (scale(2.3), transform-origin:center) through several rounds
+   of tuning (1.75 -> 2.05 -> 2.3, see git history for that reasoning) aimed
+   at pushing the 5 baked HUD rocks (ROCK_ZONES in game.js — redundant on
+   mobile, their functions live on the joystick/toolbar column) out of the
+   visible crop without clipping the wood frame. A center-anchored crop can't
+   do both at once as tightly as an off-center one: the rocks cluster toward
+   the top/left of the ice (see ROCK_ZONES), so biasing the crop's origin
+   toward that same corner clears them at a noticeably lower scale than
+   pushing the crop out symmetrically in every direction. Landed on these
+   exact numbers interactively — a standalone full-bleed drag/pinch tool
+   (built against a static export of frame.webp, mirroring this exact
+   transform-origin/scale mechanism, with the ROCK_ZONES/FX0..FY1 rects
+   overlaid live) rather than guessing values and reloading on a phone each
+   time. */
 .mobile-layout #scene {
-  transform: scale(2.05);
-  transform-origin: center;
+  transform-origin: 72.5% 51.0%;
+  transform: scale(1.627);
 }
 /* #stage-wrap (canvas only — see the `mobile` branch in game.js's
    startGame(), which moves it here from its normal home inside #app) is
@@ -562,26 +533,39 @@ html, body {
    raster image, and everything about how big they read on screen is
    already tuned around the transform above) are staying on it unchanged —
    only the arena art itself needed this.
-   calc(205% - 41px) replicates the old 2.05x zoom of #app's own content
-   box: #app has 10px padding on each side (width:100% resolves to
-   game-card's width minus 20px pre-zoom), so ×2.05 = 205% of game-card's
-   width minus 41px. translate(-50%,-50%) is a pure translation (no
-   resampling, unlike scale) anchored the same way transform-origin:center
-   above anchors the rest of the scene. Height is deliberately not set —
-   the canvas inside keeps its own width:100%;height:auto intrinsic ratio
-   (3312/1896, matching #game-card's own locked aspect-ratio), so it
-   already comes out close to a symmetric crop without needing a second
-   real-size axis. */
+   Was calc(205% - 41px) width + centered translate, a hand-computed mirror
+   of #scene's OLD mobile zoom (2.05x) from when #game-card itself was a
+   letterboxed min()-based box narrower than the viewport, so the canvas
+   needed its own oversized/cropped positioning to read as "zoomed in"
+   despite the smaller card. #game-card now covers the full viewport by
+   itself (max(100vw, 100dvh*aspect), see .mobile-layout above) and locks
+   the same 3312/1896 aspect ratio, so the canvas crop below is expressed
+   directly as a real (non-transform, stays sharp) box, no #scene involved.
+   left/top/width are the real-size-box equivalent of the CSS
+   transform-origin/scale pair in the `.mobile-layout #scene` rule above
+   (kept in sync there too, as a readable record of the intended crop, even
+   though #scene itself isn't what's on screen here — see that rule's own
+   values, tuned with the standalone positioning tool) — for an element
+   scaled by s about origin (ox,oy), the same visual result comes from a
+   real box of width/height = s×100%, positioned at left = ox×(1−s)×100%,
+   top = oy×(1−s)×100% (derive by equating a content point's screen
+   position under both approaches; sanity check: ox=oy=0.5,s=2 gives
+   left=top=-50%,width=200%, the classic centered-2x pattern this
+   replaces). Height isn't set — #game-card's own aspect-ratio matches the
+   canvas's intrinsic one, so height falls out of width automatically.
+   (This exact math was tried once before and reverted when full-width
+   bars seemed to persist regardless — that turned out to be the missing
+   `viewport-fit=cover` in index.html's meta viewport, unrelated to this
+   element; see conversation. Safe to reapply now that's fixed.) */
 /* #stage-wrap.stage-wrap-detached (ID + class), not .mobile-layout
    .stage-wrap-detached — the plain #stage-wrap rule above already sets
-   position/width with ID specificity, which beats a 2-class selector and
-   silently no-ops position:absolute/width here otherwise. */
+   position with ID specificity, which beats a 2-class selector and
+   silently no-ops position:absolute here otherwise. */
 .mobile-layout #stage-wrap.stage-wrap-detached {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: calc(205% - 41px);
-  transform: translate(-50%, -50%);
+  left: -45.46%;
+  top: -31.98%;
+  width: 162.7%;
   z-index: 0;
 }
 
@@ -783,7 +767,11 @@ button:disabled { opacity: 0.35; cursor: default; }
   pointer-events: none;
 }
 #toolbar-top .tbtn, #toolbar-top .tbtn-group { pointer-events: auto; }
-#tbtn-sound {
+/* Scoped to #toolbar-top (not a bare #tbtn-sound rule) — on mobile this
+   button gets reparented into #mcBody (see game.js's mobile branch), and
+   an unscoped position:absolute here would follow it there and fight with
+   the absolute-positioning rule that places it on the panel art instead. */
+#toolbar-top #tbtn-sound {
   position: absolute;
   left: 23.96%;
   top: 14.7%;
