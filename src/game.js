@@ -827,7 +827,7 @@ export function startGame(opts = {}) {
   function completeHandoff() {
     if (phase === 'handoffA') {
       phase = 'aimA';
-      if (!handoff.skipWhistle) audio.play('whistle', { volume: 0.6 });
+      if (!handoff.skipWhistle) audio.play('whistle', { volume: 0.78 }); // was 0.6, +30%
     } else if (phase === 'handoffB') {
       phase = 'aimB';
     } else if (phase === 'handoffWatch') {
@@ -1013,7 +1013,7 @@ export function startGame(opts = {}) {
     // Whistle cues every turn timer about to start, except the match's very
     // first one — that moment already has its own "match start" SFX (see
     // beginMatchIntro) and doesn't need a second cue stacked on top.
-    if (!fromMatchIntro) audio.play('whistle', { volume: 0.6 });
+    if (!fromMatchIntro) audio.play('whistle', { volume: 0.78 }); // was 0.6, +30%
     phase = firstAimPhase();
     // Reset the turn timer right here instead of waiting for loop()'s own
     // "phase !== turnTimerPhase" catch-up (further below): beginMatchIntro
@@ -1409,6 +1409,7 @@ export function startGame(opts = {}) {
     if (handoff) {
       if (handoff.stage === 'shown') {
         evt.preventDefault();
+        audio.play('button'); // same UI click cue as the PLAY rock (see triggerPlay)
         handoff.stage = 'out';
         handoff.stageStart = performance.now();
       }
@@ -1586,7 +1587,7 @@ export function startGame(opts = {}) {
     // inside the ring). The player can keep pulling well past the ring's
     // edge — the puck itself stops moving, but the shot keeps gaining power
     // until powerR, exactly like the old, physically bigger ring did.
-    const JOYSTICK_POWER_RADIUS_MULT = 3;
+    const JOYSTICK_POWER_RADIUS_MULT = 2;
     function joystickClientPos(evt) {
       const t = evt.touches ? (evt.touches[0] || evt.changedTouches[0]) : evt;
       return { x: t.clientX, y: t.clientY };
@@ -1624,6 +1625,11 @@ export function startGame(opts = {}) {
       joystickDrag.lockTimer = null;
       joystickDrag.lockPos = joystickDrag.lastPos || joystickDrag.anchorPos;
       joystickRing.classList.add('locked');
+      // Same clip as any wall/bar contact (reflectOffBar uses this too) —
+      // reused here as a "click" cue for the lock engaging, at a fixed
+      // moderate-hit reference volume since there's no real impact energy
+      // to derive it from.
+      audio.play('hitWall', { volume: IMPACT_VOLUME_TRIM * 0.8 * GOLF_LAYER_TRIM });
     }
     function disengageJoystickLock() {
       if (!joystickDrag || !joystickDrag.locked) return;
@@ -2247,10 +2253,10 @@ export function startGame(opts = {}) {
   // Volume rides a sqrt(t) curve rather than linear t — linear made hard hits
   // slam up to full volume far too fast/loud, sqrt compresses the top of the
   // range while still keeping soft/medium hits clearly differentiated.
-  // IMPACT_VOLUME_TRIM: -6dB, then another -5dB, then +10dB — net ~-1dB
-  // under the original unity level.
+  // IMPACT_VOLUME_TRIM: -6dB, then another -5dB, then +10dB, then +30% —
+  // net a bit above the original unity level.
   const MIN_AUDIBLE_IMPACT = 0.06; // below this, jitter during settling would spam near-silent plays
-  const IMPACT_VOLUME_TRIM = 0.885; // was 0.28, +10dB
+  const IMPACT_VOLUME_TRIM = 1.1505; // was 0.885, +30%
   const GOLF_LAYER_TRIM = 0.2; // -8dB, then another -6dB (-14dB total), testing the golf-layer impact clips
   // Partial stereo pan from the impact's x position on the board — PAN_MAX
   // caps it well short of a hard left/right pan (a stone hitting the far
@@ -5149,13 +5155,16 @@ export function startGame(opts = {}) {
     // arbiter-side timer) — see "timer nimball" design note. Solo vs IA: same
     // 30s cap on the human's own turn (aiTeam's shots are already decided in
     // prepareAiShots(), so only the human side can ever be the one stalling).
-    // Local pass-and-play has no cap — both players are already looking at
-    // the same screen, so there's no "someone might not be paying attention"
-    // case to guard against. A stone whose drag hasn't been released yet
-    // still has pendingVx/Vy reset to 0 from onPointerDown, so cancelling the
-    // in-flight drag and reusing the normal PLAY submission path naturally
-    // sends "no shot" for it.
-    if (((net && phase === 'lanAim') || (aiTeam && phase === 'aimA')) && turnTimerProgress() >= 1) {
+    // Pass & Play now caps too (per feedback): with the hand-off mask up
+    // between turns, the team whose turn it is may not even be holding the
+    // device yet when their aim phase actually starts, so the same "someone
+    // might not be paying attention" case applies. A stone whose drag hasn't
+    // been released yet still has pendingVx/Vy reset to 0 from onPointerDown,
+    // so cancelling the in-flight drag and reusing the normal PLAY submission
+    // path naturally sends "no shot" for it — and for Pass & Play that submit
+    // itself starts the next hand-off mask (handoffB/handoffWatch), same as a
+    // real tap on PLAY would.
+    if (((net && phase === 'lanAim') || (aiTeam && phase === 'aimA') || (!net && !aiTeam && (phase === 'aimA' || phase === 'aimB'))) && turnTimerProgress() >= 1) {
       if (drag && !mobile) document.body.style.cursor = '';
       drag = null;
       onValidate();
