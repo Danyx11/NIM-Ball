@@ -116,10 +116,10 @@ html, body {
      above became a full-viewport max() (no more leftover margin to size a
      ring into). #mobileController (the actual joystick/toolbar panel now,
      see its own rule below) sizes and positions itself directly instead —
-     `right: 7px; width: clamp(145px, 22.6vw, 222px)` — so its horizontal
+     `right: 36px; width: clamp(147px, 23vw, 225px)` — so its horizontal
      center as a same-units `right` offset is just half that width plus the
-     7px gap. */
-  --controller-center-right: calc(7px + clamp(145px, 22.6vw, 222px) / 2);
+     36px gap. */
+  --controller-center-right: calc(36px + clamp(147px, 23vw, 225px) / 2);
 }
 
 #bg-logo {
@@ -137,9 +137,8 @@ html, body {
   height: auto;
 }
 
-/* Wallet-connect CTA, shares the right-margin column with #bg-logo (top) and
-   the reserved menu/fullscreen slots (stacked under the logo), but anchored
-   to the bottom of that column instead. Nimiq's own light-blue brand color
+/* Wallet-connect CTA, shares the right-margin column with #bg-logo (top),
+   anchored to the bottom of that column. Nimiq's own light-blue brand color
    (#0582CA, the color their Wallet/Hub use for login/connect actions) rather
    than a team color, since this isn't team-specific — Mulish to match the
    rest of the Nimiq-branded chrome (see game.js's SCORE_FONT). */
@@ -167,90 +166,37 @@ html, body {
 }
 .nq-connect-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px -6px rgba(5,130,202,0.7); }
 
-/* Reserved, inactive slots in the same right-margin column as #bg-logo,
-   stacked directly under it — menu and fullscreen toggle aren't built yet,
-   this just holds their spot in the layout (see index.html). Muted/dashed
-   styling (vs. #connectBtn's solid blue) signals "reserved" rather than live. */
-.reserved-slot {
-  position: fixed;
-  z-index: 2;
-  right: calc(var(--right-margin) / 2 - 22px);
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed rgba(159,184,188,0.4);
-  border-radius: 50%;
-  background: rgba(20,56,68,0.4);
-  color: var(--ink-dim);
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-.reserved-slot svg { width: 20px; height: 20px; }
-#menuBtn { top: 116px; }
-
-/* Real, active counterpart to .reserved-slot above — same slot shape/size,
-   but solid border + full opacity + pointer cursor signal "live" instead of
-   "reserved". Currently just #fullscreenBtn (see src/main.js for the toggle
-   logic); menuBtn stays a .reserved-slot until the menu itself is built. */
-.icon-btn {
-  position: fixed;
-  /* Above other z-index:3 elements sharing this right-hand column, which at
-     some viewport widths physically overlap this button's slot; without
-     this it's rendered but unclickable. */
-  z-index: 4;
-  right: calc(var(--right-margin) / 2 - 22px);
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(159,184,188,0.5);
-  border-radius: 50%;
-  background: rgba(20,56,68,0.55);
-  color: var(--ink);
-  cursor: pointer;
-  transition: transform .12s ease, background .12s ease;
-}
-.icon-btn:hover { transform: translateY(-1px); background: rgba(20,56,68,0.8); }
-.icon-btn:active { transform: translateY(0); }
-.icon-btn svg, .icon-btn img { width: 20px; height: 20px; }
-#fullscreenBtn { top: 170px; }
 .nq-connect-btn:active { transform: translateY(0); }
 .nq-connect-btn.connected { background: #1F2348; }
 .nq-connect-icon { width: 12px; height: 12px; flex: none; }
 
 /* Mobile layout (see src/main.js's coarse-pointer detection, which toggles
-   this class on <body>): the same right-margin column, but #bg-logo/#menuBtn/
+   this class on <body>): the same right-margin column, but #bg-logo/
    #connectBtn are regrouped into one compact bottom-anchored stack (top to
-   bottom: menu, logo, connect) instead of spanning the whole column
-   top-to-bottom — freeing the upper part of the column for #mobileController.
-   #fullscreenBtn is dropped from the mobile column entirely (see main.js —
-   parked alongside the rest of the mobile-fullscreen feature, hidden
-   unconditionally here rather than behind that flag since there's nothing to
-   toggle back on without also flipping IOS_FULLSCREEN_FIX_ENABLED). Sized
-   down from desktop dimensions (44px icon slots, 170px logo) and tightly
-   gapped (6px) since landscape phone viewports are short on vertical room
-   and the joystick — explicitly asked to be sized as big as this layout
-   allows — competes with this stack for the same column. Each offset is
-   hand-stacked off the one below it (own height + 6px gap); bump
-   MOBILE_STACK_H (joystick's own comment below) if any of these sizes
-   change. */
-.mobile-layout #fullscreenBtn { display: none; }
-/* Aligned to the joystick/controller panel's own horizontal center
-   (--controller-center-right) rather than the plain right-margin midpoint,
-   per explicit request — overlap with the controller is expected/acceptable
-   for now, not fixed up yet. The -50px/-35px are each element's own
-   half-width-ish nudge so its visual center (not its own right edge) lands
-   on that line — unrelated to --controller-center-right's own math. */
-.mobile-layout #connectBtn { height: 32px; right: calc(var(--controller-center-right) - 50px); }
+   bottom: logo, connect) instead of spanning the whole column top-to-bottom —
+   freeing the upper part of the column for #mobileController. Sized down
+   from desktop dimensions (170px logo) and tightly gapped (6px) since
+   landscape phone viewports are short on vertical room and the joystick —
+   explicitly asked to be sized as big as this layout allows — competes with
+   this stack for the same column. Each offset is hand-stacked off the one
+   below it (own height + 6px gap); bump MOBILE_STACK_H (joystick's own
+   comment below) if any of these sizes change. */
+/* Aligned to the joystick ring's own horizontal center
+   (--controller-center-right, which lands within half a percent of the
+   ring's actual center — see #joystickRing's own left/width — close enough
+   to use directly) rather than the plain right-margin midpoint, per
+   explicit request — overlap with the controller is expected/acceptable
+   for now, not fixed up yet. -58px is #connectBtn's own actual measured
+   half-width (116px rendered, confirmed via getBoundingClientRect — not a
+   guess like the old -50px, which was ~8px off and visibly
+   off-center from the stick). -35px (bg-logo below) is still an
+   approximation, not yet re-measured the same way. */
+.mobile-layout #connectBtn { height: 32px; right: calc(var(--controller-center-right) - 58px); }
 /* height:auto (not a fixed 36px like before) — logo v2.png's own aspect
    ratio (557/128 ≈ 4.35) is much wider/shorter than the old logo's (≈1.96),
    fixing both dimensions would squish it. Width kept at 70px so the mobile
    column's horizontal footprint doesn't change. */
 .mobile-layout #bg-logo { top: auto; bottom: 54px; width: 70px; height: auto; right: calc(var(--controller-center-right) - 35px); }
-.mobile-layout #menuBtn { top: auto; bottom: 96px; width: 40px; height: 40px; }
 
 /* Unified mobile controller — the validated white "remote control" mockup
    (design/ui/ChatGPT Image 19 août 2026, 22_39_44.png), baked as real art
@@ -273,9 +219,9 @@ html, body {
   display: flex;
   position: fixed;
   z-index: 3;
-  top: 13px;
-  right: 7px;
-  width: clamp(145px, 22.6vw, 222px);
+  top: 24px;
+  right: 36px;
+  width: clamp(147px, 23vw, 225px);
 }
 #mcTopImg, #mcBodyImg {
   display: block;
@@ -297,20 +243,22 @@ html, body {
    branch already drags/animates. The ring itself draws nothing (the D-pad
    art is already baked into #mcBodyImg) — it's purely an invisible
    hit-zone, positioned/sized to the measured pixel bounds of the drawn
-   ring (left 30.7%/top 0.6%/width 38.7% of #mcBody, measured off
-   public/ui/controller-body.webp at its native 910×889). #joystickStick is
-   still a real, visible overlay — the mockup itself is a static reference
-   with no drag in progress, but the game needs live feedback of pull
-   direction while actually dragging, so it stays drawn on top of the art. */
+   ring (left 22.85%/top 0.92%/width 54.09% of #mcBody, measured off
+   public/ui/controller-body.webp at its native 930×1092 — the "V2" edit of
+   the mockup, design/ui/control section V2.png). #joystickStick is still a
+   real, visible overlay — the mockup itself is a static reference with no
+   drag in progress, but the game needs live feedback of pull direction
+   while actually dragging, so it stays drawn on top of the art. */
 #mobileController #joystickRing {
   position: absolute;
-  left: 30.7%;
-  top: 0.6%;
-  width: 38.7%;
+  left: 22.85%;
+  top: 0.92%;
+  width: 54.09%;
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   pointer-events: auto;
   touch-action: none;
+  transition: box-shadow .2s ease-out;
 }
 #joystickStick {
   position: absolute;
@@ -322,23 +270,21 @@ html, body {
   background: radial-gradient(circle at 35% 32%, #7b8794, #3f4553);
   box-shadow: 0 3px 8px -2px rgba(0,0,0,0.45);
   transform: translate(-50%, -50%);
-  transition: transform .15s ease-out, box-shadow .2s ease-out;
+  transition: transform .15s ease-out;
 }
 #joystickStick.dragging { transition: none; }
 /* Aim-lock (see JOYSTICK_LOCK_MS in src/game.js's onJoystickMove): the
-   stick's own contour glows accent gold + slow-pulses while
-   #joystickRing.locked — the player's cue that the stick has frozen and a
-   deliberate held push is now needed to regain aim control. Was a separate
-   small dot pinned to the ring's rim; moved onto the stick itself (as an
-   added glow layered on top of its existing depth shadow, not a
-   replacement) per explicit request — lights up the thing that's actually
-   frozen instead of a nearby indicator. */
-#joystickRing.locked #joystickStick {
+   whole D-pad ring's own contour (not the small stick) glows accent gold +
+   slow-pulses while #joystickRing.locked — the player's cue that the aim
+   has frozen and a deliberate held push is now needed to regain control.
+   Was a separate small dot pinned to the ring's rim, briefly tried on the
+   stick itself, landed here per explicit request. */
+#joystickRing.locked {
   animation: joyLockPulse 1.6s ease-in-out infinite;
 }
 @keyframes joyLockPulse {
-  0%, 100% { box-shadow: 0 3px 8px -2px rgba(0,0,0,0.45), 0 0 6px 2px rgba(255,209,102,0.6); }
-  50% { box-shadow: 0 3px 8px -2px rgba(0,0,0,0.45), 0 0 13px 4px rgba(255,209,102,0.95); }
+  0%, 100% { box-shadow: 0 0 6px 2px rgba(255,209,102,0.6); }
+  50% { box-shadow: 0 0 14px 5px rgba(255,209,102,0.95); }
 }
 
 /* play/sweep/power/chat/sound/exit — reparented in from #toolbar-bottom/
@@ -357,12 +303,12 @@ html, body {
   background: transparent;
   border: none;
 }
-#mobileController #tbtn-play  { left: 38.7%; top: 42.3%; width: 22.7%; }
-#mobileController #tbtn-sweep { left: 22.5%; top: 61.6%; width: 15.2%; }
-#mobileController #tbtn-power { left: 61.9%; top: 61.6%; width: 15.2%; }
-#mobileController #tbtn-chat  { left: 3.2%;  top: 82.7%; width: 29.5%; height: 17.1%; aspect-ratio: unset; }
-#mobileController #tbtn-sound { left: 34.9%; top: 82.7%; width: 29.5%; height: 17.1%; aspect-ratio: unset; }
-#mobileController #tbtn-exit  { left: 66.5%; top: 82.7%; width: 29.5%; height: 17.1%; aspect-ratio: unset; }
+#mobileController #tbtn-play  { left: 39.08%; top: 50.37%; width: 21.51%; }
+#mobileController #tbtn-sweep { left: 23.06%; top: 66.12%; width: 14.84%; }
+#mobileController #tbtn-power { left: 61.61%; top: 66.12%; width: 14.84%; }
+#mobileController #tbtn-chat  { left: 4.09%;  top: 82.87%; width: 30.43%; height: 17.12%; aspect-ratio: unset; }
+#mobileController #tbtn-sound { left: 34.52%; top: 82.87%; width: 30.43%; height: 17.12%; aspect-ratio: unset; }
+#mobileController #tbtn-exit  { left: 64.95%; top: 82.87%; width: 30.43%; height: 17.12%; aspect-ratio: unset; }
 /* #toolbar-bottom itself stays mounted in #stage-wrap on mobile (its buttons
    are the ones that move, not the container) — hidden rather than left as an
    empty box, since an empty flex container with no children still occupies
