@@ -166,7 +166,13 @@ export function startGame(opts = {}) {
   // eco felt enough better that there was no reason to keep the heavier path
   // around as a live option — but if it's ever wanted back, that's the full
   // list of what it touched.
-  const dpr = Math.min(window.devicePixelRatio || 1, mobile ? 2 : 1.3); // perf test: was 2, see perf audit
+  // TEST (see mobile aim-laser lag conversation): mobile cap dropped from 2
+  // to 1.3, matching desktop, to check whether the smoothed aim laser
+  // (smoothLaserAim, frame-based not time-based) catches up faster once
+  // mobile has fewer pixels to redraw per frame. Softer on mobile's bigger
+  // CSS box than the reasoning above originally called for — revert to
+  // `mobile ? 2 : 1.3` if the crispness loss isn't worth it.
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.3);
   canvas.width = W * dpr;
   canvas.height = H * dpr;
   ctx.scale(dpr, dpr);
@@ -1587,7 +1593,7 @@ export function startGame(opts = {}) {
     // inside the ring). The player can keep pulling well past the ring's
     // edge — the puck itself stops moving, but the shot keeps gaining power
     // until powerR, exactly like the old, physically bigger ring did.
-    const JOYSTICK_POWER_RADIUS_MULT = 2;
+    const JOYSTICK_POWER_RADIUS_MULT = 2.3;
     function joystickClientPos(evt) {
       const t = evt.touches ? (evt.touches[0] || evt.changedTouches[0]) : evt;
       return { x: t.clientX, y: t.clientY };
