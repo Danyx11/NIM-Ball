@@ -1593,7 +1593,7 @@ export function startGame(opts = {}) {
     // inside the ring). The player can keep pulling well past the ring's
     // edge — the puck itself stops moving, but the shot keeps gaining power
     // until powerR, exactly like the old, physically bigger ring did.
-    const JOYSTICK_POWER_RADIUS_MULT = 2.3;
+    const JOYSTICK_POWER_RADIUS_MULT = 1.9;
     function joystickClientPos(evt) {
       const t = evt.touches ? (evt.touches[0] || evt.changedTouches[0]) : evt;
       return { x: t.clientX, y: t.clientY };
