@@ -1,9 +1,9 @@
 import './style.css';
 // Nimiq's brand typeface (nimiq-style design system) — used for the score digits.
 import '@fontsource/mulish/800.css';
-import { startGame } from './game.js';
+import { startGame, preloadCoreAssets } from './game.js';
 import { connectNimiq, chooseAddress, getStoredAddress } from './nimiq.js';
-import { initBackground } from './background.js';
+import { initBackground, preloadBackgroundAssets } from './background.js';
 import { connectLan, connectMatch } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
@@ -14,15 +14,16 @@ const ASSET_BASE = import.meta.env.BASE_URL;
 // Branded loading screen (index.html's #loadingOverlay, self-contained/
 // inline there since it must render before this module's own CSS/JS have
 // finished downloading — see the comment above it). Visible by default in
-// the raw HTML; dismissed here as the first thing this module does since by
-// this point style.css is already applied (static imports resolve before
-// any other top-level code runs) and the real UI is ready to paint. Reused
-// below (showLoadingOverlay/hideLoadingOverlay) for the LAN/match connection
-// wait and the replay-ticket decode wait.
+// the raw HTML; stays up (see the preloadCoreAssets()/preloadBackgroundAssets()
+// await further down) until every image the home/mode-select screens and the
+// very first match frame need has actually finished loading, instead of
+// dismissing on a timer/immediately and letting those screens paint with
+// sprites still mid-download. Reused below (showLoadingOverlay/
+// hideLoadingOverlay) for the LAN/match connection wait and the
+// replay-ticket decode wait.
 const loadingOverlay = document.getElementById('loadingOverlay');
 function showLoadingOverlay() { loadingOverlay.classList.remove('hidden'); }
 function hideLoadingOverlay() { loadingOverlay.classList.add('hidden'); }
-hideLoadingOverlay();
 
 // PWA offline shell (public/sw.js, public/manifest.json) — production only:
 // registering it during `npm run dev` would let it start intercepting fetch
@@ -89,33 +90,66 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
 // this relies on and why: CSS `transform: scale()` rasterizes a layer at
 // ~its pre-transform size and blows that bitmap up for display, reading as
 // soft on mobile GPUs no matter how high-res the canvas backing buffer is).
-// #overlay, #modeOverlay, #replayUploadOverlay and #replayBar also live
-// inside #stage-wrap in the markup (index.html) but don't want the canvas's
-// own ~205%-zoomed real size — they're plain edge/corner-anchored panels
-// (e.g. #modeOverlay's right-docked drawer) meant to fill #game-card at its
+// #overlay, #modeOverlay, #replayUploadOverlay, #replayBar and #syncToast
+// also live inside #stage-wrap in the markup (index.html) but don't want the
+// canvas's own zoomed real size — they're plain edge/corner-anchored panels
+// (e.g. #modeOverlay's right-docked drawer, #replayBar's bottom transport
+// pill, #syncToast's top-centered pill) meant to fill #game-card at its
 // true, un-zoomed size, not get stretched into the same oversized box as
 // the board and then have their non-centered edges clipped off by
-// #game-card's overflow:hidden. So those four get pulled out to their own
+// #game-card's overflow:hidden. So those five get pulled out to their own
 // #game-card children instead, each keeping its own existing
-// position:absolute;inset:0 (now resolving against #game-card's real size).
-// Both moves happen once here at load, before #modeOverlay is ever shown,
-// rather than inside startGame()'s own `mobile` branch — mode-select is the
-// very first screen a mobile player sees and it's nested inside stage-wrap
-// too, so waiting until a match actually starts left it (and every other
-// overlay sharing that nesting) positioned against #scene's still-applied
-// 2.05x zoom on that first screen, which is what the old
-// `.mobile-layout #overlay`/`.mobile-layout .team-select` counter-scale(0.5)
-// rules were trying to compensate for — imprecisely (transform-origin
-// mismatches between the two nested scales, not a real cancellation, and
-// wrong entirely for edge-anchored content like the mode-select drawer),
-// which is why panels ran off-screen or half cut-off at some real phone
-// aspect ratios despite looking fine in a quick emulator check.
-if (IS_MOBILE) {
+// position:absolute (now resolving against #game-card's real size).
+// #syncToast was missed in an earlier pass of this same fix — left nested in
+// #stage-wrap, its `top:6%` resolved against the cropped/zoomed mobile box
+// instead, landing entirely off-screen above the viewport (confirmed via
+// getBoundingClientRect returning a negative top/bottom pair) rather than
+// merely misplaced. This runs on EVERY device, not just mobile: the base #scene
+// rule (see style.css) applies its own always-on scale(1.3) "zoom" for
+// desktop too (mobile's .mobile-layout #scene rule just overrides it with a
+// bigger value), so an edge-anchored panel left inside #stage-wrap gets
+// pushed outside #game-card's clip on desktop exactly the same way it did on
+// mobile before this fix — #replayBar's transport controls silently
+// clipped off-screen was the reported symptom.
+// Happens once here at load, before #modeOverlay is ever shown, rather than
+// inside startGame()'s own `mobile` branch — mode-select is the very first
+// screen a player sees and it's nested inside stage-wrap too, so waiting
+// until a match actually starts left it (and every other overlay sharing
+// that nesting) positioned against #scene's still-applied zoom on that first
+// screen, which is what the old `.mobile-layout #overlay`/
+// `.mobile-layout .team-select` counter-scale(0.5) rules were trying to
+// compensate for — imprecisely (transform-origin mismatches between the two
+// nested scales, not a real cancellation, and wrong entirely for
+// edge-anchored content like the mode-select drawer), which is why panels
+// ran off-screen or half cut-off at some real phone aspect ratios despite
+// looking fine in a quick emulator check.
+{
   const gameCard = document.getElementById('game-card');
   const stageWrap = document.getElementById('stage-wrap');
-  stageWrap.classList.add('stage-wrap-detached');
-  gameCard.prepend(stageWrap);
-  ['overlay', 'replayBar', 'modeOverlay', 'replayUploadOverlay'].forEach((id) => {
+  // #stage-wrap itself (the canvas) only needs detaching on mobile, to
+  // escape the blurry CSS transform:scale() upscale on mobile GPUs (see
+  // .stage-wrap-detached in style.css) — desktop's own zoom is meant to
+  // keep scaling the canvas along with the rest of #scene.
+  if (IS_MOBILE) {
+    stageWrap.classList.add('stage-wrap-detached');
+    gameCard.prepend(stageWrap);
+    // #chatBar (the LAN chat windows) is #stage-wrap's own flex sibling
+    // inside #app on desktop, stacking directly below the board in that
+    // flex column — but #app is still nested inside #scene, which keeps its
+    // own mobile zoom transform (scale(1.627) etc., see .mobile-layout
+    // #scene) even after #stage-wrap itself is pulled out of it above. Left
+    // in place, #chatBar was the only remaining child of that still-
+    // transformed #app, so it inherited the same crop math meant only for
+    // the board — confirmed via getBoundingClientRect landing entirely
+    // above the viewport (top ~-190px), not just misplaced. Detached here,
+    // mobile-only (desktop's own #chatBar positioning already works, it
+    // never lost its stage-wrap sibling), with its own absolute
+    // bottom-anchored position picking up in style.css's
+    // `.mobile-layout #chatBar` rule instead of the flex layout it can no
+    // longer participate in as a #game-card child.
+    gameCard.appendChild(document.getElementById('chatBar'));
+  }
+  ['overlay', 'replayBar', 'modeOverlay', 'replayUploadOverlay', 'syncToast'].forEach((id) => {
     gameCard.appendChild(document.getElementById(id));
   });
 }
@@ -141,6 +175,15 @@ const FULLSCREEN_SUPPORTED = IOS_FULLSCREEN_FIX_ENABLED ? FULLSCREEN_API_AVAILAB
 const IS_STANDALONE = IOS_FULLSCREEN_FIX_ENABLED && IS_STANDALONE_MODE;
 
 initBackground();
+
+// Guards the loading screen against one slow/broken asset hanging it
+// forever — after this, the game just proceeds and lets the normal
+// per-frame .complete checks in game.js fill sprites in as they arrive.
+const ASSET_PRELOAD_TIMEOUT_MS = 8000;
+Promise.race([
+  Promise.all([preloadBackgroundAssets(), preloadCoreAssets()]),
+  new Promise((resolve) => setTimeout(resolve, ASSET_PRELOAD_TIMEOUT_MS)),
+]).then(hideLoadingOverlay);
 
 // Loaded once here rather than per-match (see src/audio.js) — game.js's
 // startGame() just plays SFX off this same shared instance. Ambience starts
@@ -419,13 +462,13 @@ connectBtn.addEventListener('click', () => {
     .catch((err) => console.log('[hub] chooseAddress failed:', err.message || err));
 });
 
-// ---- Mode select: local pass-and-play vs LAN duel (see CLAUDE.md "LAN mode") ----
+// ---- Mode select: Pass & Play / Remote Match / AI Training / Replay ----
 // startGame() isn't called until a mode is picked, so it only ever runs once
-// per page load — local mode calls it plain, LAN mode passes {net, myTeam}
-// once both players are connected.
+// per page load. Duel LAN isn't offered here anymore (dropped from the
+// picker), but it's still reachable via the `?duel` magic link below, which
+// passes {net, myTeam} once both players are connected — see joinLan().
 const modeOverlay = document.getElementById('modeOverlay');
 const modeLocal = document.getElementById('modeLocal');
-const modeLan = document.getElementById('modeLan');
 const modeMatch = document.getElementById('modeMatch');
 const modeSolo = document.getElementById('modeSolo');
 const modeReplay = document.getElementById('modeReplay');
@@ -491,12 +534,6 @@ modeLocal.addEventListener('click', () => {
   startOverlay.classList.remove('hidden');
   showToolbar();
   activeStopGame = startGame({ ...rockHandlers, identiconAddress: identiconOverride('A'), mobile: IS_MOBILE });
-});
-
-modeLan.addEventListener('click', () => {
-  audio.play('button');
-  modeOverlay.classList.add('hidden');
-  showLanJoinScreen();
 });
 
 modeMatch.addEventListener('click', () => {

@@ -10,6 +10,7 @@ import { getIdenticonCanvasStoneBust, getIdenticonPngDataUrl } from './identicon
 import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
 import { isBasicLaser } from './settings.js';
 import { preloadTicketAssets, renderTicket } from './ticket.js';
+import { loadImages } from './preload.js';
 import * as recorder from './recorder.js';
 import { MAX_POINTS_ON_TICKET, pointTileRect, buildReplayUrl, POINTS_SECTION_Y, POINTS_SECTION_H, TICKET_W, TICKET_H } from './replay.js';
 
@@ -75,6 +76,30 @@ const ICON_PLAY = `<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="
 const ICON_PAUSE = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="4" width="4" height="16" fill="currentColor"/><rect x="14" y="4" width="4" height="16" fill="currentColor"/></svg>`;
 const ICON_SOUND_ON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9 L8 9 L13 4 L13 20 L8 15 L4 15 Z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M16 9a4.2 4.2 0 0 1 0 6"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M18.5 6.5a7.8 7.8 0 0 1 0 11"/></svg>`;
 const ICON_SOUND_OFF = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9 L8 9 L13 4 L13 20 L8 15 L4 15 Z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M16 8l5 8M21 8l-5 8"/></svg>`;
+
+// Awaited by main.js before the branded #loadingOverlay lifts, so the first
+// match's opening frame never draws with sprites still mid-download (the
+// symptom this was added to fix — startGame() below loads every one of these
+// again itself since it re-creates fresh Image objects per match, but by
+// then the browser's HTTP cache makes that instant). Mirrors the asset list
+// startGame() loads below minus the per-address identicon bakes, which
+// aren't static files. Keep this list in sync if those loads change.
+export function preloadCoreAssets() {
+  const urls = [
+    LIGHT_LAYER_SRC,
+    ARENA_FRAME_SRC,
+    BALL_SRC,
+    ...Object.keys(ROCK_GLOW).flatMap((id) => [`${ASSET_BASE}rocks/${id}-flou.webp`, `${ASSET_BASE}rocks/${id}-light.webp`]),
+    ...['A', 'B'].flatMap((team) => ['0', '1', '2', '3'].map((d) => `${ASSET_BASE}score-digits/${team}-${d}.png`)),
+    `${ASSET_BASE}hex-timer/ring-full.png`,
+    `${ASSET_BASE}hex-timer/ring-full-red.png`,
+    `${ASSET_BASE}waiting-label/word.png`,
+    ...[0, 1, 2].map((i) => `${ASSET_BASE}waiting-label/dot-${i}.png`),
+    `${ASSET_BASE}handoff/ice-mask.webp`,
+    ...['A', 'B'].flatMap((team) => LED_STATE_KEYS.map((key) => LED_STATE_SRC[team][key])),
+  ];
+  return Promise.all([loadImages(urls), preloadTicketAssets()]);
+}
 
 export function startGame(opts = {}) {
   const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null } = opts;
