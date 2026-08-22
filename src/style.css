@@ -315,15 +315,6 @@ html, body {
    the desktop `top:80%` slot even with nothing to show. */
 .mobile-layout #toolbar-bottom { display: none; }
 
-/* "Duel LAN" requires typing the ws:// address a locally-run relay server
-   printed on someone's laptop (see CLAUDE.md's "LAN mode" — a dev/local-
-   testing flow, not the public online mode) — not a thing a phone player
-   would ever have to type in. "Match Réseau" (#modeMatch, host/join by a
-   4-char code over PartyKit) is the actual online mode and stays. The
-   remaining tiles' `flex:1` (.half, see .mode-drawer above) picks up the
-   freed space on its own, no layout changes needed here. */
-.mobile-layout #modeLan { display: none; }
-
 /* Shared shell for mobile-only full-screen intro gates (see main.js): plain
    dark scrim + one big centered icon + caption, shown before #modeOverlay so
    it's the very first thing a phone player sees. Two gates use this —
@@ -473,7 +464,7 @@ html, body {
    (see the dpr comment in game.js), because the extra resolution never
    gets consulted once the bitmap is fixed. Giving the canvas a real
    (non-transform) box size instead makes the browser paint at the correct
-   final resolution directly, sidestepping that step. #bg-stage/#fg-stage
+   final resolution directly, sidestepping that step. #fg-stage
    (decorative, low detail — blur there is not the complaint) and
    #overlay/#modeOverlay/#replayBar/etc. (real DOM text/panels, not a
    raster image, and everything about how big they read on screen is
@@ -620,6 +611,16 @@ canvas {
    without first giving the card more vertical room to work with. */
 #chatBar { width: 70%; display: flex; gap: 12px; margin-top: -4%; position: relative; z-index: 1; pointer-events: auto; }
 #chatBar.hidden { display: none; }
+/* Mobile: #chatBar is detached straight to #game-card (see main.js), same
+   reasoning as #syncToast/#overlay/etc. above — it's no longer #stage-wrap's
+   flex sibling inside #app once the canvas itself is pulled out for its own
+   crop/zoom (.stage-wrap-detached), so the margin-top/flex-position tricks
+   above (tuned for that desktop flex column) no longer apply. Bottom-
+   anchored + horizontally centered on #game-card directly instead, own
+   small overlap with #mobileController in the bottom-right corner accepted
+   for now (same call already made for #connectBtn/#bg-logo, see their own
+   mobile rules above) rather than solved by shrinking one or the other. */
+.mobile-layout #chatBar { position: absolute; left: 0; right: 0; bottom: 4%; margin: 0 auto; }
 .chat-window {
   flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px;
   background: var(--panel); border-radius: 14px; padding: 8px 10px;
@@ -887,12 +888,19 @@ button:disabled { opacity: 0.35; cursor: default; }
 .ticket-img { max-width: 100%; max-height: 64vh; width: auto; border-radius: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
 
 /* Inset to the physics/ice rect only (FX0/FY0/FX1/FY1 in game.js — as % of the
-   1200x905 canvas: 13.25%/22.76%/12.83%/22.87%), not the full board — the wood
-   frame, scoreboard plaque and PLAY cap baked around the ice in arena/frame.webp
-   should read as neutral chrome, not get washed in team color before kickoff. */
+   V2 3312x1896 canvas: 32.79%/33.02%/31.70%/32.81%, left/top/right/bottom),
+   not the full board — the wood frame, scoreboard plaque and PLAY cap baked
+   around the ice in arena/frame.webp should read as neutral chrome, not get
+   washed in team color before kickoff. Was 13.25%/22.76%/12.83%/22.87% — the
+   old V1 1200x905 arena's ice-rect fractions, never updated when the arena
+   art moved to the V2 3312x1896 canvas (FX0/FY0/FX1/FY1 changed to
+   1086/626/2262/1274, see game.js) — left the wash badly oversized and
+   off-center, most visibly bleeding well past the ice's true right edge
+   (into the forest / mobile joystick column) since the old right inset
+   (12.83%) was less than half the correct value. */
 /* Shared by #startOverlay (local pass-and-play ready-tap) and #modeOverlay
    (local vs LAN mode picker, shown first) — same two-column layout/palette. */
-.team-select { position: absolute; inset: 22.76% 12.83% 22.87% 13.25%; border-radius: 28px; display: flex; flex-direction: row; overflow: hidden; }
+.team-select { position: absolute; inset: 33.02% 31.70% 32.81% 32.79%; border-radius: 28px; display: flex; flex-direction: row; overflow: hidden; }
 .team-select.hidden { display: none; }
 /* No mobile counter-scale needed here anymore. #startOverlay (ready-tap team
    pick) uses this base ice-rect-aligned inset as-is — its team-color wash
@@ -920,21 +928,25 @@ button:disabled { opacity: 0.35; cursor: default; }
 .half.b { background: rgba(168,50,71,0.55); }
 .half.c { background: rgba(110,80,168,0.55); }
 /* #startOverlay's "half b" is team B specifically (Nimiq yellow, not the
-   shared/generic red above — see #modeOverlay's "Duel LAN" card, unchanged). */
+   shared/generic red above — that red is currently unused by #modeOverlay
+   since Duel LAN was dropped from the mode-select picker, kept here as the
+   base .half color for any future tile). */
 #startOverlay .half.b { background: rgba(173,133,20,0.55); }
 .half.ready { background: rgba(20,40,30,0.55); }
 .half .tag { font-weight: 800; font-size: 18px; letter-spacing: 0.5px; }
 .half .sub { font-size: 12px; color: rgba(255,255,255,0.85); max-width: 150px; }
 .half .check { font-size: 30px; }
 
-/* Mode-select right-drawer override, ID-scoped so #startOverlay (which
+/* Mode-select quadrant-grid override, ID-scoped so #startOverlay (which
    shares .team-select/.half for its own team-ready screen) is unaffected.
    Full inset (was rink-only) since #modeOverlayBg now replaces the visible
-   arena art entirely instead of just tinting the ice; the four mode tiles
-   move from a full-width row into a vertical drawer docked to the right
-   (design/ecran acceuil empty.png as the darkened backdrop — see
-   src/background.js). Rough first pass per the brief — colors/spacing/
-   Nimiq branding for this column TBD later. */
+   arena art entirely instead of just tinting the ice. The four mode tiles
+   fill a 2x2 grid over the whole card (design/ecran acceuil empty.png as
+   the darkened backdrop — see src/background.js) instead of a right-docked
+   column: a docked strip only ever got a slim fraction of the card's
+   height/width, so on some phone aspect ratios tiles ran out of room and
+   got clipped or needed to scroll to reach. Each tile now gets a full
+   quarter of the card on any screen, no scrolling needed. */
 /* No display override here on purpose — children are all position:absolute
    (out of flow), so .team-select's own display:flex is harmless, and
    leaving display alone keeps .team-select.hidden's display:none (a plain
@@ -945,25 +957,14 @@ button:disabled { opacity: 0.35; cursor: default; }
 .mode-select-scrim { position: absolute; inset: 0; background: rgba(6,14,18,0.5); }
 .mode-drawer {
   position: absolute;
-  top: 8%;
-  bottom: 8%;
-  right: 4%;
-  width: 30%;
-  min-width: 220px;
-  display: flex;
-  flex-direction: column;
+  inset: 6%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
   gap: 12px;
   border-radius: 20px;
   overflow: hidden;
 }
-/* 5 tiles' natural content height (padding + two lines of text each) can
-   exceed the 84%-of-card-height (top:8%/bottom:8%) this drawer gets on a
-   short landscape phone — was invisible before (the whole drawer was
-   clipped off-card by the .team-select positioning bug fixed above, so
-   nobody could scroll far enough to notice tiles were also short on room),
-   now that it's positioned correctly this needs its own fix: let it scroll
-   instead of silently cutting off DUEL LAN/REPLAY at the bottom. */
-.mobile-layout .mode-drawer { overflow-y: auto; }
 
 #overlay input[type="text"] {
   font-family: inherit; font-size: 15px; color: var(--ink); background: var(--bg-mid);
@@ -972,155 +973,6 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 #overlay input[type="text"]::placeholder { color: var(--ink-dim); }
 .lan-error { color: var(--error) !important; }
-
-/* ---- Animated constellation background, ported from design-lab (see
-   design-lab/design_handoff_scintillement_constellation/README.md) ---- */
-
-  /* #bg-stage now just fills the card's own scene (100%, via inset:0) instead
-     of being independently sized/centered against the viewport — the card
-     (#game-card) is what handles the viewport-responsive sizing now, and
-     .fond-layer's own background-size:cover fills whatever box this ends up
-     being, same as before. */
-  /* Hidden for the V2 arena art: that art already bakes in its own forest
-     scene (see #game-card/#stage-wrap above), so this separate constellation
-     background would either be fully occluded behind the now fully-opaque
-     board or, worse, mismatch at the edges — rather than delete the whole
-     layer (and its JS wiring in background.js/main.js), just stop it from
-     rendering/animating. Revisit if a future skin goes back to a small inset
-     board with transparent margins. */
-  #bg-stage {
-    display: none;
-    position: absolute;
-    inset: 0;
-    background: #060716;
-  }
-
-  /* Constellation background animation, ported 1:1 from
-     design-lab/design_handoff_scintillement_constellation/ — positions/timings
-     are measured against this exact fond (fond constel nimiq V4.png), see that
-     folder's README for the per-class breakdown (glow-dot/pulse-dot/dim-dot/hex-dim). */
-  /* 4 mirrored fond variants (V4/V4.2/V4.3/V4.4) stacked and slow-crossfaded: each
-     holds still for 20s, then crossfades into the next over 20s (160s total loop,
-     perpetual) so the background alternates rest/transition instead of always drifting.
-     Each .fond-layer bundles its own background image with its OWN constellation
-     overlay (own set of node coordinates, mirrored to match), since the art
-     itself isn't self-symmetric — a shared overlay across variants would drift
-     out of alignment mid-fade. See design-lab/design_handoff_scintillement_constellation/
-     for the base (V4) coordinates; V4.2/V4.3/V4.4 are exact vertical/180/horizontal
-     mirrors, so their coordinates are the same values run through the mirror formula
-     (top->100-top, left->100-left, with a width*aspect correction for classes anchored
-     by their top-left corner rather than centered) rather than re-measured by hand.
-  */
-  #bg-fond-stack { position: absolute; inset: 0; }
-  .fond-layer { position: absolute; inset: 0; background-size: cover; background-position: center; }
-  #fond-v4  { animation: fondCycle0 160s linear infinite; }
-  #fond-v42 { animation: fondCycle1 160s linear infinite; }
-  #fond-v43 { animation: fondCycle2 160s linear infinite; }
-  #fond-v44 { animation: fondCycle3 160s linear infinite; }
-  @keyframes fondCycle0 { 0%{opacity:1;} 12.5%{opacity:1;} 25%{opacity:0;} 87.5%{opacity:0;} 100%{opacity:1;} }
-  @keyframes fondCycle1 { 0%{opacity:0;} 12.5%{opacity:0;} 25%{opacity:1;} 37.5%{opacity:1;} 50%{opacity:0;} 100%{opacity:0;} }
-  @keyframes fondCycle2 { 0%{opacity:0;} 37.5%{opacity:0;} 50%{opacity:1;} 62.5%{opacity:1;} 75%{opacity:0;} 100%{opacity:0;} }
-  @keyframes fondCycle3 { 0%{opacity:0;} 62.5%{opacity:0;} 75%{opacity:1;} 87.5%{opacity:1;} 100%{opacity:0;} }
-
-  .constellation-overlay { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-  @keyframes twinkle {
-    0%, 100% { opacity: 0.12; transform: translate(-50%,-50%) scale(0.85); }
-    50% { opacity: 0.9; transform: translate(-50%,-50%) scale(1.2); }
-  }
-  @keyframes hexfade { 0%,100%{opacity:0;} 38%{opacity:0;} 50%{opacity:0.88;} 62%{opacity:0;} }
-  @keyframes dimpulse { 0%,100%{opacity:0;} 45%{opacity:0;} 50%{opacity:0.65;} 55%{opacity:0;} }
-  @keyframes travel1 { 0%{left:24.76%;top:23.84%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:22.90%;top:29.79%;opacity:0;} 100%{left:22.90%;top:29.79%;opacity:0;} }
-  @keyframes travel2 { 0%{left:25.04%;top:34.12%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:24.93%;top:39.77%;opacity:0;} 100%{left:24.93%;top:39.77%;opacity:0;} }
-  @keyframes travel3 { 0%{left:22.34%;top:45.89%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:17.41%;top:50.58%;opacity:0;} 100%{left:17.41%;top:50.58%;opacity:0;} }
-  @keyframes travel4 { 0%{left:14.82%;top:62.18%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:21.50%;top:64.22%;opacity:0;} 100%{left:21.50%;top:64.22%;opacity:0;} }
-  @keyframes travel5 { 0%{left:82.56%;top:33.25%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:81.67%;top:41.56%;opacity:0;} 100%{left:81.67%;top:41.56%;opacity:0;} }
-  @keyframes travel6 { 0%{left:73.78%;top:43.65%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:71.82%;top:49.50%;opacity:0;} 100%{left:71.82%;top:49.50%;opacity:0;} }
-  @keyframes travel7 { 0%{left:82.39%;top:52.36%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:85.55%;top:54.81%;opacity:0;} 100%{left:85.55%;top:54.81%;opacity:0;} }
-  @keyframes travel8 { 0%{left:70.58%;top:70.83%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:73.83%;top:74.62%;opacity:0;} 100%{left:73.83%;top:74.62%;opacity:0;} }
-  @keyframes travel9 { 0%{left:19.18%;top:69.17%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.60%;top:75.76%;opacity:0;} 100%{left:20.60%;top:75.76%;opacity:0;} }
-  @keyframes travel10 { 0%{left:20.60%;top:75.76%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:21.53%;top:78.07%;opacity:0;} 100%{left:21.53%;top:78.07%;opacity:0;} }
-  @keyframes travel11 { 0%{left:21.53%;top:78.07%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.63%;top:80.13%;opacity:0;} 100%{left:20.63%;top:80.13%;opacity:0;} }
-  @keyframes travel12 { 0%{left:66.54%;top:72.82%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:70.58%;top:70.83%;opacity:0;} 100%{left:70.58%;top:70.83%;opacity:0;} }
-  @keyframes travel13 { 0%{left:78.50%;top:33.33%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:81.67%;top:41.56%;opacity:0;} 100%{left:81.67%;top:41.56%;opacity:0;} }
-  @keyframes travel14 { 0%{left:69.71%;top:53.65%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:68.48%;top:56.41%;opacity:0;} 100%{left:68.48%;top:56.41%;opacity:0;} }
-  @keyframes travel15 { 0%{left:20.65%;top:59.45%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:17.41%;top:50.58%;opacity:0;} 100%{left:17.41%;top:50.58%;opacity:0;} }
-  @keyframes travel16 { 0%{left:76.29%;top:60.61%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.77%;top:60.66%;opacity:0;} 100%{left:79.77%;top:60.66%;opacity:0;} }
-  @keyframes travel1_v42 { 0%{left:24.76%;top:76.16%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:22.90%;top:70.21%;opacity:0;} 100%{left:22.90%;top:70.21%;opacity:0;} }
-  @keyframes travel2_v42 { 0%{left:25.04%;top:65.88%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:24.93%;top:60.23%;opacity:0;} 100%{left:24.93%;top:60.23%;opacity:0;} }
-  @keyframes travel3_v42 { 0%{left:22.34%;top:54.11%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:17.41%;top:49.42%;opacity:0;} 100%{left:17.41%;top:49.42%;opacity:0;} }
-  @keyframes travel4_v42 { 0%{left:14.82%;top:37.82%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:21.50%;top:35.78%;opacity:0;} 100%{left:21.50%;top:35.78%;opacity:0;} }
-  @keyframes travel5_v42 { 0%{left:82.56%;top:66.75%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:81.67%;top:58.44%;opacity:0;} 100%{left:81.67%;top:58.44%;opacity:0;} }
-  @keyframes travel6_v42 { 0%{left:73.78%;top:56.35%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:71.82%;top:50.50%;opacity:0;} 100%{left:71.82%;top:50.50%;opacity:0;} }
-  @keyframes travel7_v42 { 0%{left:82.39%;top:47.64%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:85.55%;top:45.19%;opacity:0;} 100%{left:85.55%;top:45.19%;opacity:0;} }
-  @keyframes travel8_v42 { 0%{left:70.58%;top:29.17%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:73.83%;top:25.38%;opacity:0;} 100%{left:73.83%;top:25.38%;opacity:0;} }
-  @keyframes travel9_v42 { 0%{left:19.18%;top:30.83%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.60%;top:24.24%;opacity:0;} 100%{left:20.60%;top:24.24%;opacity:0;} }
-  @keyframes travel10_v42 { 0%{left:20.60%;top:24.24%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:21.53%;top:21.93%;opacity:0;} 100%{left:21.53%;top:21.93%;opacity:0;} }
-  @keyframes travel11_v42 { 0%{left:21.53%;top:21.93%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.63%;top:19.87%;opacity:0;} 100%{left:20.63%;top:19.87%;opacity:0;} }
-  @keyframes travel12_v42 { 0%{left:66.54%;top:27.18%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:70.58%;top:29.17%;opacity:0;} 100%{left:70.58%;top:29.17%;opacity:0;} }
-  @keyframes travel13_v42 { 0%{left:78.50%;top:66.67%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:81.67%;top:58.44%;opacity:0;} 100%{left:81.67%;top:58.44%;opacity:0;} }
-  @keyframes travel14_v42 { 0%{left:69.71%;top:46.35%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:68.48%;top:43.59%;opacity:0;} 100%{left:68.48%;top:43.59%;opacity:0;} }
-  @keyframes travel15_v42 { 0%{left:20.65%;top:40.55%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:17.41%;top:49.42%;opacity:0;} 100%{left:17.41%;top:49.42%;opacity:0;} }
-  @keyframes travel16_v42 { 0%{left:76.29%;top:39.39%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.77%;top:39.34%;opacity:0;} 100%{left:79.77%;top:39.34%;opacity:0;} }
-
-  @keyframes travel1_v43 { 0%{left:75.24%;top:76.16%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:77.10%;top:70.21%;opacity:0;} 100%{left:77.10%;top:70.21%;opacity:0;} }
-  @keyframes travel2_v43 { 0%{left:74.96%;top:65.88%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:75.07%;top:60.23%;opacity:0;} 100%{left:75.07%;top:60.23%;opacity:0;} }
-  @keyframes travel3_v43 { 0%{left:77.66%;top:54.11%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:82.59%;top:49.42%;opacity:0;} 100%{left:82.59%;top:49.42%;opacity:0;} }
-  @keyframes travel4_v43 { 0%{left:85.18%;top:37.82%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:78.50%;top:35.78%;opacity:0;} 100%{left:78.50%;top:35.78%;opacity:0;} }
-  @keyframes travel5_v43 { 0%{left:17.44%;top:66.75%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:18.33%;top:58.44%;opacity:0;} 100%{left:18.33%;top:58.44%;opacity:0;} }
-  @keyframes travel6_v43 { 0%{left:26.22%;top:56.35%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:28.18%;top:50.50%;opacity:0;} 100%{left:28.18%;top:50.50%;opacity:0;} }
-  @keyframes travel7_v43 { 0%{left:17.61%;top:47.64%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:14.45%;top:45.19%;opacity:0;} 100%{left:14.45%;top:45.19%;opacity:0;} }
-  @keyframes travel8_v43 { 0%{left:29.42%;top:29.17%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:26.17%;top:25.38%;opacity:0;} 100%{left:26.17%;top:25.38%;opacity:0;} }
-  @keyframes travel9_v43 { 0%{left:80.82%;top:30.83%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.40%;top:24.24%;opacity:0;} 100%{left:79.40%;top:24.24%;opacity:0;} }
-  @keyframes travel10_v43 { 0%{left:79.40%;top:24.24%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:78.47%;top:21.93%;opacity:0;} 100%{left:78.47%;top:21.93%;opacity:0;} }
-  @keyframes travel11_v43 { 0%{left:78.47%;top:21.93%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.37%;top:19.87%;opacity:0;} 100%{left:79.37%;top:19.87%;opacity:0;} }
-  @keyframes travel12_v43 { 0%{left:33.46%;top:27.18%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:29.42%;top:29.17%;opacity:0;} 100%{left:29.42%;top:29.17%;opacity:0;} }
-  @keyframes travel13_v43 { 0%{left:21.50%;top:66.67%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:18.33%;top:58.44%;opacity:0;} 100%{left:18.33%;top:58.44%;opacity:0;} }
-  @keyframes travel14_v43 { 0%{left:30.29%;top:46.35%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:31.52%;top:43.59%;opacity:0;} 100%{left:31.52%;top:43.59%;opacity:0;} }
-  @keyframes travel15_v43 { 0%{left:79.35%;top:40.55%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:82.59%;top:49.42%;opacity:0;} 100%{left:82.59%;top:49.42%;opacity:0;} }
-  @keyframes travel16_v43 { 0%{left:23.71%;top:39.39%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.23%;top:39.34%;opacity:0;} 100%{left:20.23%;top:39.34%;opacity:0;} }
-
-  @keyframes travel1_v44 { 0%{left:75.24%;top:23.84%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:77.10%;top:29.79%;opacity:0;} 100%{left:77.10%;top:29.79%;opacity:0;} }
-  @keyframes travel2_v44 { 0%{left:74.96%;top:34.12%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:75.07%;top:39.77%;opacity:0;} 100%{left:75.07%;top:39.77%;opacity:0;} }
-  @keyframes travel3_v44 { 0%{left:77.66%;top:45.89%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:82.59%;top:50.58%;opacity:0;} 100%{left:82.59%;top:50.58%;opacity:0;} }
-  @keyframes travel4_v44 { 0%{left:85.18%;top:62.18%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:78.50%;top:64.22%;opacity:0;} 100%{left:78.50%;top:64.22%;opacity:0;} }
-  @keyframes travel5_v44 { 0%{left:17.44%;top:33.25%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:18.33%;top:41.56%;opacity:0;} 100%{left:18.33%;top:41.56%;opacity:0;} }
-  @keyframes travel6_v44 { 0%{left:26.22%;top:43.65%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:28.18%;top:49.50%;opacity:0;} 100%{left:28.18%;top:49.50%;opacity:0;} }
-  @keyframes travel7_v44 { 0%{left:17.61%;top:52.36%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:14.45%;top:54.81%;opacity:0;} 100%{left:14.45%;top:54.81%;opacity:0;} }
-  @keyframes travel8_v44 { 0%{left:29.42%;top:70.83%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:26.17%;top:74.62%;opacity:0;} 100%{left:26.17%;top:74.62%;opacity:0;} }
-  @keyframes travel9_v44 { 0%{left:80.82%;top:69.17%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.40%;top:75.76%;opacity:0;} 100%{left:79.40%;top:75.76%;opacity:0;} }
-  @keyframes travel10_v44 { 0%{left:79.40%;top:75.76%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:78.47%;top:78.07%;opacity:0;} 100%{left:78.47%;top:78.07%;opacity:0;} }
-  @keyframes travel11_v44 { 0%{left:78.47%;top:78.07%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:79.37%;top:80.13%;opacity:0;} 100%{left:79.37%;top:80.13%;opacity:0;} }
-  @keyframes travel12_v44 { 0%{left:33.46%;top:72.82%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:29.42%;top:70.83%;opacity:0;} 100%{left:29.42%;top:70.83%;opacity:0;} }
-  @keyframes travel13_v44 { 0%{left:21.50%;top:33.33%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:18.33%;top:41.56%;opacity:0;} 100%{left:18.33%;top:41.56%;opacity:0;} }
-  @keyframes travel14_v44 { 0%{left:30.29%;top:53.65%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:31.52%;top:56.41%;opacity:0;} 100%{left:31.52%;top:56.41%;opacity:0;} }
-  @keyframes travel15_v44 { 0%{left:79.35%;top:59.45%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:82.59%;top:50.58%;opacity:0;} 100%{left:82.59%;top:50.58%;opacity:0;} }
-  @keyframes travel16_v44 { 0%{left:23.71%;top:60.61%;opacity:0;} 4%{opacity:1;} 10%{opacity:1;} 13%{left:20.23%;top:60.66%;opacity:0;} 100%{left:20.23%;top:60.66%;opacity:0;} }
-  /* travelN keyframes animate left/top (layout-triggering) on 64 elements —
-     measured as the single most expensive piece of the whole background (see
-     perf audit), far above the opacity/transform-only twinkle/dimpulse/hexfade
-     animations on the other 356 dots. Neutralized for perf: opacity:0 matches
-     these dots' own resting state (invisible ~87% of their own cycle anyway),
-     so this reads as "no shooting stars" rather than "some dots stuck
-     visible". Kept reversible — drop this rule to restore the effect. */
-  .pulse-dot { animation: none !important; opacity: 0 !important; }
-
-  /* twinkle (glow-dot, 248 elements) only ever animates opacity/transform
-     (compositor-only, no layout) — measured as "free" in the perf audit —
-     but neutralized anyway on request to simplify testing. The centering
-     transform normally comes from the twinkle keyframe itself (no base
-     .glow-dot rule sets it), so it has to be restated here or all 248 stars
-     shift by half their own size once the animation stops applying it.
-     0.5 opacity / scale(1) is the keyframe's own midpoint, so stars stay
-     visible at roughly their average brightness instead of vanishing. */
-  .glow-dot { animation: none !important; opacity: 0.5 !important; transform: translate(-50%, -50%) scale(1) !important; }
-
-  @media (prefers-reduced-motion: reduce) {
-    .constellation-overlay .glow-dot, .constellation-overlay .pulse-dot,
-    .constellation-overlay .dim-dot, .constellation-overlay .hex-dim { animation: none !important; opacity: 0 !important; }
-    .fond-layer { animation: none !important; }
-    #fond-v4 { opacity: 1 !important; }
-    #fond-v42, #fond-v43, #fond-v44 { opacity: 0 !important; }
-  }
 
 /* ---- Pinède night forest layers, ported from design-lab's
    "nimball-designlab fond pinede.xcf" experiment, then re-validated against
@@ -1139,7 +991,8 @@ button:disabled { opacity: 0.35; cursor: default; }
      up as a visible seam where the picture stops and the card's plain
      background starts. 130% pushes both edges safely outside the card at
      any .scene scale we're likely to use. */
-  /* Hidden for the V2 arena art, same reasoning as #bg-stage above — this
+  /* Hidden for the V2 arena art, same reasoning as the old constellation
+     background (removed, see git history) — this
      layer's own translateY(6.52%) also matched the old board's now-removed
      offset, so it'd be stale even if shown. */
   #bg-nature {
