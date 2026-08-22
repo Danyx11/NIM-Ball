@@ -1696,7 +1696,7 @@ export function startGame(opts = {}) {
       // reused here as a "click" cue for the lock engaging, at a fixed
       // moderate-hit reference volume since there's no real impact energy
       // to derive it from.
-      audio.play('hitWall', { volume: IMPACT_VOLUME_TRIM * 0.8 * GOLF_LAYER_TRIM });
+      audio.play('hitWall', { volume: IMPACT_VOLUME_TRIM * 0.8 * GOLF_LAYER_TRIM * 1.5 }); // +50%
     }
     function disengageJoystickLock() {
       if (!joystickDrag || !joystickDrag.locked) return;
@@ -3844,6 +3844,11 @@ export function startGame(opts = {}) {
     // whitelist the scoring team's halos stayed lit fixed through that
     // entire pause instead of cutting the instant the reveal ended.
     if (!isAimingPhase(phase) && phase !== 'lanWait' && phase !== 'replayAim') return 'off';
+    // Pass & Play: 'aimB' only ever happens in the local 2-human flow (LAN
+    // uses lanAim, solo vs IA never leaves aimA) — team A's already-committed
+    // halo must stay behind the hand-off mask while team B aims, same as
+    // their laser/sweep patch already do, not leak which stones they used.
+    if (phase === 'aimB' && g.team === 'A') return 'off';
     if (!g.used) {
       // Mobile: a tap-selected stone glows before the joystick ever arms a
       // shot, so the player can see which stone they're about to aim.
