@@ -14,13 +14,14 @@ const ASSET_BASE = import.meta.env.BASE_URL;
 // Branded loading screen (index.html's #loadingOverlay, self-contained/
 // inline there since it must render before this module's own CSS/JS have
 // finished downloading — see the comment above it). Visible by default in
-// the raw HTML; stays up (see the preloadCoreAssets()/preloadBackgroundAssets()
-// await further down) until every image the home/mode-select screens and the
-// very first match frame need has actually finished loading, instead of
-// dismissing on a timer/immediately and letting those screens paint with
-// sprites still mid-download. Reused below (showLoadingOverlay/
-// hideLoadingOverlay) for the LAN/match connection wait and the
-// replay-ticket decode wait.
+// the raw HTML; stays up (see the preloadBackgroundAssets() await further
+// down) only until the home/mode-select screens' own images are ready —
+// whoever opens Nim-Curl is here to play, so match assets (preloadCoreAssets())
+// start downloading in the background right as the overlay lifts rather than
+// also gating it, so the menu appears sooner while the match itself is
+// already most of the way loaded by the time a player picks a mode. Reused
+// below (showLoadingOverlay/hideLoadingOverlay) for the LAN/match connection
+// wait and the replay-ticket decode wait.
 const loadingOverlay = document.getElementById('loadingOverlay');
 function showLoadingOverlay() { loadingOverlay.classList.remove('hidden'); }
 function hideLoadingOverlay() { loadingOverlay.classList.add('hidden'); }
@@ -176,14 +177,17 @@ const IS_STANDALONE = IOS_FULLSCREEN_FIX_ENABLED && IS_STANDALONE_MODE;
 
 initBackground();
 
-// Guards the loading screen against one slow/broken asset hanging it
+// Guards the loading screen against one slow/broken menu asset hanging it
 // forever — after this, the game just proceeds and lets the normal
 // per-frame .complete checks in game.js fill sprites in as they arrive.
 const ASSET_PRELOAD_TIMEOUT_MS = 8000;
 Promise.race([
-  Promise.all([preloadBackgroundAssets(), preloadCoreAssets()]),
+  preloadBackgroundAssets(),
   new Promise((resolve) => setTimeout(resolve, ASSET_PRELOAD_TIMEOUT_MS)),
-]).then(hideLoadingOverlay);
+]).then(() => {
+  hideLoadingOverlay();
+  preloadCoreAssets(IS_MOBILE); // not awaited: warms the match assets in the background from here on
+});
 
 // Loaded once here rather than per-match (see src/audio.js) — game.js's
 // startGame() just plays SFX off this same shared instance. Ambience starts
