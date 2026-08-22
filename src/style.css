@@ -107,7 +107,12 @@ html, body {
      82vh*aspect), reserving the leftover width as --right-margin for the
      old joystick/toolbar column (#mobileController) — that column's moving
      to its own overlay, so the reserved margin no longer applies. */
-  --card-w: max(100vw, calc(100dvh * 3312 / 1896));
+  /* 2218/1295, not 3312/1896: matches the mobile pre-crop now baked into the
+     canvas backing buffer itself (see MOBILE_CROP in game.js) — #game-card's
+     own aspect-ratio below is the same ratio, so this max() still sizes the
+     card to fill the viewport on either axis exactly as before, just against
+     the smaller cropped reference frame. */
+  --card-w: max(100vw, calc(100dvh * 2218 / 1295));
   --right-margin: calc(100vw - var(--card-w) - var(--card-left-gap));
   /* #bg-logo/#connectBtn's own alignment reference (see their rules further
      down) — the old --joy-d-full/--joy-shift-x/--joy-center-right chain
@@ -120,6 +125,14 @@ html, body {
      center as a same-units `right` offset is just half that width plus the
      36px gap. */
   --controller-center-right: calc(36px + clamp(147px, 23vw, 225px) / 2);
+  /* Full reserved width of the controller column (gap + panel), not just the
+     half-width --controller-center-right above needs for its own centering —
+     used by #overlay on mobile (see its own rule further down) to inset the
+     goal/ticket panel's box away from the controller instead of centering it
+     across the full screen width: the panel should read as centered on the
+     visible arena, with the controller's own column left untouched/"safe",
+     not straddling both per explicit request. */
+  --controller-reserved-w: calc(36px + clamp(147px, 23vw, 225px));
 }
 
 #bg-logo {
@@ -407,6 +420,11 @@ html, body {
 .mobile-layout #game-card {
   left: 50%;
   transform: translate(-50%, -50%);
+  /* Matches the canvas's own new intrinsic ratio (MOBILE_CROP in game.js:
+     2218x1295, not the full 3312x1896) — canvas is `width:100%;height:auto`
+     (see the `canvas` rule below), so this only needs to agree with that
+     ratio for the card to be filled exactly, no gap or overflow. */
+  aspect-ratio: 2218 / 1295;
 }
 
 /* Zooms the whole scene (constellation + forest + board) in together,
@@ -451,9 +469,15 @@ html, body {
    transform-origin/scale mechanism, with the ROCK_ZONES/FX0..FY1 rects
    overlaid live) rather than guessing values and reloading on a phone each
    time. */
+/* Recomputed for the MOBILE_CROP pre-crop now baked into the canvas
+   backing buffer (game.js) — same target ice-visible window as before
+   (2036x1165ish, centered ~y=955.5 in full-canvas space), just re-derived
+   against the smaller 2218x1295 crop reference frame instead of the full
+   3312x1896, using the left/top/width -> origin/scale formula documented
+   by .stage-wrap-detached below (kept in sync with it, same as before). */
 .mobile-layout #scene {
-  transform-origin: 72.5% 51.0%;
-  transform: scale(1.627);
+  transform-origin: 72.57% 70.64%;
+  transform: scale(1.0894);
 }
 /* #stage-wrap (canvas only — see the `mobile` branch in game.js's
    startGame(), which moves it here from its normal home inside #app) is
@@ -500,9 +524,13 @@ html, body {
    silently no-ops position:absolute here otherwise. */
 .mobile-layout #stage-wrap.stage-wrap-detached {
   position: absolute;
-  left: -45.46%;
-  top: -31.98%;
-  width: 162.7%;
+  /* Recomputed for MOBILE_CROP (game.js): same visible ice window as
+     before, re-derived against the smaller 2218x1295 crop reference frame
+     baked into the canvas backing buffer instead of the full 3312x1896 —
+     see the .mobile-layout #scene rule above, kept in sync with these. */
+  left: -6.49%;
+  top: -6.31%;
+  width: 108.94%;
   z-index: 0;
 }
 
@@ -829,6 +857,20 @@ button:disabled { opacity: 0.35; cursor: default; }
   z-index: 10;
 }
 #overlay.hidden { display: none; }
+/* Mobile: the goal (+1) and end-of-match ticket panel — by far the most
+   frequently-seen DOM overlay in a live match — should read as centered on
+   the visible arena, not the full screen: #game-card (this panel's
+   containing block, see main.js's detach block) spans edge-to-edge
+   including the strip #mobileController floats over on the right, so a
+   plain inset:0 centers this panel's content across that whole width,
+   including the space under the controller — reading as shifted left of
+   where the arena itself visually centers, off by roughly half the
+   controller's own footprint. Insetting the right edge by that same
+   reserved width (--controller-reserved-w, see .mobile-layout above) instead
+   of 0 keeps the controller's column fully clear ("safe", per explicit
+   request) and re-centers this panel's own flex content within what's left,
+   i.e. the arena's own visible span. */
+.mobile-layout #overlay { right: var(--controller-reserved-w); }
 /* Network sync-check toast (see index.html/game.js) — translucent pill, not
    #overlay's near-opaque backdrop, since the rollback tween needs the stones
    underneath to stay visible while it plays. Non-interactive: it only ever
@@ -965,6 +1007,17 @@ button:disabled { opacity: 0.35; cursor: default; }
   border-radius: 20px;
   overflow: hidden;
 }
+/* Per-tile line-art icon, one per mode (players-at-console, linked devices,
+   robot-on-curling-stone, replay document) — ported from "Modes tuiles
+   design ref.png"'s outlined icon set, redrawn as inline stroke SVGs so
+   they recolor with the tile's white text instead of shipping as raster
+   assets. Fixed height (not cqw-scaled, same convention as .tag/.sub's
+   fixed px sizes above) with width:auto so each icon keeps its own natural
+   aspect ratio. The two taller icons (robot, replay page) get a shorter
+   height so all four read as roughly the same visual weight despite very
+   different viewBox aspect ratios. */
+.mode-icon { height: 36px; width: auto; color: rgba(255,255,255,0.92); }
+.mode-icon-tall { height: 30.6px; }
 
 #overlay input[type="text"] {
   font-family: inherit; font-size: 15px; color: var(--ink); background: var(--bg-mid);

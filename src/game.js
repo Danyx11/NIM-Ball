@@ -52,6 +52,11 @@ const LED_STATE_SRC = {
 const LED_STATE_KEYS = ['0', '1', '1dim', '2', '3', '4'];
 const LIGHT_LAYER_SRC = `${ASSET_BASE}identicons/stone-light-layer.webp`;
 const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
+// Mobile-only pre-crop of the above (see scripts/bake_mobile_frame.py and
+// the MOBILE_CROP comment in startGame() below) — same pixels, just the
+// sub-rect mobile ever actually shows, so the phone downloads/decodes ~57%
+// less image data for art it was always going to crop away anyway.
+const ARENA_FRAME_MOBILE_SRC = `${ASSET_BASE}arena/frame-mobile.webp`;
 const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
 // HUD rock glow — each of the 5 rocks baked into the arena art has a
 // hand-painted "flou"/soft halo + "light"/sharp core pair (Arena V2
@@ -84,10 +89,15 @@ const ICON_SOUND_OFF = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="
 // then the browser's HTTP cache makes that instant). Mirrors the asset list
 // startGame() loads below minus the per-address identicon bakes, which
 // aren't static files. Keep this list in sync if those loads change.
-export function preloadCoreAssets() {
+//
+// `mobile`: preload the cropped ARENA_FRAME_MOBILE_SRC instead of the full
+// ARENA_FRAME_SRC — main.js already knows IS_MOBILE synchronously before
+// calling this, so there's no reason to pay for the desktop-sized download
+// on a phone that's about to load the small variant anyway in startGame().
+export function preloadCoreAssets(mobile = false) {
   const urls = [
     LIGHT_LAYER_SRC,
-    ARENA_FRAME_SRC,
+    mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC,
     BALL_SRC,
     ...Object.keys(ROCK_GLOW).flatMap((id) => [`${ASSET_BASE}rocks/${id}-flou.webp`, `${ASSET_BASE}rocks/${id}-light.webp`]),
     ...['A', 'B'].flatMap((team) => ['0', '1', '2', '3'].map((d) => `${ASSET_BASE}score-digits/${team}-${d}.png`)),
@@ -198,9 +208,26 @@ export function startGame(opts = {}) {
   // CSS box than the reasoning above originally called for — revert to
   // `mobile ? 2 : 1.3` if the crispness loss isn't worth it.
   const dpr = Math.min(window.devicePixelRatio || 1, 1.3);
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  // Mobile-only pre-crop (see "crop tool" conversation): the CSS zoom below
+  // (.stage-wrap-detached in style.css) only ever shows a sub-window of the
+  // full 3312x1896 art — on any device shape, the outer #game-card
+  // viewport-overflow clip can only narrow that further, never widen it, so
+  // this rect is a generous, device-shape-independent superset of what's
+  // ever actually visible on mobile. Everything outside it is guaranteed
+  // dead weight: full physics/entities/HUD math still runs in the real
+  // W x H logical space below (untouched — LAN determinism depends on that
+  // staying identical across devices), but the backing buffer itself is
+  // sized to just this rect instead of the full canvas, and ctx.translate
+  // shifts drawing into it — so the GPU never has to rasterize/composite
+  // the ~54% of the scene that CSS would've clipped away anyway. Desktop is
+  // unaffected (cropW/cropH just fall back to the full W/H).
+  const MOBILE_CROP = { x0: 793, y0: 286, x1: 3010, y1: 1580 };
+  const cropW = mobile ? MOBILE_CROP.x1 - MOBILE_CROP.x0 : W;
+  const cropH = mobile ? MOBILE_CROP.y1 - MOBILE_CROP.y0 : H;
+  canvas.width = cropW * dpr;
+  canvas.height = cropH * dpr;
   ctx.scale(dpr, dpr);
+  if (mobile) ctx.translate(-MOBILE_CROP.x0, -MOBILE_CROP.y0);
 
   // ---------- Audio ----------
   // Shared singleton (src/audio.js) — loading, muting, and ambience are all
@@ -353,8 +380,11 @@ export function startGame(opts = {}) {
     }
   }
 
+  // Mobile loads the pre-cropped ARENA_FRAME_MOBILE_SRC instead of the full
+  // arena art (see its comment above and MOBILE_CROP below) — same pixels,
+  // ~57% less to download/decode for the sub-rect mobile ever shows.
   const arenaFrameImage = new Image();
-  arenaFrameImage.src = ARENA_FRAME_SRC;
+  arenaFrameImage.src = mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC;
 
   // Ball sprite, baked at 2x its on-screen diameter: the ball rotates every
   // frame so it never sits on a 1:1 pixel grid anyway, and downsampling a 2x
@@ -754,32 +784,34 @@ export function startGame(opts = {}) {
   // ice extends that far, not just to FX0/FX1) — GY0..GY1 sits entirely
   // within each flat wall segment (clear of the corner chamfers), so this
   // stays one simple, non-self-intersecting polygon.
-  function traceHandoffMaskPath() {
-    ctx.beginPath();
-    ctx.moveTo(FX0 + CHAMFER_X, FY0);
-    ctx.lineTo(FX1 - CHAMFER_X, FY0);
-    ctx.lineTo(FX1, FY0 + CHAMFER_Y);
-    ctx.lineTo(FX1, GY0);
-    ctx.lineTo(NOTCH_X1, GY0);
-    ctx.lineTo(NOTCH_X1, GY1);
-    ctx.lineTo(FX1, GY1);
-    ctx.lineTo(FX1, FY1 - CHAMFER_Y);
-    ctx.lineTo(FX1 - CHAMFER_X, FY1);
-    ctx.lineTo(FX0 + CHAMFER_X, FY1);
-    ctx.lineTo(FX0, FY1 - CHAMFER_Y);
-    ctx.lineTo(FX0, GY1);
-    ctx.lineTo(NOTCH_X0, GY1);
-    ctx.lineTo(NOTCH_X0, GY0);
-    ctx.lineTo(FX0, GY0);
-    ctx.lineTo(FX0, FY0 + CHAMFER_Y);
-    ctx.closePath();
-  }
+  //
+  // Built once as a Path2D (FX0/FY0/etc are fixed for the whole match)
+  // instead of retraced via ctx.beginPath()/lineTo every frame the mask is
+  // visible — drawHandoffMask/drawHandoffShine both clip to this same
+  // object via ctx.clip(path) rather than rebuilding + ctx.clip() each time.
+  const HANDOFF_MASK_PATH = new Path2D();
+  HANDOFF_MASK_PATH.moveTo(FX0 + CHAMFER_X, FY0);
+  HANDOFF_MASK_PATH.lineTo(FX1 - CHAMFER_X, FY0);
+  HANDOFF_MASK_PATH.lineTo(FX1, FY0 + CHAMFER_Y);
+  HANDOFF_MASK_PATH.lineTo(FX1, GY0);
+  HANDOFF_MASK_PATH.lineTo(NOTCH_X1, GY0);
+  HANDOFF_MASK_PATH.lineTo(NOTCH_X1, GY1);
+  HANDOFF_MASK_PATH.lineTo(FX1, GY1);
+  HANDOFF_MASK_PATH.lineTo(FX1, FY1 - CHAMFER_Y);
+  HANDOFF_MASK_PATH.lineTo(FX1 - CHAMFER_X, FY1);
+  HANDOFF_MASK_PATH.lineTo(FX0 + CHAMFER_X, FY1);
+  HANDOFF_MASK_PATH.lineTo(FX0, FY1 - CHAMFER_Y);
+  HANDOFF_MASK_PATH.lineTo(FX0, GY1);
+  HANDOFF_MASK_PATH.lineTo(NOTCH_X0, GY1);
+  HANDOFF_MASK_PATH.lineTo(NOTCH_X0, GY0);
+  HANDOFF_MASK_PATH.lineTo(FX0, GY0);
+  HANDOFF_MASK_PATH.lineTo(FX0, FY0 + CHAMFER_Y);
+  HANDOFF_MASK_PATH.closePath();
   // Same left-to-right glint idea as drawSweepShine, stretched across the
   // whole rink instead of one patch's circle.
   function drawHandoffShine(t) {
     ctx.save();
-    traceHandoffMaskPath();
-    ctx.clip();
+    ctx.clip(HANDOFF_MASK_PATH);
     const bandW = (FX1 - FX0) * 0.35;
     const travel = (FX1 - FX0) + bandW * 2;
     const bandCx = (FX0 - bandW) + t * travel;
@@ -827,8 +859,7 @@ export function startGame(opts = {}) {
       maskAlpha = 1 - shineT;
     }
     ctx.save();
-    traceHandoffMaskPath();
-    ctx.clip();
+    ctx.clip(HANDOFF_MASK_PATH);
     ctx.globalAlpha = maskAlpha;
     // Baked wider than FX0..FX1 on purpose (NOTCH_X0..NOTCH_X1, see
     // scripts/bake_handoff_mask.py) to cover the goal-notch detours above —
@@ -1356,9 +1387,14 @@ export function startGame(opts = {}) {
   // ---------- Input ----------
   function getPointerPos(evt) {
     const rect = canvas.getBoundingClientRect();
-    const scaleX = W / rect.width, scaleY = H / rect.height;
+    // rect covers cropW/cropH worth of logical space on mobile (see the
+    // MOBILE_CROP backing-buffer setup above), not the full W/H — scale
+    // against that, then shift back into full logical space by the same
+    // crop origin ctx.translate offset the draw side uses.
+    const scaleX = cropW / rect.width, scaleY = cropH / rect.height;
     const t = evt.touches ? (evt.touches[0] || evt.changedTouches[0]) : evt;
-    return { x: (t.clientX - rect.left) * scaleX, y: (t.clientY - rect.top) * scaleY };
+    const offX = mobile ? MOBILE_CROP.x0 : 0, offY = mobile ? MOBILE_CROP.y0 : 0;
+    return { x: (t.clientX - rect.left) * scaleX + offX, y: (t.clientY - rect.top) * scaleY + offY };
   }
   function currentTeamStones() {
     const team = aimingTeam();
@@ -3423,7 +3459,12 @@ export function startGame(opts = {}) {
     ctx.clearRect(0, 0, W, H);
 
     if (arenaFrameImage.complete) {
-      ctx.drawImage(arenaFrameImage, 0, 0, W, H);
+      // Mobile's arenaFrameImage is pre-cropped to exactly the MOBILE_CROP
+      // rect (see its comment above) — same pixels, just placed back at
+      // that rect's own logical offset instead of (0,0) so nothing else
+      // needs to know the image itself is smaller than W x H.
+      if (mobile) ctx.drawImage(arenaFrameImage, MOBILE_CROP.x0, MOBILE_CROP.y0, cropW, cropH);
+      else ctx.drawImage(arenaFrameImage, 0, 0, W, H);
     } else {
       ctx.fillStyle = '#142451'; ctx.fillRect(0, 0, W, H);
     }
@@ -5165,6 +5206,14 @@ export function startGame(opts = {}) {
   function loop() {
     if (torn) return; // stray already-scheduled frame after stopGame() aborted the loop below
     const now = performance.now();
+    // Captured before updateHandoff() runs below (which can flip
+    // handoff.stage 'in'->'shown' mid-tick): the freeze check further down
+    // must use this pre-update snapshot, not a fresh read after the phase
+    // update, otherwise the exact frame the mask finishes fading in would
+    // both flip to 'shown' AND get its own render() skipped in the same
+    // tick — freezing on the last still-fading-in frame instead of the
+    // fully opaque one nobody's meant to see change again.
+    const wasHandoffShown = handoff !== null && handoff.stage === 'shown';
     if (import.meta.env.DEV) logSlowFrame(lastFrameTime === null ? 0 : now - lastFrameTime);
     // Capped so a backgrounded-tab reflow doesn't fling every particle across
     // the board in one giant jump when the frame comes back.
@@ -5263,7 +5312,19 @@ export function startGame(opts = {}) {
       }
     }
     const idleThrottled = isAimingPhase(phase) && !drag && (now - lastRenderTime < IDLE_RENDER_INTERVAL_MS);
-    if (!idleThrottled) {
+    // Pass & Play hand-off mask, fully shown: a static opaque overlay
+    // waiting for a tap (see onPointerDown's handoff.stage==='shown'
+    // branch) — everything underneath (full background blit, every entity,
+    // every glow) was still being recomputed and repainted every frame for
+    // something nobody can see, for however long it takes a human to pass
+    // the device and tap. Skip render() entirely once frozen — using
+    // wasHandoffShown (captured before updateHandoff() ran above) rather
+    // than handoff.stage directly, so the frame that just finished fading
+    // in still renders once (painting the fully opaque state) before any
+    // freezing starts; only frames where it was ALREADY 'shown' get
+    // skipped. The tap handler resets stageStart the instant it flips to
+    // 'out', so the very next frame resumes rendering the fade-out normally.
+    if (!idleThrottled && !wasHandoffShown) {
       lastRenderTime = now;
       render();
     }
