@@ -347,7 +347,11 @@ export function startGame(opts = {}) {
   // correct). Baked once here, during the same load-time pass that already
   // bakes every LED-state sprite, so drawStone() only ever needs a plain
   // drawImage() to show it — see the 'dead' sprite in tryBakeBubble below.
-  function desaturateSprite(src, amount) {
+  // lighten (0..1): after desaturating, lerp toward white by this fraction —
+  // the navy/gold source art is fairly dark, so a pure luminance-matched grey
+  // reads much darker than the "light grey" dead look this is meant to match
+  // (see conversation: a first pass with lighten=0 came out too dark/somber).
+  function desaturateSprite(src, amount, lighten = 0) {
     const w = src.width, h = src.height;
     const out = document.createElement('canvas');
     out.width = w; out.height = h;
@@ -361,6 +365,11 @@ export function startGame(opts = {}) {
       px[i] = gray + amount * (r - gray);
       px[i + 1] = gray + amount * (g - gray);
       px[i + 2] = gray + amount * (b - gray);
+      if (lighten > 0) {
+        px[i] += (255 - px[i]) * lighten;
+        px[i + 1] += (255 - px[i + 1]) * lighten;
+        px[i + 2] += (255 - px[i + 2]) * lighten;
+      }
     }
     octx.putImageData(imgData, 0, 0);
     return out;
@@ -380,7 +389,7 @@ export function startGame(opts = {}) {
     for (const key of LED_STATE_KEYS) if (!imgs[key]) return;
     bubbleSprites[team] = {};
     for (const key of LED_STATE_KEYS) bubbleSprites[team][key] = bakeBubble(imgs[key], id, STONE_R * 2);
-    bubbleSprites[team].dead = desaturateSprite(bubbleSprites[team]['0'], DEAD_SATURATION);
+    bubbleSprites[team].dead = desaturateSprite(bubbleSprites[team]['0'], DEAD_SATURATION, DEAD_LIGHTEN);
   }
   for (const team of ['A', 'B']) {
     getIdenticonCanvasStoneBust(IDENTICON_ADDRESS[team]).then((canvas) => {
@@ -633,6 +642,7 @@ export function startGame(opts = {}) {
   // frames) only ever counts as one hit — see registerStoneHit in resolveCollision
   const HIT_COOLDOWN_FRAMES = 20;
   const DEAD_SATURATION = 0.1;                 // 1 - 0.9: dead stones desaturate 90%
+  const DEAD_LIGHTEN = 0.35;                   // lerp toward white after desaturating — see desaturateSprite
 
   const PW = FX1 - FX0, PH = FY1 - FY0;
   const startPositions = {
@@ -3834,19 +3844,24 @@ export function startGame(opts = {}) {
     sprite.width = w; sprite.height = h;
     sprite.logicalWidth = w / s; sprite.logicalHeight = h / s;
     const sctx = sprite.getContext('2d');
-    sctx.fillStyle = `rgba(0,0,0,${Math.min(0.55, 0.5 * boost)})`;
+    // Cut down from 0.5/0.55 (see conversation — read as way too strong on
+    // mobile, where the dpr mismatch stretches the sprite and shows more of
+    // this peak alpha than desktop's tighter falloff let through): tuned so
+    // the visible sliver (see drawContactShadow's cx/cy offset) reads close
+    // to the ~30% opacity desktop already looked like.
+    sctx.fillStyle = `rgba(0,0,0,${Math.min(0.32, 0.3 * boost)})`;
     sctx.filter = `blur(${blur}px)`;
     sctx.beginPath();
     sctx.ellipse(w / 2, h / 2, rx, ry, 0, 0, Math.PI * 2);
     sctx.fill();
-    // small, near-sharp accent layered on top of the soft ambient shadow
-    // above — tighter radius and much less blur so it stays mostly hidden
-    // under the stone, but the sliver that survives past the silhouette
-    // (same side as the soft shadow's own offset) reads as a crisp dark
-    // contact line instead of the stone looking like it's floating just
-    // above the ice.
-    const accentBlur = Math.max(0.7, r * 0.02) * s;
-    sctx.fillStyle = `rgba(0,0,0,${Math.min(0.6, 0.55 * boost)})`;
+    // small accent layered on top of the soft ambient shadow above — used to
+    // be near-sharp (min blur, high alpha) so it read as a crisp contact
+    // line, but that's exactly what made mobile's stretch turn it into a
+    // second hard, dark shadow (see conversation). Much softer and fainter
+    // now: still a slightly denser core than the ambient layer alone, but no
+    // longer sharp enough to read as its own separate shape at any dpr.
+    const accentBlur = Math.max(0.7, r * 0.05) * s;
+    sctx.fillStyle = `rgba(0,0,0,${Math.min(0.22, 0.2 * boost)})`;
     sctx.filter = `blur(${accentBlur}px)`;
     sctx.beginPath();
     sctx.ellipse(w / 2, h / 2, rx * 0.8, ry * 0.8, 0, 0, Math.PI * 2);
