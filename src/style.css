@@ -1007,6 +1007,12 @@ button:disabled { opacity: 0.35; cursor: default; }
   border-radius: 20px;
   overflow: hidden;
 }
+/* Mobile: leave the right-hand column (--controller-reserved-w, see
+   .mobile-layout above) clear of tiles — that's the same column #bg-logo/
+   #connectBtn already live in and is earmarked for more controls later, so
+   the grid needs to stay out of it instead of running full-bleed under
+   them, same inset pattern as .mobile-layout #overlay below. */
+.mobile-layout .mode-drawer { right: var(--controller-reserved-w); }
 /* Per-tile line-art icon, one per mode (players-at-console, linked devices,
    robot-on-curling-stone, replay document) — ported from "Modes tuiles
    design ref.png"'s outlined icon set, redrawn as inline stroke SVGs so
