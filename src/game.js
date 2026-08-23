@@ -13,6 +13,7 @@ import { preloadTicketAssets, renderTicket } from './ticket.js';
 import { loadImages } from './preload.js';
 import * as recorder from './recorder.js';
 import { MAX_POINTS_ON_TICKET, pointTileRect, buildReplayUrl, POINTS_SECTION_Y, POINTS_SECTION_H, TICKET_W, TICKET_H } from './replay.js';
+import { DEFAULT_MATCH_CONFIG, STONE_SLOTS_BY_COUNT, TIMER_WARNING_SECONDS_BY_TURN_TIME, sanitizeMatchConfig } from './matchConfig.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 // Placeholder demo addresses, used unless opts.identiconAddress overrides a
@@ -57,6 +58,11 @@ const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
 // sub-rect mobile ever actually shows, so the phone downloads/decodes ~57%
 // less image data for art it was always going to crop away anyway.
 const ARENA_FRAME_MOBILE_SRC = `${ASSET_BASE}arena/frame-mobile.webp`;
+// Winter arena variant (see conversation — art already baked, just not
+// wired to a skin picker before matchConfig existed). Same desktop/mobile
+// pre-crop pairing as the summer frame above.
+const ARENA_FRAME_WINTER_SRC = `${ASSET_BASE}arena/frame-winter.webp`;
+const ARENA_FRAME_WINTER_MOBILE_SRC = `${ASSET_BASE}arena/frame-winter-mobile.webp`;
 const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
 // HUD rock glow — each of the 5 rocks baked into the arena art has a
 // hand-painted "flou"/soft halo + "light"/sharp core pair (Arena V2
@@ -112,7 +118,14 @@ export function preloadCoreAssets(mobile = false) {
 }
 
 export function startGame(opts = {}) {
-  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null } = opts;
+  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, matchConfig: rawMatchConfig = null } = opts;
+  // Centralized match rules (see src/matchConfig.js) — Classic is just this
+  // default preset; Custom is the same shape with different values. Every
+  // caller not yet wired to the Classic/Custom flow (vs AI, replay) simply
+  // omits `matchConfig` and gets Classic. Sanitized here (not trusted from
+  // opts as-is) since it may come back out of localStorage or off the wire
+  // (Remote Match's creator-sent config, see net.js/party/arbiter.js).
+  const matchConfig = sanitizeMatchConfig(rawMatchConfig || DEFAULT_MATCH_CONFIG);
   // Replay mode: replayPoints is an array of previously-recorded points (see
   // src/recorder.js + src/replay.js) — one if opened from a single-point QR
   // link, several if assembled from an uploaded ticket. Mutually exclusive
@@ -421,7 +434,9 @@ export function startGame(opts = {}) {
   // arena art (see its comment above and MOBILE_CROP below) — same pixels,
   // ~57% less to download/decode for the sub-rect mobile ever shows.
   const arenaFrameImage = new Image();
-  arenaFrameImage.src = mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC;
+  arenaFrameImage.src = matchConfig.skin === 'winter'
+    ? (mobile ? ARENA_FRAME_WINTER_MOBILE_SRC : ARENA_FRAME_WINTER_SRC)
+    : (mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC);
 
   // Ball sprite, baked at 2x its on-screen diameter: the ball rotates every
   // frame so it never sits on a 1:1 pixel grid anyway, and downsampling a 2x
@@ -628,7 +643,7 @@ export function startGame(opts = {}) {
   const DRAG_TICK_STEP = 8 * SCALE * ART_V2_SCALE; // px of drag distance between each dragTick retrigger, see onPointerMove
   const MAX_SPEED = 8 * ART_V2_SCALE;
   const STOP_THRESHOLD = 0.08 * ART_V2_SCALE;
-  const WIN_SCORE = 3;
+  const WIN_SCORE = matchConfig.pointsToWin;
   // Stone "damage": each impact against an opposing-team stone counts one hit
   // toward STONE_MAX_HITS (8 — 2 hits per LED, see STONE_HITS_PER_LED below).
   // LEDs/ring quadrants go out one at a time, top first then clockwise (see
@@ -645,10 +660,19 @@ export function startGame(opts = {}) {
   const DEAD_LIGHTEN = 0.35;                   // lerp toward white after desaturating — see desaturateSprite
 
   const PW = FX1 - FX0, PH = FY1 - FY0;
+  // Always the same 3 hand-measured rack slots regardless of matchConfig —
+  // never recomputed/re-spaced for fewer stones (see conversation: slot 1 is
+  // the center spot, 0/2 are the two outer ones). ACTIVE_STONE_SLOTS below
+  // picks which of these 3 indices actually get a stone; every other place
+  // that indexes into startPositions[team] (beginRoundReset,
+  // matchIntroHuddlePos, etc.) already does so by a stone's own id-encoded
+  // slot number, not by array position, so this array itself never needs to
+  // shrink/re-index (see resetPositions below for where slots become stones).
   const startPositions = {
     A: [{ x: FX0 + 0.16 * PW, y: FY0 + 0.267 * PH }, { x: FX0 + 0.13 * PW, y: FY0 + 0.5 * PH }, { x: FX0 + 0.16 * PW, y: FY0 + 0.733 * PH }],
     B: [{ x: FX1 - 0.16 * PW, y: FY0 + 0.267 * PH }, { x: FX1 - 0.13 * PW, y: FY0 + 0.5 * PH }, { x: FX1 - 0.16 * PW, y: FY0 + 0.733 * PH }],
   };
+  const ACTIVE_STONE_SLOTS = STONE_SLOTS_BY_COUNT[matchConfig.stonesPerTeam] || STONE_SLOTS_BY_COUNT[3];
 
   // Match-start intro (see beginMatchIntro further below): both teams' 3
   // stones start stacked vertically right in front of their own goal —
@@ -970,7 +994,7 @@ export function startGame(opts = {}) {
   let phase = 'start';
   // Visual-only 30s turn timer for the score panel LED bar — resets whenever aiming
   // starts for either team, has no effect on the phase state machine (see turnTimerProgress).
-  const TURN_TIMER_MS = 30000;
+  const TURN_TIMER_MS = matchConfig.turnTime * 1000;
   let turnTimerStart = 0;
   let turnTimerPhase = null;
   // beginMatchIntro()'s own animation clock + done-flag (see that function,
@@ -1389,8 +1413,13 @@ export function startGame(opts = {}) {
     };
   }
   function resetPositions() {
-    entities.A = startPositions.A.map((p, i) => makeStone('A', i, p));
-    entities.B = startPositions.B.map((p, i) => makeStone('B', i, p));
+    // Only the active slots (matchConfig.stonesPerTeam) get a stone — each
+    // one keeps its real rack-slot number as its id (e.g. team B's single
+    // stone at stonesPerTeam=1 is still "B1", the center slot), so every
+    // other place that reads a slot back off a stone's id (startPositions
+    // lookups, matchIntroHuddlePos) needs no changes at all.
+    entities.A = ACTIVE_STONE_SLOTS.map((slot) => makeStone('A', slot, startPositions.A[slot]));
+    entities.B = ACTIVE_STONE_SLOTS.map((slot) => makeStone('B', slot, startPositions.B[slot]));
     entities.ball = {
       x: CENTER_X, y: CY, vx: 0, vy: 0, r: BALL_R, mass: BALL_MASS, rot: 0,
       falling: false, fallScale: 1, out: false,
@@ -3155,7 +3184,9 @@ export function startGame(opts = {}) {
         <img class="ticket-img" id="ticketImg" alt="Ticket de match Nim-Curl">
       </div>
       <div class="goal-actions">
-        <button class="bigbtn" id="goalReplayBtn">▶ Rejouer</button>
+        <button class="bigbtn" id="goalPlayAgainBtn">▶ Play Again</button>
+        ${onChangeSettings ? '<button class="bigbtn" id="goalChangeSettingsBtn">⚙ Change Settings</button>' : ''}
+        <button class="bigbtn" id="goalMatchReplayBtn">🔁 Replay</button>
         <button class="bigbtn" id="goalShareBtn">📤 Partager</button>
         <button class="bigbtn" id="goalMenuBtn">🚪 Menu</button>
       </div>
@@ -3179,7 +3210,14 @@ export function startGame(opts = {}) {
       a.style.height = `${(POINTS_SECTION_H / TICKET_H) * 100}%`;
       ticketWrap.appendChild(a);
     });
-    document.getElementById('goalReplayBtn').onclick = () => {
+    // PLAY AGAIN: same matchConfig this instance was already started with
+    // (WIN_SCORE/TURN_TIMER_MS/ACTIVE_STONE_SLOTS/skin never change mid-
+    // instance) — an in-place reset, no new startGame() needed. Net mode:
+    // deliberately no extra ready-handshake here (see conversation) — same
+    // best-effort behavior "Rejouer" already had, each side's own tap just
+    // resets its own board locally, matching net mode's existing "both
+    // clients simulate independently" model.
+    document.getElementById('goalPlayAgainBtn').onclick = () => {
       audio.play('button');
       scoreA = 0; scoreB = 0; round = 1;
       sweep.A.used = false; sweep.B.used = false; sweep.A.rockClicked = false; sweep.B.rockClicked = false;
@@ -3190,6 +3228,33 @@ export function startGame(opts = {}) {
       // showVictory() above stopped it for the ticket screen — resume for
       // this fresh match (no matchIntro replay here, so no onEnded to do it).
       audio.playAmbience();
+    };
+    // CHANGE SETTINGS: tear this instance down and hand back to main.js,
+    // which owns the Custom Settings screen (outside this closure) — same
+    // teardown as Menu, just a different landing spot. For a net match this
+    // also closes the socket (see stopGame()), so the opponent naturally
+    // sees the existing "opponent left" screen rather than a new protocol.
+    if (onChangeSettings) {
+      document.getElementById('goalChangeSettingsBtn').onclick = () => {
+        audio.play('button');
+        stopGame();
+        onChangeSettings();
+      };
+    }
+    // REPLAY: replays this just-finished match from the in-memory points
+    // recorder.js already captured (recordManche/finishPoint), reusing the
+    // exact same replay engine as an uploaded ticket (see CLAUDE.md replay
+    // section) — but sourced directly from memory, bypassing the
+    // binary/QR round-trip entirely, so it works regardless of the 3-stone
+    // hardcoding in replay.js's encode/decode (out of scope, untouched —
+    // see conversation). Passes this same matchConfig through so a Custom
+    // match (any stonesPerTeam/pointsToWin/turnTime/skin) replays exactly
+    // as played, not as whatever Classic defaults to.
+    document.getElementById('goalMatchReplayBtn').onclick = () => {
+      audio.play('button');
+      const pointsToReplay = recorder.getPoints();
+      stopGame();
+      startGame({ onRockSound, onRockExit, onRockPower, onExit, matchConfig, mobile, identiconAddress: IDENTICON_ADDRESS, replayPoints: pointsToReplay });
     };
     document.getElementById('goalMenuBtn').onclick = () => { audio.play('button'); stopGame(); onExit?.(); };
     document.getElementById('goalShareBtn').onclick = async () => {
@@ -3670,9 +3735,13 @@ export function startGame(opts = {}) {
   // — this defines the drawImage box the baked ring is stamped into, so any
   // mismatch would stretch it off its baked position.
   const HEX_TIMER_R_OUTER = 90, HEX_TIMER_MARGIN = 6;
-  // Last 1/6 of the turn (last 5s of TURN_TIMER_MS=30s) switches to the red
-  // ring instead of grey, pulsing for urgency — feedback from conversation.
-  const HEX_TIMER_RED_FRACTION = 5 / 6;
+  // Last stretch of the turn switches to the red ring instead of grey,
+  // pulsing for urgency — feedback from conversation. Not a fixed fraction:
+  // an explicit warning-window LENGTH per turnTime (matchConfig.turnTime),
+  // e.g. 30s and 20s both warn for their last 5s, 10s only warns for its
+  // last 3s (see TIMER_WARNING_SECONDS_BY_TURN_TIME) — 30s's own value here
+  // reproduces the original always-5s/6-of-30s behavior exactly.
+  const HEX_TIMER_RED_FRACTION = 1 - (TIMER_WARNING_SECONDS_BY_TURN_TIME[matchConfig.turnTime] ?? 5) / matchConfig.turnTime;
   const HEX_TIMER_RED_PULSE_RATE = 5;
 
   // Clips to the pie-slice wedge spanning fractions [f0, f1) of the clock

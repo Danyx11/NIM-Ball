@@ -58,6 +58,13 @@ export class Arbiter extends Server {
   // plain per-room state like this.
   onStart() {
     this.players = { A: null, B: null };
+    // Room creator's chosen rules (see src/net.js's sendMatchConfig / main.js
+    // hostMatch) — set once by whoever connects first (team A), handed to
+    // team B in its own 'joined' message below the moment it connects. Stays
+    // a plain opaque blob as far as the arbiter is concerned, same as every
+    // other relayed payload here — matchConfig shape/defaults live in
+    // src/matchConfig.js, not duplicated here.
+    this.matchConfig = null;
     this.shots = { A: null, B: null };
     this.sweeps = { A: null, B: null };
     // Same per-team rolling cooldown as server/arbiter.js — independent of
@@ -114,7 +121,11 @@ export class Arbiter extends Server {
     // partyserver's connection.setState) — used in onMessage/onClose below
     // instead of re-deriving team from the raw ws connection identity.
     connection.setState({ team });
-    this.send(connection, { type: 'joined', team });
+    // Team A (creator) reads back null here (it hasn't sent its config yet
+    // at this point — it already knows its own choice locally, see main.js)
+    // and team B (joiner) gets whatever A already stored, assuming the
+    // normal flow (Custom Settings -> SAVE -> only then share the code).
+    this.send(connection, { type: 'joined', team, matchConfig: this.matchConfig });
     const opponent = this.players[otherTeam(team)];
     if (opponent) {
       this.send(opponent, { type: 'opponentJoined' });
@@ -127,7 +138,13 @@ export class Arbiter extends Server {
     if (team !== 'A' && team !== 'B') return;
     let msg;
     try { msg = JSON.parse(message); } catch { return; }
-    if (msg.type === 'shots') {
+    if (msg.type === 'matchConfig') {
+      // Only the creator (team A) is ever in a position to send this in the
+      // normal flow (see main.js's hostMatch) — no server-side enforcement
+      // beyond that, same trust model as every other client-sent field this
+      // arbiter already relays as-is (shots, chat text, etc).
+      this.matchConfig = msg.config;
+    } else if (msg.type === 'shots') {
       this.shots[team] = msg.stones;
       this.sweeps[team] = msg.sweep || null;
       if (this.shots.A && this.shots.B) {

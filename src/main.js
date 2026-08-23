@@ -6,6 +6,7 @@ import { connectNimiq, chooseAddress, getStoredAddress } from './nimiq.js';
 import { initBackground, preloadBackgroundAssets } from './background.js';
 import { connectLan, connectMatch } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
+import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
 import { audio } from './audio.js';
 
@@ -150,7 +151,7 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
     // longer participate in as a #game-card child.
     gameCard.appendChild(document.getElementById('chatBar'));
   }
-  ['overlay', 'replayBar', 'modeOverlay', 'replayUploadOverlay', 'syncToast'].forEach((id) => {
+  ['overlay', 'replayBar', 'modeOverlay', 'replayUploadOverlay', 'syncToast', 'classicCustomOverlay', 'customSettingsOverlay'].forEach((id) => {
     gameCard.appendChild(document.getElementById(id));
   });
 }
@@ -523,21 +524,177 @@ function showToolbar() {
 // without going through main.js's toolbar/logo at all. A function
 // declaration (not const) so it's hoisted — rockHandlers below references it
 // before this line runs.
-function returnToModeSelect() {
+// Split out of returnToModeSelect (below) so "Change Settings" (see
+// showVictory's onChangeSettings in game.js) can tear down the same match
+// chrome without necessarily landing back on #modeOverlay — it lands on
+// Custom Settings instead, pre-filled with the match that just ended.
+function hideMatchChrome() {
   activeStopGame = null;
   toolbarTop.classList.add('hidden');
   toolbarBottom.classList.add('hidden');
   mobileController.classList.add('hidden');
   startOverlay.classList.add('hidden');
+}
+
+function returnToModeSelect() {
+  hideMatchChrome();
   modeOverlay.classList.remove('hidden');
 }
 
+// ---- Classic / Custom match settings (Pass & Play + Remote Match only —
+// vs AI stays Classic-only and untouched, see conversation) — a screen
+// inserted after #modeOverlay's tiles (never modified, per explicit
+// request) and before each of those two modes' own existing entry flow.
+// Custom's per-field choices persist locally per mode (src/matchConfig.js,
+// same localStorage-backed pattern as src/settings.js's basicLaser flag) —
+// Pass & Play's Custom config and Remote's are two fully independent
+// presets, never cross-applied.
+const classicCustomOverlay = document.getElementById('classicCustomOverlay');
+const ccBackBtn = document.getElementById('ccBackBtn');
+const ccModeIcon = document.getElementById('ccModeIcon');
+const ccModeTitle = document.getElementById('ccModeTitle');
+const classicBtn = document.getElementById('classicBtn');
+const customBtn = document.getElementById('customBtn');
+const customSettingsOverlay = document.getElementById('customSettingsOverlay');
+const csModeIcon = document.getElementById('csModeIcon');
+const csModeTitle = document.getElementById('csModeTitle');
+const csBackBtn = document.getElementById('csBackBtn');
+const csResetBtn = document.getElementById('csResetBtn');
+const csSaveBtn = document.getElementById('csSaveBtn');
+const segControls = [...customSettingsOverlay.querySelectorAll('.seg-control')];
+
+const MODE_LABELS = { passplay: 'PASS & PLAY', remote: 'REMOTE MATCH' };
+// Reuses #modeOverlay's own tile icons (cloned, never a new asset) — see
+// explicit request not to introduce a new logo for these screens.
+function modeIconSvg(mode) {
+  const tile = mode === 'passplay' ? modeLocal : modeMatch;
+  return tile.querySelector('.mode-icon').cloneNode(true);
+}
+// Also tints the panel itself with the same background as the mode-select
+// tile this screen follows (see .half.a/.half.e in style.css) — both screens
+// are shared between Pass & Play and Remote Match rather than duplicated per
+// mode, so the tint is applied here rather than baked into the markup.
+function fillModeHeader(panelEl, iconEl, titleEl, mode) {
+  iconEl.replaceChildren(modeIconSvg(mode));
+  titleEl.textContent = MODE_LABELS[mode];
+  panelEl.classList.remove('mode-passplay', 'mode-remote');
+  panelEl.classList.add(mode === 'passplay' ? 'mode-passplay' : 'mode-remote');
+}
+
+// Called once a mode/config choice is actually ready to launch — resumes
+// that mode's own existing entry flow exactly as before this feature
+// (Pass & Play's #startOverlay ready-tap, Remote Match's Créer/Rejoindre
+// choice), just now carrying a matchConfig through it.
+let onConfigReady = null;
+// Where this screen's own Back arrow goes — Pass & Play reaches Classic/
+// Custom straight from #modeOverlay, so Back lands there; Remote Match
+// reaches it from the Créer/Rejoindre choice screen (see showMatchChoiceScreen
+// below), one step later, so Back should land there instead, not skip past
+// it straight to mode-select.
+let onConfigBack = null;
+
+function showClassicCustomScreen(mode, launch, goBack) {
+  onConfigReady = launch;
+  onConfigBack = goBack;
+  fillModeHeader(classicCustomOverlay, ccModeIcon, ccModeTitle, mode);
+  hideLobby();
+  modeOverlay.classList.add('hidden');
+  customSettingsOverlay.classList.add('hidden');
+  classicCustomOverlay.classList.remove('hidden');
+  classicBtn.onclick = () => {
+    audio.play('button');
+    classicCustomOverlay.classList.add('hidden');
+    onConfigReady?.({ ...DEFAULT_MATCH_CONFIG });
+  };
+  customBtn.onclick = () => {
+    audio.play('button');
+    showCustomSettingsScreen(mode, getCustomConfig(mode));
+  };
+}
+
+ccBackBtn.addEventListener('click', () => {
+  audio.play('button');
+  classicCustomOverlay.classList.add('hidden');
+  onConfigBack?.();
+});
+
+let customSettingsMode = null;
+let customSettingsDraft = { ...DEFAULT_MATCH_CONFIG };
+
+function renderCustomSettingsDraft() {
+  segControls.forEach((seg) => {
+    const field = seg.dataset.field;
+    const value = String(customSettingsDraft[field]);
+    seg.querySelectorAll('.seg-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.value === value);
+    });
+  });
+}
+
+// Reused both as the Custom Settings entry point from the Classic/Custom
+// fork above and directly by "Change Settings" (game.js's onChangeSettings)
+// on an already-finished match — the latter skips the fork entirely and
+// lands here pre-filled with whatever that match was actually playing with.
+function showCustomSettingsScreen(mode, initialConfig) {
+  customSettingsMode = mode;
+  customSettingsDraft = { ...initialConfig };
+  fillModeHeader(customSettingsOverlay, csModeIcon, csModeTitle, mode);
+  renderCustomSettingsDraft();
+  hideLobby();
+  modeOverlay.classList.add('hidden');
+  classicCustomOverlay.classList.add('hidden');
+  customSettingsOverlay.classList.remove('hidden');
+}
+
+segControls.forEach((seg) => {
+  const field = seg.dataset.field;
+  const numeric = field !== 'skin';
+  seg.querySelectorAll('.seg-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      audio.play('button');
+      customSettingsDraft[field] = numeric ? parseInt(btn.dataset.value, 10) : btn.dataset.value;
+      renderCustomSettingsDraft();
+    });
+  });
+});
+
+// Back: Custom Settings -> Classic/Custom fork (never straight to
+// mode-select — see explicit back-navigation request). Reopening the fork
+// with the same mode is enough; the in-progress Custom draft simply isn't
+// saved unless SAVE was actually pressed, matching RESET's own "preview
+// only" behavior below.
+csBackBtn.addEventListener('click', () => {
+  audio.play('button');
+  customSettingsOverlay.classList.add('hidden');
+  classicCustomOverlay.classList.remove('hidden');
+});
+
+// RESET previews the Classic values on-screen — it does not launch and does
+// not persist by itself (see conversation: SAVE is the only thing that
+// writes to localStorage), so a player can back out of an accidental Reset.
+csResetBtn.addEventListener('click', () => {
+  audio.play('button');
+  customSettingsDraft = { ...DEFAULT_MATCH_CONFIG };
+  renderCustomSettingsDraft();
+});
+
+csSaveBtn.addEventListener('click', () => {
+  audio.play('button');
+  setCustomConfig(customSettingsMode, customSettingsDraft);
+  customSettingsOverlay.classList.add('hidden');
+  onConfigReady?.({ ...customSettingsDraft });
+});
+
 modeLocal.addEventListener('click', () => {
   audio.play('button');
-  modeOverlay.classList.add('hidden');
-  startOverlay.classList.remove('hidden');
-  showToolbar();
-  activeStopGame = startGame({ ...rockHandlers, identiconAddress: identiconOverride('A'), mobile: IS_MOBILE });
+  showClassicCustomScreen('passplay', (config) => {
+    startOverlay.classList.remove('hidden');
+    showToolbar();
+    activeStopGame = startGame({
+      ...rockHandlers, identiconAddress: identiconOverride('A'), mobile: IS_MOBILE, matchConfig: config,
+      onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('passplay', config); },
+    });
+  }, returnToModeSelect);
 });
 
 modeMatch.addEventListener('click', () => {
@@ -641,7 +798,7 @@ async function joinLan(raw, joinBtn) {
   try {
     const net = await connectLan(addr);
     hideLoadingOverlay();
-    showWaitingScreen(net, (msg) => showLanJoinScreen(msg));
+    showWaitingScreen(net, (msg) => showLanJoinScreen(msg), net.matchConfig);
   } catch (err) {
     hideLoadingOverlay();
     showLanJoinScreen(err.message);
@@ -654,7 +811,7 @@ async function joinLan(raw, joinBtn) {
 // differs. `onLost(msg)` decides where "opponent disconnected" sends the
 // player back to — each mode's own entry screen, so an error there offers
 // the right retry (LAN address vs. match code) rather than a generic dead end.
-function showWaitingScreen(net, onLost) {
+function showWaitingScreen(net, onLost, matchConfig) {
   const teamLabel = net.myTeam === 'A' ? 'ÉQUIPE BLEUE' : 'ÉQUIPE JAUNE';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
   showLobby(`
@@ -662,7 +819,7 @@ function showWaitingScreen(net, onLost) {
     <h2>En attente de l'adversaire…</h2>
     <p>Partage le lien avec l'autre joueur si ce n'est pas déjà fait.</p>
   `);
-  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, onLost));
+  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, onLost, matchConfig));
   net.onDisconnect(() => onLost("L'autre joueur s'est déconnecté."));
 }
 
@@ -683,7 +840,7 @@ function showWaitingScreen(net, onLost) {
 // their own match (and start chatting) while the other is still sitting on
 // this screen with no startGame()/onChat() wired up yet to receive it —
 // those messages used to just silently vanish.
-function showReadyScreen(net, teamLabel, cls, onLost) {
+function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
   showLobby(`
     <span class="team-pill ${cls}">${teamLabel}</span>
     <h2>Adversaire connecté !</h2>
@@ -702,7 +859,14 @@ function showReadyScreen(net, teamLabel, cls, onLost) {
   net.onBothReady(() => {
     hideLobby();
     showToolbar();
-    activeStopGame = startGame({ ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), mobile: IS_MOBILE });
+    activeStopGame = startGame({
+      ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), mobile: IS_MOBILE, matchConfig,
+      // Remote Match only in practice (Duel LAN's magic link never goes
+      // through Classic/Custom, see conversation) — either player is free to
+      // reconfigure a fresh room after the match ends, creator/joiner roles
+      // don't carry over past a match's end.
+      onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('remote', matchConfig || DEFAULT_MATCH_CONFIG); },
+    });
   });
   net.onDisconnect(() => onLost("L'autre joueur s'est déconnecté."));
 }
@@ -736,17 +900,29 @@ function showMatchChoiceScreen(errorMsg) {
     </div>
     ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
   `);
-  document.getElementById('matchHostBtn').onclick = () => { audio.play('button'); hostMatch(); };
+  // "Créer" is the room creator — routes through Classic/Custom first (see
+  // conversation, point 13: the creator defines the rules, the joiner below
+  // never sees this screen at all and just receives whatever the creator
+  // saved). Persists/reads Remote's own Custom preset, independent from
+  // Pass & Play's (src/matchConfig.js).
+  document.getElementById('matchHostBtn').onclick = () => {
+    audio.play('button');
+    showClassicCustomScreen('remote', (config) => hostMatch(config), () => showMatchChoiceScreen());
+  };
   document.getElementById('matchJoinBtn').onclick = () => { audio.play('button'); showMatchJoinScreen(); };
 }
 
-async function hostMatch() {
+async function hostMatch(matchConfig) {
   const code = generateMatchCode();
   showLoadingOverlay();
   try {
     const net = await connectMatch(code);
+    // Stored server-side against this room (see party/arbiter.js) before
+    // sharing the code with anyone — the joiner receives it back in its own
+    // 'joined' message (net.js) once it connects, never sends its own.
+    net.sendMatchConfig(matchConfig);
     hideLoadingOverlay();
-    showMatchHostWaitingScreen(net, code);
+    showMatchHostWaitingScreen(net, code, matchConfig);
   } catch (err) {
     hideLoadingOverlay();
     showMatchChoiceScreen(err.message);
@@ -758,7 +934,7 @@ async function hostMatch() {
 // get here, see joinMatch below) and sends a disconnected opponent back to
 // the choice screen (a fresh "Créer" gets a fresh code — the old one, tied
 // to this now-empty room, isn't reused).
-function showMatchHostWaitingScreen(net, code) {
+function showMatchHostWaitingScreen(net, code, matchConfig) {
   const teamLabel = net.myTeam === 'A' ? 'ÉQUIPE BLEUE' : 'ÉQUIPE JAUNE';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
   showLobby(`
@@ -767,7 +943,7 @@ function showMatchHostWaitingScreen(net, code) {
     <p>Donne-lui ce code :</p>
     <div class="match-code">${code}</div>
   `);
-  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, (msg) => showMatchChoiceScreen(msg)));
+  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, (msg) => showMatchChoiceScreen(msg), matchConfig));
   net.onDisconnect(() => showMatchChoiceScreen("L'autre joueur s'est déconnecté."));
 }
 
@@ -794,7 +970,10 @@ async function joinMatch(code, joinBtn) {
   try {
     const net = await connectMatch(code);
     hideLoadingOverlay();
-    showWaitingScreen(net, (msg) => showMatchJoinScreen(msg));
+    // The creator's matchConfig, as stored server-side and handed back in
+    // this connection's own 'joined' message (see net.js/party/arbiter.js)
+    // — this client never chooses/sends its own (point 13 of the brief).
+    showWaitingScreen(net, (msg) => showMatchJoinScreen(msg), net.matchConfig);
   } catch (err) {
     hideLoadingOverlay();
     showMatchJoinScreen(err.message);
