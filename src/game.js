@@ -340,12 +340,39 @@ export function startGame(opts = {}) {
     bctx.restore();
     return bubble;
   }
+  // Manual per-pixel desaturation (same luminance-preserving matrix CSS/SVG's
+  // saturate() filter uses) instead of a live ctx.filter — that silently
+  // no-ops in some mobile in-app WebViews (see conversation: Nimiq Pay's dead
+  // stones never greyed out on phone even though the physics/hits state was
+  // correct). Baked once here, during the same load-time pass that already
+  // bakes every LED-state sprite, so drawStone() only ever needs a plain
+  // drawImage() to show it — see the 'dead' sprite in tryBakeBubble below.
+  function desaturateSprite(src, amount) {
+    const w = src.width, h = src.height;
+    const out = document.createElement('canvas');
+    out.width = w; out.height = h;
+    const octx = out.getContext('2d');
+    octx.drawImage(src, 0, 0);
+    const imgData = octx.getImageData(0, 0, w, h);
+    const px = imgData.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const r = px[i], g = px[i + 1], b = px[i + 2];
+      const gray = 0.213 * r + 0.715 * g + 0.072 * b;
+      px[i] = gray + amount * (r - gray);
+      px[i + 1] = gray + amount * (g - gray);
+      px[i + 2] = gray + amount * (b - gray);
+    }
+    octx.putImageData(imgData, 0, 0);
+    return out;
+  }
   // Bakes one composited sprite per LED state once the identicon AND every
   // one of that team's 6 state images have loaded — module ring + identicon
   // + LEDs all end up in the same pre-baked bitmap, so drawStone() never
   // does more than 1-2 plain drawImage() calls per frame regardless of
   // damage state (see conversation — this replaced a live shadowBlur redraw
-  // of the LEDs every frame).
+  // of the LEDs every frame). The extra 'dead' sprite (LEDs-at-zero art,
+  // desaturated) is what a killed stone crossfades to — see DEAD_SATURATION
+  // and drawStone.
   function tryBakeBubble(team) {
     const id = identiconSources[team];
     const imgs = moduleImages[team];
@@ -353,6 +380,7 @@ export function startGame(opts = {}) {
     for (const key of LED_STATE_KEYS) if (!imgs[key]) return;
     bubbleSprites[team] = {};
     for (const key of LED_STATE_KEYS) bubbleSprites[team][key] = bakeBubble(imgs[key], id, STONE_R * 2);
+    bubbleSprites[team].dead = desaturateSprite(bubbleSprites[team]['0'], DEAD_SATURATION);
   }
   for (const team of ['A', 'B']) {
     getIdenticonCanvasStoneBust(IDENTICON_ADDRESS[team]).then((canvas) => {
@@ -2369,7 +2397,19 @@ export function startGame(opts = {}) {
     const dx = e.x - wallX, dy = e.y - closestY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist === 0 || dist >= e.r) return false;
-    const nx = dx / dist, ny = dy / dist;
+    let nx = dx / dist;
+    const ny = dy / dist;
+    // Flat-wall segment (dy === 0: y already outside the goal mouth, see
+    // above) — the legal/interior side is fixed by which post this is, not
+    // by the entity's current displacement. Pinning it defends against the
+    // same already-crossed-the-line scenario GOAL_RECESSES' box-gating is
+    // meant to prevent ever reaching this branch in the first place (see
+    // conversation) — belt and suspenders at the recess-box boundary rather
+    // than a load-bearing fix here. The tip branch below (dy !== 0, grazing
+    // the post's own corner point) keeps the direction-from-displacement
+    // math, which is correct there since both sides of a point really are
+    // legitimate approach directions.
+    if (dy === 0) nx = wallX < CENTER_X ? 1 : -1;
     const vDotN = e.vx * nx + e.vy * ny;
     const spd = Math.abs(vDotN);
     const overlap = e.r - dist;
@@ -2397,6 +2437,39 @@ export function startGame(opts = {}) {
     { p: { x: FX1 - CHAMFER_X, y: FY1 }, p2: { x: FX1, y: FY1 - CHAMFER_Y }, n: cornerNorm(CHAMFER_Y, CHAMFER_X), box: { x0: FX1 - CHAMFER_X, x1: FX1 + 1, y0: FY1 - CHAMFER_Y, y1: FY1 + 1 } }, // BR
   ];
   function inCornerBox(e, box) { return e.x >= box.x0 && e.x <= box.x1 && e.y >= box.y0 && e.y <= box.y1; }
+  // Goal recess boundary: the outer post's flat-wall/tip approximation
+  // (collideGoalSide below) used to also stand in for the recess interior —
+  // one function pretending the wall was a straight line at FX0/FX1 for any
+  // y outside the mouth, and a single point at the post tip for y inside it.
+  // That missed the recess entirely: real art (confirmed 100% perpendicular,
+  // see conversation) is a rectangular notch — a short return straight in
+  // from the post tip to the back wall, the back wall itself, then the
+  // mirrored return back out — three real, connected wall segments, not one
+  // approximated line. Modeled here exactly like CORNERS above (a
+  // box-gated, closed chain of clamped-segment checks, same collideCorner
+  // math) instead of patching the old approximation further: this replaces
+  // it for the recess area outright, so exactly one collision model ever
+  // owns a given spot, same principle as the corner/flat-wall split.
+  const GOAL_RECESS_MARGIN = 1;
+  const GOAL_RECESSES = [
+    { // left goal
+      box: { x0: NOTCH_X0 - GOAL_RECESS_MARGIN, x1: FX0 + GOAL_RECESS_MARGIN, y0: GY0 - GOAL_RECESS_MARGIN, y1: GY1 + GOAL_RECESS_MARGIN },
+      segments: [
+        { p: { x: FX0, y: GY0 }, p2: { x: NOTCH_X0, y: GY0 } },      // top return
+        { p: { x: NOTCH_X0, y: GY0 }, p2: { x: NOTCH_X0, y: GY1 } }, // back wall
+        { p: { x: NOTCH_X0, y: GY1 }, p2: { x: FX0, y: GY1 } },      // bottom return
+      ],
+    },
+    { // right goal, mirrored
+      box: { x0: FX1 - GOAL_RECESS_MARGIN, x1: NOTCH_X1 + GOAL_RECESS_MARGIN, y0: GY0 - GOAL_RECESS_MARGIN, y1: GY1 + GOAL_RECESS_MARGIN },
+      segments: [
+        { p: { x: FX1, y: GY0 }, p2: { x: NOTCH_X1, y: GY0 } },
+        { p: { x: NOTCH_X1, y: GY0 }, p2: { x: NOTCH_X1, y: GY1 } },
+        { p: { x: NOTCH_X1, y: GY1 }, p2: { x: FX1, y: GY1 } },
+      ],
+    },
+  ];
+  function inRecessBox(e, box) { return e.x >= box.x0 && e.x <= box.x1 && e.y >= box.y0 && e.y <= box.y1; }
   // Proper clamped-segment closest point (not an infinite line) — degenerates
   // to circle-vs-point at the segment's own endpoints (p/p2), exactly where
   // the flat-wall checks in physicsStep stop applying, so the handoff
@@ -2563,20 +2636,19 @@ export function startGame(opts = {}) {
 
       if (!inTL && !inTR && e.y - e.r < FY0) { const spd = Math.abs(e.vy); e.y = FY0 + e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, -1, spd); playWallHit(spd, e.x, silent); }
       if (!inBL && !inBR && e.y + e.r > FY1) { const spd = Math.abs(e.vy); e.y = FY1 - e.r; e.vy = -e.vy * WALL_RESTITUTION; triggerSquish(e, 0, 1, spd); playWallHit(spd, e.x, silent); }
-      // See collideGoalSide above: posts are the corners of the two wall
-      // segments flanking the goal mouth, so a stone grazing one bounces off
-      // the post tip cleanly instead of the mouth/wall branches fighting over
-      // it frame to frame. Reused for BOTH the outer wall (FX0/FX1) and, as
-      // a fallback once past it, the recessed inner notch wall
-      // (NOTCH_X0/X1) — same post/tip shape at a shallower depth (see
-      // NOTCH_X0's own comment for why the goal mouth isn't simply open).
-      let blockedByPost = false;
-      if (!inTL && !inBL && e.x - e.r < FX0) blockedByPost = collideGoalSide(e, FX0, silent) || blockedByPost;
-      if (!inTR && !inBR && e.x + e.r > FX1) blockedByPost = collideGoalSide(e, FX1, silent) || blockedByPost;
-      if (!blockedByPost && Math.abs(e.y - CY) < GOAL_HALF_HEIGHT) {
-        if (e.x - e.r < NOTCH_X0) collideGoalSide(e, NOTCH_X0, silent);
-        if (e.x + e.r > NOTCH_X1) collideGoalSide(e, NOTCH_X1, silent);
-      }
+      // See collideGoalSide above: the post is the tip of the outer wall
+      // segment flanking the goal mouth, so a stone grazing it bounces off
+      // the post tip cleanly instead of the mouth/wall branches fighting
+      // over it frame to frame. Only covers the OUTER wall now — the recess
+      // interior (post tip -> return -> back wall -> return -> post tip) is
+      // its own closed segment chain below (see GOAL_RECESSES above), gated
+      // the same way CORNERS gates the flat walls, so exactly one collision
+      // model ever owns a given spot here too.
+      const inRecessL = inRecessBox(e, GOAL_RECESSES[0].box), inRecessR = inRecessBox(e, GOAL_RECESSES[1].box);
+      if (!inTL && !inBL && !inRecessL && e.x - e.r < FX0) collideGoalSide(e, FX0, silent);
+      if (!inTR && !inBR && !inRecessR && e.x + e.r > FX1) collideGoalSide(e, FX1, silent);
+      if (inRecessL) for (const s of GOAL_RECESSES[0].segments) collideCorner(e, s, silent);
+      if (inRecessR) for (const s of GOAL_RECESSES[1].segments) collideCorner(e, s, silent);
       for (const c of CORNERS) {
         if (inCornerBox(e, c.box)) collideCorner(e, c, silent);
       }
@@ -3738,16 +3810,29 @@ export function startGame(opts = {}) {
   // difference instead: still visibly tighter than the original 1.0, but the
   // sliver that pokes past the stone's own silhouette survives.
   const SHADOW_SIZE_SCALE = 0.85;
+  // Baked at extra internal resolution, independent of the screen's own dpr
+  // cap (see the dpr comment near the top of startGame): on a phone with a
+  // high real devicePixelRatio, the screen dpr cap undersamples the whole
+  // canvas relative to its displayed CSS size, which stretched this sprite's
+  // near-sharp accent ellipse (see below) enough to read as a second, harder
+  // shadow glued to the soft one instead of a subtle contact line. Baking at
+  // 3x and letting drawContactShadow scale it back down to logical size
+  // gives the blur gradient enough source pixels to stay smooth through that
+  // stretch, on every platform, for the cost of two small offscreen canvases
+  // baked once at load — not a per-frame cost.
+  const SHADOW_BAKE_SUPERSAMPLE = 3;
   function bakeContactShadowSprite(r, boost) {
+    const s = SHADOW_BAKE_SUPERSAMPLE;
     // blur scales with the entity's own radius rather than a fixed pixel amount —
     // a flat 3px blur reads as a subtle soft edge on a 38px stone, but on the much
     // smaller 17px ball it was smearing away most of the shadow's density
-    const blur = Math.max(1.2, r * 0.08);
-    const rx = r * boost * SHADOW_SIZE_SCALE, ry = r * 0.92 * boost * SHADOW_SIZE_SCALE;
+    const blur = Math.max(1.2, r * 0.08) * s;
+    const rx = r * boost * SHADOW_SIZE_SCALE * s, ry = r * 0.92 * boost * SHADOW_SIZE_SCALE * s;
     const pad = blur * 3; // generous margin so the blurred edge never gets cropped
     const w = Math.ceil((rx + pad) * 2), h = Math.ceil((ry + pad) * 2);
     const sprite = document.createElement('canvas');
     sprite.width = w; sprite.height = h;
+    sprite.logicalWidth = w / s; sprite.logicalHeight = h / s;
     const sctx = sprite.getContext('2d');
     sctx.fillStyle = `rgba(0,0,0,${Math.min(0.55, 0.5 * boost)})`;
     sctx.filter = `blur(${blur}px)`;
@@ -3760,7 +3845,7 @@ export function startGame(opts = {}) {
     // (same side as the soft shadow's own offset) reads as a crisp dark
     // contact line instead of the stone looking like it's floating just
     // above the ice.
-    const accentBlur = Math.max(0.7, r * 0.02);
+    const accentBlur = Math.max(0.7, r * 0.02) * s;
     sctx.fillStyle = `rgba(0,0,0,${Math.min(0.6, 0.55 * boost)})`;
     sctx.filter = `blur(${accentBlur}px)`;
     sctx.beginPath();
@@ -3805,8 +3890,9 @@ export function startGame(opts = {}) {
     // side the shadow actually pokes out past the stone — matching the bubble's
     // own compression there — and stays invisible on the opposite side.
     const shadowEntity = { x: cx, y: cy, r: g.r, squish: g.squish || 0, squishNX: g.squishNX, squishNY: g.squishNY };
+    const dw = sprite.logicalWidth, dh = sprite.logicalHeight;
     drawSquished(shadowEntity, () => {
-      ctx.drawImage(sprite, cx - sprite.width / 2, cy - sprite.height / 2);
+      ctx.drawImage(sprite, cx - dw / 2, cy - dh / 2, dw, dh);
     });
     ctx.restore();
   }
@@ -4133,11 +4219,6 @@ export function startGame(opts = {}) {
         ctx.save();
         ctx.translate(g.x, g.y);
         ctx.rotate(g.rot || 0);
-        // dead stone: desaturated 80%, permanently marked out of play (see
-        // registerStoneHit/STONE_MAX_HITS) — still fully solid for collisions.
-        // deadMix (0..1) lets a revived stone fade its color back in gradually
-        // instead of snapping, see beginRoundReset/updateRoundReset.
-        if (g.deadMix > 0.001) ctx.filter = `saturate(${1 - g.deadMix * (1 - DEAD_SATURATION)})`;
         if (state.dimKey && sprites[state.dimKey]) {
           // "last life" pulse: crossfade the dim floor sprite up to the same
           // bright '1' sprite the steady single-LED state already uses,
@@ -4148,7 +4229,15 @@ export function startGame(opts = {}) {
         } else {
           ctx.drawImage(sprite, -d / 2, -d / 2, d, d);
         }
-        ctx.filter = 'none';
+        // dead stone: crossfade to the pre-baked desaturated sprite (see
+        // tryBakeBubble/desaturateSprite — a live ctx.filter here silently
+        // no-ops in some mobile in-app WebViews). deadMix (0..1) lets a
+        // revived stone fade its color back in gradually instead of snapping,
+        // see beginRoundReset/updateRoundReset.
+        if (g.deadMix > 0.001 && sprites.dead) {
+          ctx.globalAlpha = g.deadMix;
+          ctx.drawImage(sprites.dead, -d / 2, -d / 2, d, d);
+        }
         ctx.restore();
         drawStoneGlassHighlight(g, d);
         // drawStoneLightLayer(g, d); // removed on request, kept defined — reversible
@@ -4685,7 +4774,12 @@ export function startGame(opts = {}) {
     const dx = b.x - wallX, dy = b.y - closestY;
     const dist = Math.hypot(dx, dy);
     if (dist === 0 || dist >= b.r) return null;
-    const nx = dx / dist, ny = dy / dist;
+    let nx = dx / dist;
+    const ny = dy / dist;
+    // See physicsStep's collideGoalSide for why the flat-wall branch pins
+    // the push direction instead of trusting the raw (possibly
+    // already-crossed) displacement.
+    if (dy === 0) nx = wallX < CENTER_X ? 1 : -1;
     const vDotN = b.vx * nx + b.vy * ny;
     const overlap = b.r - dist;
     b.x += nx * overlap; b.y += ny * overlap;
@@ -4790,15 +4884,16 @@ export function startGame(opts = {}) {
       let hitWall = null; // {axis, wall} — cosmetic snap for the drawn point, see below
       if (!inTL && !inTR && b.y - b.r < FY0) { b.y = FY0 + b.r; b.vy = -b.vy * WALL_RESTITUTION; hitWall = { axis: 'y', wall: FY0 }; }
       if (!inBL && !inBR && b.y + b.r > FY1) { b.y = FY1 - b.r; b.vy = -b.vy * WALL_RESTITUTION; hitWall = { axis: 'y', wall: FY1 }; }
-      let blockedByPost = false;
-      if (!inTL && !inBL && b.x - b.r < FX0) { const pt = ghostCollideGoalSide(b, FX0); if (pt) { hitWall = pt; blockedByPost = true; } }
-      if (!inTR && !inBR && b.x + b.r > FX1) { const pt = ghostCollideGoalSide(b, FX1); if (pt) { hitWall = pt; blockedByPost = true; } }
-      // Recessed inner notch wall, fallback only — in practice the bar check
-      // above almost always wins first (see its own comment).
-      if (!blockedByPost && Math.abs(b.y - CY) < GOAL_HALF_HEIGHT) {
-        if (b.x - b.r < NOTCH_X0) { const pt = ghostCollideGoalSide(b, NOTCH_X0); if (pt) hitWall = pt; }
-        if (b.x + b.r > NOTCH_X1) { const pt = ghostCollideGoalSide(b, NOTCH_X1); if (pt) hitWall = pt; }
-      }
+      // Recess interior (post tip -> return -> back wall -> return -> post
+      // tip): same closed segment chain as physicsStep's GOAL_RECESSES, not
+      // the old flat-wall/notch approximation — see its own comment. In
+      // practice the bar check above almost always wins first for the ball,
+      // but a stone's predicted line can still reach in here.
+      const inRecessL = inRecessBox(b, GOAL_RECESSES[0].box), inRecessR = inRecessBox(b, GOAL_RECESSES[1].box);
+      if (!inTL && !inBL && !inRecessL && b.x - b.r < FX0) { const pt = ghostCollideGoalSide(b, FX0); if (pt) hitWall = pt; }
+      if (!inTR && !inBR && !inRecessR && b.x + b.r > FX1) { const pt = ghostCollideGoalSide(b, FX1); if (pt) hitWall = pt; }
+      if (inRecessL) for (const s of GOAL_RECESSES[0].segments) { const pt = ghostCollideCorner(b, s); if (pt) hitWall = pt; }
+      if (inRecessR) for (const s of GOAL_RECESSES[1].segments) { const pt = ghostCollideCorner(b, s); if (pt) hitWall = pt; }
       for (const c of CORNERS) {
         if (inCornerBox(b, c.box)) { const pt = ghostCollideCorner(b, c); if (pt) hitWall = pt; }
       }

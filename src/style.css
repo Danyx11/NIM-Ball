@@ -1165,22 +1165,18 @@ button:disabled { opacity: 0.35; cursor: default; }
 #replayUploadStatus { font-size: 13px; color: var(--ink-dim); min-height: 18px; margin: 0; }
 
 /* Custom replay playback chrome — deliberately not the arcade #toolbar (see
-   CLAUDE.md). Three pieces, all absolutely positioned over the board:
-   a small corner exit button, a YouTube-style vertical rail of real point
-   thumbnails (see captureThumbnails in game.js) on the right, and a bottom
-   bar with a point-segmented scrubber + a centered prev/play-pause/next
-   transport pill (manche-level navigation — see jumpToManche). */
+   CLAUDE.md). Two pieces, both absolutely positioned over the board: a
+   YouTube-style vertical rail of real point thumbnails (see
+   captureThumbnails in game.js) on the right, and a bottom bar with a
+   point-segmented scrubber + a prev/play-pause/next/exit transport pill
+   (manche-level navigation — see jumpToManche). Exit used to be its own
+   corner-pinned button, but that corner sits inside #game-card's own
+   deliberate viewport-overflow margin (see .mobile-layout #game-card) and
+   got clipped off on mobile same as the transport pill originally did — folded
+   into the transport row instead of tuning yet another corner offset. */
 #replayBar { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
 #replayBar.hidden { display: none; }
 #replayBar > * { pointer-events: auto; }
-
-#replayExitBtn {
-  position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; padding: 0;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 50%; border: none; background: rgba(6,16,20,0.7); color: var(--ink);
-  cursor: pointer;
-}
-#replayExitBtn svg { width: 15px; height: 15px; display: block; }
 
 /* Sits outside the board itself (#stage-wrap is only 70% of #app's width,
    see style.css's own #stage-wrap rule) rather than over the ice — left:
@@ -1212,6 +1208,13 @@ button:disabled { opacity: 0.35; cursor: default; }
   padding: 10px 16px 14px;
   background: linear-gradient(0deg, rgba(6,16,20,0.92), rgba(6,16,20,0));
 }
+/* Mobile: bottom:0 sits at #game-card's own bottom edge, but #game-card is
+   deliberately oversized and overflows the real viewport on every side (see
+   .mobile-layout #game-card above) — the transport pill ended up in that
+   clipped-off margin, unreadable. % (not px) since #game-card's aspect ratio
+   is fixed, so the wood-beam's fractional height inside it is too — tuned
+   interactively to land the pill on the bottom wood beam. */
+.mobile-layout #replayBottomBar { bottom: 10%; }
 #replaySegments { display: flex; width: 100%; max-width: 520px; gap: 4px; }
 .replay-segment {
   flex: 1; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.15); cursor: pointer;
@@ -1227,6 +1230,17 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 #replaySoundBtn svg, #replayPrevBtn svg, #replayNextBtn svg { width: 18px; height: 18px; display: block; }
 #replaySoundBtn.muted { color: var(--ink-dim); }
+/* Quit action, not a transport control — darker fill (was its own
+   corner button's exact background, see CLAUDE.md replay note) and an extra
+   14px of breathing room past the transport row's own 22px gap keeps it
+   reading as a separate "leave" affordance instead of a 5th playback button. */
+#replayExitBtn {
+  flex: 0 0 auto; width: 36px; height: 36px; padding: 0; margin-left: 14px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: none; background: rgba(6,16,20,0.7); color: var(--ink);
+  cursor: pointer;
+}
+#replayExitBtn svg { width: 18px; height: 18px; display: block; }
 #replayPlayBtn {
   flex: 0 0 auto; width: 54px; height: 54px; padding: 0;
   display: flex; align-items: center; justify-content: center;
