@@ -473,6 +473,12 @@ connectBtn.addEventListener('click', () => {
 // picker), but it's still reachable via the `?duel` magic link below, which
 // passes {net, myTeam} once both players are connected — see joinLan().
 const modeOverlay = document.getElementById('modeOverlay');
+// The tile grid specifically, not the whole #modeOverlay — Classic/Custom
+// and Custom Settings (see below) keep #modeOverlay itself visible so its
+// arena backdrop (#modeOverlayBg + .mode-select-scrim) shows through their
+// own translucent panel, same as the mode tiles do; only the tiles
+// themselves need hiding underneath.
+const modeDrawer = modeOverlay.querySelector('.mode-drawer');
 const modeLocal = document.getElementById('modeLocal');
 const modeMatch = document.getElementById('modeMatch');
 const modeSolo = document.getElementById('modeSolo');
@@ -538,6 +544,7 @@ function hideMatchChrome() {
 
 function returnToModeSelect() {
   hideMatchChrome();
+  modeDrawer.classList.remove('hidden');
   modeOverlay.classList.remove('hidden');
 }
 
@@ -598,7 +605,8 @@ function showClassicCustomScreen(mode, launch, goBack) {
   onConfigBack = goBack;
   fillModeHeader(classicCustomOverlay, ccModeIcon, ccModeTitle, mode);
   hideLobby();
-  modeOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
   customSettingsOverlay.classList.add('hidden');
   classicCustomOverlay.classList.remove('hidden');
   classicBtn.onclick = () => {
@@ -641,7 +649,8 @@ function showCustomSettingsScreen(mode, initialConfig) {
   fillModeHeader(customSettingsOverlay, csModeIcon, csModeTitle, mode);
   renderCustomSettingsDraft();
   hideLobby();
-  modeOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
   classicCustomOverlay.classList.add('hidden');
   customSettingsOverlay.classList.remove('hidden');
 }
@@ -688,6 +697,7 @@ csSaveBtn.addEventListener('click', () => {
 modeLocal.addEventListener('click', () => {
   audio.play('button');
   showClassicCustomScreen('passplay', (config) => {
+    modeOverlay.classList.add('hidden');
     startOverlay.classList.remove('hidden');
     showToolbar();
     activeStopGame = startGame({
@@ -907,7 +917,7 @@ function showMatchChoiceScreen(errorMsg) {
   // Pass & Play's (src/matchConfig.js).
   document.getElementById('matchHostBtn').onclick = () => {
     audio.play('button');
-    showClassicCustomScreen('remote', (config) => hostMatch(config), () => showMatchChoiceScreen());
+    showClassicCustomScreen('remote', (config) => { modeOverlay.classList.add('hidden'); hostMatch(config); }, () => { modeOverlay.classList.add('hidden'); showMatchChoiceScreen(); });
   };
   document.getElementById('matchJoinBtn').onclick = () => { audio.play('button'); showMatchJoinScreen(); };
 }

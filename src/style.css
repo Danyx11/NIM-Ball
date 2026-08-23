@@ -1013,6 +1013,11 @@ button:disabled { opacity: 0.35; cursor: default; }
    the grid needs to stay out of it instead of running full-bleed under
    them, same inset pattern as .mobile-layout #overlay below. */
 .mobile-layout .mode-drawer { right: var(--controller-reserved-w); }
+/* Hidden while Classic/Custom or Custom Settings show over the same
+   #modeOverlay backdrop (see main.js's modeDrawer) — every hideable element
+   in this file gets its own scoped .hidden rule rather than a generic one,
+   same convention as #overlay.hidden/.team-select.hidden/etc. above. */
+.mode-drawer.hidden { display: none; }
 /* Per-tile line-art icon, one per mode (players-at-console, linked devices,
    robot-on-curling-stone, replay document) — ported from "Modes tuiles
    design ref.png"'s outlined icon set, redrawn as inline stroke SVGs so
