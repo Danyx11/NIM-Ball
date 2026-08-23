@@ -65,6 +65,16 @@ function connectSocket(url) {
 
     const net = {
       myTeam: null,
+      // Match Réseau only (see main.js's hostMatch/showReadyScreen — Duel LAN
+      // never sends this, its own matchConfig stays null/undefined and
+      // startGame() falls back to Classic, see src/matchConfig.js): the room
+      // creator's chosen rules, sent once right after connecting and stored
+      // server-side (party/arbiter.js) so a joiner receives it back in its
+      // own 'joined' message below instead of choosing its own.
+      matchConfig: null,
+      sendMatchConfig(config) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matchConfig', config }));
+      },
       sendShots(stones, sweep = null) {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'shots', stones, sweep }));
       },
@@ -125,6 +135,7 @@ function connectSocket(url) {
       try { msg = JSON.parse(evt.data); } catch { return; }
       if (msg.type === 'joined') {
         net.myTeam = msg.team;
+        net.matchConfig = msg.matchConfig || null;
         settled = true;
         resolve(net);
       } else if (msg.type === 'full') {

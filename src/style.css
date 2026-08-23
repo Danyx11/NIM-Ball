@@ -1013,6 +1013,11 @@ button:disabled { opacity: 0.35; cursor: default; }
    the grid needs to stay out of it instead of running full-bleed under
    them, same inset pattern as .mobile-layout #overlay below. */
 .mobile-layout .mode-drawer { right: var(--controller-reserved-w); }
+/* Hidden while Classic/Custom or Custom Settings show over the same
+   #modeOverlay backdrop (see main.js's modeDrawer) — every hideable element
+   in this file gets its own scoped .hidden rule rather than a generic one,
+   same convention as #overlay.hidden/.team-select.hidden/etc. above. */
+.mode-drawer.hidden { display: none; }
 /* Per-tile line-art icon, one per mode (players-at-console, linked devices,
    robot-on-curling-stone, replay document) — ported from "Modes tuiles
    design ref.png"'s outlined icon set, redrawn as inline stroke SVGs so
@@ -1024,6 +1029,74 @@ button:disabled { opacity: 0.35; cursor: default; }
    different viewBox aspect ratios. */
 .mode-icon { height: 36px; width: auto; color: rgba(255,255,255,0.92); }
 .mode-icon-tall { height: 30.6px; }
+
+/* ---- Classic/Custom + Custom Settings screens (see main.js) — shown after
+   Pass & Play / Remote Match is picked from #modeOverlay above, never for
+   vs AI. Left 3/4 of #game-card, same reasoning/technique as #overlay and
+   .mode-drawer above: on desktop #game-card is already just the bounded
+   arena card (not the full viewport, see :root --card-w), so a plain right:
+   25% reads as "3/4 left, game art visible on the right"; on mobile it
+   reuses the exact same --controller-reserved-w column those two already
+   keep clear of the joystick controller, per explicit request to match the
+   mode tiles' own technique instead of inventing a new one. */
+.config-panel {
+  position: absolute; inset: 6% 25% 6% 6%; z-index: 5;
+  background: rgba(6,16,20,0.92); border-radius: 24px;
+  display: flex; flex-direction: column; padding: 28px 32px;
+  box-sizing: border-box; overflow: auto;
+}
+.config-panel.hidden { display: none; }
+.mobile-layout .config-panel { right: var(--controller-reserved-w); }
+/* Same background tint as the mode-select tile this screen follows (see
+   .half.a/.half.e in the mode-drawer rules above) — set via JS (main.js's
+   applyPanelMode) since the same two panels are reused for both Pass & Play
+   and Remote Match rather than duplicated per mode. */
+.config-panel.mode-passplay { background: rgba(31,111,168,0.55); }
+.config-panel.mode-remote { background: rgba(168,110,50,0.55); }
+.config-header { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 28px; }
+.config-mode-icon { display: flex; align-items: center; }
+.config-mode-icon svg { height: 32px; width: auto; color: #fff; }
+.config-mode-title { font-weight: 800; font-size: 20px; letter-spacing: 0.5px; color: #fff; }
+.config-back {
+  position: absolute; top: 24px; left: 28px; width: 40px; height: 40px;
+  border-radius: 50%; background: rgba(255,255,255,0.12); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.config-back svg { width: 20px; height: 20px; flex-shrink: 0; }
+.config-back:hover { background: rgba(255,255,255,0.22); }
+
+/* Side by side, not stacked — see explicit request. */
+.config-presets { display: flex; flex-direction: row; gap: 16px; justify-content: center; align-items: center; flex: 1; }
+.config-preset-btn {
+  flex: 1; max-width: 260px;
+  background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.18);
+  border-radius: 18px; padding: 28px 26px; text-align: center; color: #fff;
+  transition: background .15s ease, border-color .15s ease;
+}
+.config-preset-btn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
+.config-preset-name { font-weight: 800; font-size: 22px; letter-spacing: 0.5px; color: #fff; }
+
+.config-rows { display: flex; flex-direction: column; gap: 22px; flex: 1; justify-content: center; }
+/* Label left, control right, one line — never stacked, mobile included (see
+   explicit request: no label-above-control layout on narrow screens). */
+.config-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
+.config-label { font-weight: 700; font-size: 13px; letter-spacing: 0.6px; color: var(--ink-dim); white-space: nowrap; }
+
+.seg-control {
+  display: flex; flex-direction: row; background: rgba(255,255,255,0.06);
+  border-radius: 12px; padding: 4px; gap: 4px; flex-shrink: 0;
+}
+.seg-btn {
+  min-width: 44px; min-height: 40px; padding: 8px 14px; border-radius: 9px;
+  font-weight: 700; font-size: 13px; color: var(--ink-dim); letter-spacing: 0.3px;
+  transition: background .15s ease, color .15s ease;
+}
+.seg-btn.active { background: var(--accent); color: #3a2900; }
+.seg-btn:not(.active):hover { background: rgba(255,255,255,0.08); color: var(--ink); }
+
+.config-footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+.config-reset { background: rgba(255,255,255,0.1); color: var(--ink); }
+.config-save { background: var(--accent); color: #3a2900; }
 
 #overlay input[type="text"] {
   font-family: inherit; font-size: 15px; color: var(--ink); background: var(--bg-mid);
