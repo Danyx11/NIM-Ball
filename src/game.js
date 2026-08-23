@@ -3482,7 +3482,13 @@ export function startGame(opts = {}) {
   //   is false (matches the old toolbar cap's own on/off icon swap)
   // - exit/play: always lit at baseline, with a brief dip-then-recover
   //   flicker on click (ROCK_FLASH_MS)
+  //
+  // Mobile-only: these rocks' functions are all reachable from the mobile
+  // controller (see index.html's #mobileController), and their carved icons
+  // are cleaned off frame-mobile.webp (see conversation), so the glow is
+  // switched off there too rather than lighting up now-blank stone.
   function drawRockGlow() {
+    if (mobile) return;
     const team = aimingTeam();
     const iceLit = team ? !sweep[team].rockClicked : !(sweep.A.rockClicked || sweep.B.rockClicked);
     const alphas = {
