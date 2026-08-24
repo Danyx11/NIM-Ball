@@ -114,7 +114,23 @@ export function preloadCoreAssets(mobile = false) {
     `${ASSET_BASE}handoff/ice-mask.webp`,
     ...['A', 'B'].flatMap((team) => LED_STATE_KEYS.map((key) => LED_STATE_SRC[team][key])),
   ];
-  return Promise.all([loadImages(urls), preloadTicketAssets()]);
+  // Also warms the default-address identicon bust canvases (see
+  // tryBakeBubble/getIdenticonCanvasStoneBust below) — @nimiq/identicons
+  // lazy-fetches its own shape/color SVG spritesheet on its very first call
+  // per page load, which otherwise landed right at match start and showed as
+  // flat-color "unicolor" stones (drawFallbackBubble) for a second or two
+  // until tryBakeBubble had something to bake. Both caches this warms
+  // (identicons.js's canvasCache/stoneBustCanvasCache) are module-level and
+  // address-keyed, so startGame() below hits them for free as long as it
+  // ends up using these same default addresses — a real Hub-connected
+  // address picked later still pays its own (much smaller, spritesheet
+  // already warm) first-render cost. Errors swallowed here since a failed
+  // warm-up shouldn't be fatal — startGame() just retries the real fetch itself.
+  const identiconWarmup = Promise.all([
+    getIdenticonCanvasStoneBust(DEFAULT_IDENTICON_ADDRESS.A),
+    getIdenticonCanvasStoneBust(DEFAULT_IDENTICON_ADDRESS.B),
+  ]).catch(() => {});
+  return Promise.all([loadImages(urls), preloadTicketAssets(), identiconWarmup]);
 }
 
 export function startGame(opts = {}) {
@@ -3224,6 +3240,15 @@ export function startGame(opts = {}) {
       matchStartTime = performance.now();
       totalCollisions = 0; bestShotSpeed = 0; stonesDestroyed = 0;
       recorder.reset();
+      resetSharedMatchChrome();
+      // Net mode only — the match that just ended already settled its own
+      // last manche (a win only ever resolves after that), so these are
+      // realistically already at rest, but reset explicitly rather than
+      // trust that: an in-place restart like this one doesn't get a fresh
+      // closure to fall back on if any of it wasn't. chatMuted is
+      // deliberately left alone — a real user preference for this session,
+      // not leftover match state, see resetSharedMatchChrome's own comment.
+      mancheValidated = true; currentMancheIndex = null; pendingMancheAdvance = null; syncWaitTimerActive = false;
       resetPositions(); beginAimPhase(); hideOverlay();
       // showVictory() above stopped it for the ticket screen — resume for
       // this fresh match (no matchIntro replay here, so no onEnded to do it).
@@ -5367,6 +5392,21 @@ export function startGame(opts = {}) {
   // (toolbar/logo confirm dialogs); goalMenuBtn/replayExitBtn above call it
   // directly since they already have closure access, then hand off to
   // opts.onExit for the "now show mode-select" part this closure doesn't own.
+  // #chatTextA/B and #syncToast are persistent, page-level DOM shared across
+  // every match instance — unlike canvas-drawn content (redrawn fresh every
+  // frame straight from this instance's own state, so it can never leak) or
+  // #chatEmojiPickerA/B (already rebuilt fresh per instance, see
+  // buildEmojiPicker's own comment on this same class of bug), these two
+  // only ever change reactively (a chat send, a sync-mismatch event) — with
+  // nothing to react to yet in a brand new match, whatever they were last
+  // set to keeps right on showing. Called both by stopGame() below (leaving
+  // a match entirely) and by "Play Again" (same instance, so there's no
+  // fresh DOM to inherit a clean slate from either).
+  function resetSharedMatchChrome() {
+    chatTextA.textContent = ''; chatTextB.textContent = '';
+    syncToast.classList.add('hidden'); syncToast.classList.remove('problem');
+  }
+
   function stopGame() {
     if (torn) return;
     torn = true;
@@ -5385,6 +5425,14 @@ export function startGame(opts = {}) {
     hideOverlay();
     if (isReplay) hideReplayBar();
     chatBar.classList.add('hidden');
+    resetSharedMatchChrome();
+    // chatMuted itself is this instance's own closure state, already gone
+    // once this instance is torn down — the NEXT instance's chatMuted starts
+    // at its own default (false), so the slash icon needs to agree with
+    // that here (see resetSharedMatchChrome's own comment: not safe to fold
+    // this into it, "Play Again" reuses this instance's real chatMuted value
+    // instead of resetting it, and would otherwise fall out of sync with it).
+    chatBtnSlash.classList.remove('show');
     // Visual ready-state left on #startOverlay's tiles (see halfA/halfB
     // above) would otherwise show as already-ready the next time a local
     // match is picked from mode-select.

@@ -1039,14 +1039,26 @@ button:disabled { opacity: 0.35; cursor: default; }
    reuses the exact same --controller-reserved-w column those two already
    keep clear of the joystick controller, per explicit request to match the
    mode tiles' own technique instead of inventing a new one. */
+/* Sized to its own content (fit-content, capped by the same left-3/4 bounds
+   the old fixed-size box used) rather than stretched to fill that whole
+   zone — Classic/Custom (2 buttons) and Custom Settings (4 rows + footer)
+   end up different heights, each no bigger than it needs to be. Centered
+   on both axes within the left-3/4 zone itself (the midpoint between the 6%
+   left margin and the 25%-from-the-right boundary), not the full card. */
 .config-panel {
-  position: absolute; inset: 6% 25% 6% 6%; z-index: 5;
+  position: absolute; top: 50%; left: calc((6% + (100% - 25%)) / 2);
+  transform: translate(-50%, -50%); z-index: 5;
+  width: fit-content; max-width: calc(100% - 6% - 25%);
+  height: fit-content; max-height: 88%;
   background: rgba(6,16,20,0.92); border-radius: 24px;
-  display: flex; flex-direction: column; padding: 28px 32px;
+  display: flex; flex-direction: column; padding: 26px 30px;
   box-sizing: border-box; overflow: auto;
 }
 .config-panel.hidden { display: none; }
-.mobile-layout .config-panel { right: var(--controller-reserved-w); }
+.mobile-layout .config-panel {
+  left: calc((6% + (100% - var(--controller-reserved-w))) / 2);
+  max-width: calc(100% - 6% - var(--controller-reserved-w));
+}
 /* Same background tint as the mode-select tile this screen follows (see
    .half.a/.half.e in the mode-drawer rules above) — set via JS (main.js's
    applyPanelMode) since the same two panels are reused for both Pass & Play
