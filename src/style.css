@@ -1,4 +1,13 @@
 :root {
+  /* --bg-deep/--ink/--ink-dim/--teamA/--teamB/--accent/--panel: these 7 are
+     also defined in src/colors.js and overwritten on this element by
+     main.js at startup (synchronously, before the loading overlay ever
+     lifts — see that file's own comment) — colors.js is the real source of
+     truth for them now, ticket.js's canvas rendering reads the same module
+     directly. The literal values below are only a static fallback (what a
+     person reading this file alone sees), kept equal to colors.js by hand;
+     everything else in this block was never duplicated anywhere else, so
+     it stays plain CSS, no indirection needed. */
   --bg-deep: #0b1f2a;
   --bg-mid: #12313f;
   --ink: #eef6f4;
@@ -15,6 +24,21 @@
      this is the verified official hex, not an approximation. */
   --accent: #e9b213;
   --panel: #143844;
+  /* Nimiq Blue (#1F2348) at the official kit's own descending-alpha stops
+     (nimiq-ui-kit's "Light opacity ladder" — the greyscale TEXT system,
+     --text-100.._50 there) — used by the sidebar (see #sidebar further down)
+     to drive its whole text/surface hierarchy off one color + alpha instead
+     of picking new ad-hoc grays per element. Only the handful of stops the
+     sidebar actually uses are declared, not the full ladder (the kit's own
+     also goes down to a 12/14/16/20/22 tier for hairline surfaces — --nb-12
+     below is the one of those actually needed here, for hover/active fills). */
+  --nb-100: rgba(31, 35, 72, 1);
+  --nb-80: rgba(31, 35, 72, 0.8);
+  --nb-70: rgba(31, 35, 72, 0.7);
+  --nb-60: rgba(31, 35, 72, 0.6);
+  --nb-50: rgba(31, 35, 72, 0.5);
+  --nb-16: rgba(31, 35, 72, 0.16);
+  --nb-12: rgba(31, 35, 72, 0.12);
   /* Scrim depths reused across every full-panel dark backdrop (#overlay,
      .config-panel, #replayUploadOverlay, #syncToast, #replayExitBtn) — same
      rgb triple (Nimiq-Blue-ish near-black), only the alpha differs by how
@@ -88,7 +112,7 @@ html, body {
      up to half of --joy-d-full, but never more than the slack already
      sitting to its right minus a 12px safety margin; clamped to 0 on a
      viewport too narrow to spare any slack at all. */
-  --joy-free-h: calc(100vh - 16px - 146px);
+  --joy-free-h: calc(100dvh - 16px - 146px);
   --joy-d-full: min(calc(var(--right-margin) - 48px), calc(var(--joy-free-h) - 32px), 260px);
   --joy-shift-x: max(0px, min(calc(var(--joy-d-full) / 2), calc((var(--right-margin) - var(--joy-d-full)) / 2 - 12px)));
   /* Distance from the viewport's right edge to that alignment line, so
@@ -153,83 +177,268 @@ html, body {
   --controller-reserved-w: calc(36px + clamp(147px, 23vw, 225px));
 }
 
-#bg-logo {
+/* ---- Desktop utility sidebar (Nimiq UI Kit language) --------------------
+   Fills the --right-margin column (:root, 20vw) reserved next to #game-card
+   with one flex column — brand tile, nav, identity pill — instead of the
+   two independently-floating pieces (#bg-logo, #connectBtn) this replaces.
+   The column itself (body's Nimiq Gray, #f4f4f4) is already the surface —
+   deliberately no card wrapping the whole thing, per explicit request.
+   Mobile keeps #bg-logo/#connectBtn exactly where/how they were: this
+   wrapper (and .sidebar-brand) go display:contents there so they don't
+   impose a box of their own, letting the original .mobile-layout #bg-logo/
+   #connectBtn position:fixed rules further down apply unchanged; .sidebar-nav
+   is hidden outright (mobile's own nav treatment is a later task). */
+#sidebar {
   position: fixed;
   z-index: 2;
-  top: 16px;
-  cursor: pointer;
-  /* Centered in the 20vw reserved column (--right-margin) — the same clamp()
-     expression appears in both width and right so the centering math stays
-     correct at every size, not just the design-reference one. Was a fixed
-     255px (~90% of the column on a narrower desktop window, edge-to-edge);
-     shrunk to a comfortable fraction of the column itself instead, per
-     explicit request. */
-  width: clamp(140px, 12vw, 210px);
-  right: calc((var(--right-margin) - clamp(140px, 12vw, 210px)) / 2);
-  height: auto;
+  top: 0;
+  right: 0;
+  width: var(--right-margin);
+  height: 100vh;
+  box-sizing: border-box;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
 }
 
-/* Wallet-connect CTA, shares the right-margin column with #bg-logo (top),
-   anchored to the bottom of that column. Nimiq's own light-blue brand color
-   (#0582CA, the color their Wallet/Hub use for login/connect actions) rather
-   than a team color, since this isn't team-specific — Mulish to match the
-   rest of the Nimiq-branded chrome (see game.js's SCORE_FONT). */
+/* Brand bar: a slim, full-width Nimiq-Blue strip just tall enough for the
+   logo — reads as a header, not a floating square card (that squarer,
+   heavily-padded version was tried first, see git history — too isolated,
+   too much of its own "block" sitting alone above all that nav whitespace). */
+.sidebar-brand {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1F2348;
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+#bg-logo {
+  display: block;
+  width: 100%;
+  max-width: 165px;
+  height: auto;
+  cursor: pointer;
+}
+
+/* margin-top:auto (not on the identity pill below anymore) eats the leftover
+   space ABOVE the nav, so nav ends up grouped with the pill near the bottom
+   of the column instead of clustered under the brand tile — per explicit
+   request, the empty whitespace now reads as "below the brand", not
+   "above the pill". */
+.sidebar-nav {
+  flex: none;
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  /* Loose between groups, tight within one (see .nav-section's own gap
+     below) — the nimiq-ui-kit sidebar's own rhythm: its section labels
+     ("FOUNDATIONS", "COMPONENTS") sit in a wide gap of their own, while the
+     items under one label sit close together. */
+  gap: 32px;
+}
+.nav-section { display: flex; flex-direction: column; gap: 4px; }
+/* Nav items are text-only, right-aligned flush to the sidebar's own right
+   edge — no icons there (dropped per explicit request). The group label
+   above them is the one exception: icon + text as a unit, that unit still
+   flush right (justify-content, not text-align, now that there are two
+   children to lay out) — icon reads to the left of its own label, per
+   explicit request, not pinned to the sidebar's left edge. Color/weight
+   follow the --nb-* ladder above, not one-off grays: --nb-50 for this label
+   (icon included) is the kit's own "quietest" text tier. */
+.nav-label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 12px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--nb-50);
+}
+.nav-label-icon { width: 13px; height: 13px; flex: none; }
+/* Resting/hover/active read as one continuous step up the same --nb-*
+   ladder (80 -> 100, plus a bold jump at .active) rather than three
+   unrelated colors — the kit's own idiom of driving hierarchy through alpha,
+   not through swapping in new hues per state. */
+.nav-item {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--nb-80);
+  text-align: right;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.nav-item:hover { background: var(--nb-12); color: var(--nb-100); }
+.nav-item.active { background: var(--nb-16); color: var(--nb-100); font-weight: 700; }
+
+/* Identity pill — a real card, not a small CTA (that was this element's old
+   job as a corner "Connecter" button): bigger, sits at the very bottom of
+   #sidebar's flex column, directly below .sidebar-nav (see its own
+   margin-top:auto above — this element stays put, no auto margin of its own).
+   White surface regardless of connect state now — the identicon avatar +
+   status line carry that distinction instead of a background color swap
+   (kept a step further below, scoped to mobile only, where that swap is
+   still the established look). */
 .nq-connect-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 999px;
+  background: #fff;
+  font-family: 'Mulish', -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s ease;
+}
+.nq-connect-btn:hover { background: var(--nb-12); }
+.nq-connect-btn.hidden { display: none; }
+/* Mobile-only leading icon (the real "nq-login" glyph) — desktop leads with
+   the identicon avatar instead, see .connect-avatar below. */
+.nq-connect-icon { display: none; }
+.connect-avatar {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--nb-12);
+  background-size: cover;
+  background-position: center;
+  color: var(--nb-50);
+}
+.connect-avatar-default { width: 20px; height: 20px; }
+.connect-avatar.has-identicon .connect-avatar-default { display: none; }
+.connect-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+/* Top line: "Guest", the claimed handle, or (all:unset resets its <button>
+   chrome away, see index.html) the "Claim a handle" CTA — Mulish always,
+   since none of those three are raw chain data. Nimiq Gold (.claim-cta,
+   var(--accent)) is reserved for exactly that one CTA state, per the "gold =
+   one primary action" rule — a claimed handle goes back to plain Nimiq Blue,
+   same weight as "Guest". */
+#connectBtnLabel {
+  all: unset;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'Mulish', -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--nb-100);
+  cursor: default;
+}
+#connectBtnLabel.claim-cta { color: var(--accent); cursor: pointer; }
+#connectBtnLabel.claim-cta:hover { text-decoration: underline; }
+/* Bottom line: "Connect wallet"/"Connected" (Mulish, unchanged) on Guest, or
+   the shortened address once connected — .mono switches that one case to
+   Fira Mono, the Nimiq UI Kit's pairing for on-chain data specifically (the
+   human-facing name above it stays Mulish regardless of state). --nb-60: one
+   tier down from the label's --nb-100, same ladder logic as the nav above. */
+.connect-status {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--nb-60);
+}
+.connect-status.mono { font-family: 'Fira Mono', ui-monospace, SFMono-Regular, monospace; letter-spacing: .01em; }
+
+/* Mobile layout (see src/main.js's coarse-pointer detection, which toggles
+   this class on <body>): the sidebar wrapper/brand tile drop their desktop
+   box (display:contents) so #bg-logo/#connectBtn fall back to their own
+   plain fixed positioning below, regrouped into one compact bottom-anchored
+   stack (top to bottom: logo, connect) instead of spanning the whole column
+   top-to-bottom — freeing the upper part of the column for #mobileController.
+   .sidebar-nav has no mobile design yet, so it's hidden outright rather than
+   left to lay out however the desktop flex rules above would place it. */
+.mobile-layout #sidebar { display: contents; }
+.mobile-layout .sidebar-brand { display: contents; }
+.mobile-layout .sidebar-nav { display: none; }
+/* Sized down from desktop dimensions (170px logo) and tightly gapped (6px)
+   since landscape phone viewports are short on vertical room and the
+   joystick — explicitly asked to be sized as big as this layout allows —
+   competes with this stack for the same column. Each offset is hand-stacked
+   off the one below it (own height + 6px gap); bump MOBILE_STACK_H
+   (joystick's own comment below) if any of these sizes change. */
+.mobile-layout #bg-logo {
+  position: fixed;
+  z-index: 2;
+  cursor: pointer;
+  top: auto;
+  bottom: 54px;
+  width: 105px;
+  height: auto;
+  right: calc(var(--controller-center-right) - 52.5px);
+}
+/* Restores the pre-sidebar CTA look (light-blue/dark-navy pill) exactly —
+   the desktop rules above repurpose the base .nq-connect-btn/.connected
+   selectors for the new white card look, so mobile re-declares its own
+   colors/sizing/position rather than inheriting them. -58px is #connectBtn's
+   own actual measured half-width (116px rendered, confirmed via
+   getBoundingClientRect). Aligned to the joystick ring's own horizontal
+   center (--controller-center-right) rather than the plain right-margin
+   midpoint, per explicit request — overlap with the controller is
+   expected/acceptable for now, not fixed up yet. */
+.mobile-layout .nq-connect-btn {
   position: fixed;
   z-index: 3;
   bottom: 16px;
-  right: calc(var(--right-margin) / 2 - 50px);
-  display: flex;
-  align-items: center;
+  right: calc(var(--controller-center-right) - 58px);
+  height: 32px;
+  width: auto;
   gap: 6px;
   padding: 6px 13px;
-  border: none;
-  border-radius: 999px;
   background: #0582CA;
   color: #fff;
-  font-family: 'Mulish', -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-weight: 800;
   font-size: 11px;
   letter-spacing: .04em;
   text-transform: uppercase;
-  cursor: pointer;
   box-shadow: 0 6px 18px -6px rgba(5,130,202,0.6);
   transition: transform .12s ease, box-shadow .12s ease;
 }
-.nq-connect-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px -6px rgba(5,130,202,0.7); }
-
-.nq-connect-btn:active { transform: translateY(0); }
-.nq-connect-btn.connected { background: #1F2348; }
-.nq-connect-btn.hidden { display: none; }
-.nq-connect-icon { width: 12px; height: 12px; flex: none; }
-
-/* Mobile layout (see src/main.js's coarse-pointer detection, which toggles
-   this class on <body>): the same right-margin column, but #bg-logo/
-   #connectBtn are regrouped into one compact bottom-anchored stack (top to
-   bottom: logo, connect) instead of spanning the whole column top-to-bottom —
-   freeing the upper part of the column for #mobileController. Sized down
-   from desktop dimensions (170px logo) and tightly gapped (6px) since
-   landscape phone viewports are short on vertical room and the joystick —
-   explicitly asked to be sized as big as this layout allows — competes with
-   this stack for the same column. Each offset is hand-stacked off the one
-   below it (own height + 6px gap); bump MOBILE_STACK_H (joystick's own
-   comment below) if any of these sizes change. */
-/* Aligned to the joystick ring's own horizontal center
-   (--controller-center-right, which lands within half a percent of the
-   ring's actual center — see #joystickRing's own left/width — close enough
-   to use directly) rather than the plain right-margin midpoint, per
-   explicit request — overlap with the controller is expected/acceptable
-   for now, not fixed up yet. -58px is #connectBtn's own actual measured
-   half-width (116px rendered, confirmed via getBoundingClientRect — not a
-   guess like the old -50px, which was ~8px off and visibly
-   off-center from the stick). -35px (bg-logo below) is still an
-   approximation, not yet re-measured the same way. */
-.mobile-layout #connectBtn { height: 32px; right: calc(var(--controller-center-right) - 58px); }
-/* height:auto (not a fixed 36px like before) — logo v2.png's own aspect
-   ratio (557/128 ≈ 4.35) is much wider/shorter than the old logo's (≈1.96),
-   fixing both dimensions would squish it. Width kept at 70px so the mobile
-   column's horizontal footprint doesn't change. */
-.mobile-layout #bg-logo { top: auto; bottom: 54px; width: 105px; height: auto; right: calc(var(--controller-center-right) - 52.5px); }
+.mobile-layout .nq-connect-btn:hover { background: #0582CA; transform: translateY(-1px); box-shadow: 0 10px 22px -6px rgba(5,130,202,0.7); }
+.mobile-layout .nq-connect-btn:active { transform: translateY(0); }
+.mobile-layout .nq-connect-btn.connected { background: #1F2348; }
+.mobile-layout .nq-connect-icon { display: block; width: 12px; height: 12px; flex: none; }
+.mobile-layout .connect-avatar, .mobile-layout .connect-status { display: none; }
+/* #connectBtnLabel's own font-size/weight/color (all:unset + explicit values,
+   see its default rule above) are specified directly on the element, so they
+   don't fall back to inheriting .nq-connect-btn's mobile color/font-size/
+   weight above the way a plain unstyled <span> would have — re-declared here
+   in full, matching this pill's original look exactly (white/800/11px/
+   uppercase), same self-contained-override pattern as the rest of this
+   mobile block. */
+.mobile-layout #connectBtnLabel {
+  all: unset;
+  display: block;
+  cursor: default;
+  color: #fff;
+  font-family: 'Mulish', -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
 
 /* Unified mobile controller — the validated white "remote control" mockup
    (design/ui/ChatGPT Image 19 août 2026, 22_39_44.png), baked as real art
@@ -463,79 +672,87 @@ body:not(.mobile-layout) #homeOverlay.leaving { transform: translateX(-10vw); cl
      ratio (#app's flex centering does this for free, unchanged) — it just
      isn't forced to fill this box's exact shape anymore. */
   width: calc(100vw - var(--right-margin));
-  height: 100vh;
+  height: 100dvh;
   /* No border/radius framing the box anymore (was 1px solid + 14px radius)
      — per explicit request, dropped now that the card isn't a smaller
      margin-surrounded box on every side. */
   overflow: hidden;
-  /* Nimiq Blue, darkened (--nimiq-blue-darkened in the official kit) — was
-     a near-black #060716 that only ever showed as a same-frame loading
-     flash. Now it's also whatever shows in the gap above/below the canvas
-     when this box is taller than the art's own rendered height (any screen
-     narrower than ~2.18:1 — see :root's own comment) — #stage-wrap's fade
-     below blends the canvas's real edge into this same color instead of a
-     hard cut. */
-  background: #151833;
+  /* Black — was Nimiq Blue darkened (#151833), swapped per explicit
+     request after seeing the fade actually working. Whatever shows in the
+     gap above/below the canvas when this box is taller than the art's own
+     rendered height (any screen narrower than ~2.18:1 — see :root's own
+     comment) — #stage-wrap's fade below blends the canvas's real edge into
+     this same color instead of a hard cut. Kept in sync by hand with that
+     fade's own end-of-gradient color, same as before. */
+  background: #000;
 }
 /* Soft fade from the canvas into #game-card's surrounding Nimiq Blue.
-   Genuinely important detail: this has to dip a little INTO the canvas
-   (per explicit request/confirmation — was tried living entirely outside
-   it first, anchored exactly at the edge, and turned out invisible by
-   construction: a semi-transparent #151833 painted over #game-card's own
-   solid #151833 background composites to the exact same #151833 regardless
-   of opacity, so a "fade" confined only to the margin has nothing to
-   actually fade against). The 24px offset (bottom/top: calc(100% - 24px),
-   not a plain 100%) shifts the whole gradient that far into the real image,
-   where the colors are actually different from the surrounding blue and a
-   fade becomes visible — small enough not to meaningfully eat into the
-   playing field. Stops run transparent-near-the-image to solid-out-in-the-
-   margin (mirrored from a first attempt that had this backwards — solid
-   would land ON the image at the overlap point, opaque near-margin end
-   fading to nothing well before reaching the image, backwards from the
-   intended effect). Eased (8 stops, not a flat 2-color gradient) for the
-   same reason as before: a plain linear alpha ramp still reads as an
-   abrupt cutoff perceptually.
-   height: vh, not a % of #stage-wrap's own box — #stage-wrap has no
-   explicit height (it shrink-wraps to the canvas's own auto height), and a
-   percentage height on an absolutely-positioned child of an auto-height
-   containing block is one of the genuinely inconsistent corners of CSS
-   (resolved fine in Chromium during testing, collapsed to nothing in a
-   real user's Firefox). vh sidesteps that ambiguity entirely. 20vh
-   comfortably covers the realistic margin range (~9-13vh per side on
-   common desktop ratios, see :root's own comment) with room to spare; any
-   excess simply gets clipped by #game-card's own overflow:hidden rather
-   than causing a hard edge — on an ultra-wide screen with no margin left,
-   only the small 24px in-image portion would show, which is fine. */
+   Root cause found through a step-by-step diagnostic (opaque red — worked;
+   opaque red->blue gradient — worked; alpha gradient at the SAME spot via
+   bottom/top: calc(100% - 24px) — hard cut, no transition, in a real
+   Firefox/Safari despite correct computed styles; the exact same alpha
+   gradient moved to a plain `top: 100px` (no percentage/calc at all) —
+   worked perfectly, and a later attempt at `top: -40px` — a plain fixed px
+   offset, no percentage anywhere — went straight back to a hard cut): it
+   was never about percentages specifically. Both the calc() version and
+   `top: -40px` push part of the box OUTSIDE #stage-wrap's own bounds
+   (negative offset / >100% position alike); the working test kept the
+   whole box INSIDE #stage-wrap. That's the actual trigger — a gradient on
+   a pseudo-element extending past its containing block's own box fails to
+   paint in a real Firefox/Safari, even though it measures correctly via
+   getComputedStyle.
+   Fix: keep the entire fade INSIDE #stage-wrap (top:0/bottom:0, never
+   negative, height never pushing past 100%) — the whole 56px lives on the
+   image itself, reaching fully solid #151833 by the time it reaches
+   #stage-wrap's own edge. #game-card's matching #151833 background picks
+   up seamlessly beyond that — this never needed to physically reach into
+   the margin, just to *look* like it does, which ending solid right at the
+   edge already accomplishes. */
 #stage-wrap::before, #stage-wrap::after {
   content: '';
   position: absolute;
   left: 0; right: 0;
-  height: 20vh;
+  height: 140px;
   pointer-events: none;
+  /* Explicit stacking, not left to auto — <canvas> is a replaced element
+     some engines (Firefox especially, combined with the transform on
+     #scene further up) promote to its own compositing layer, which can end
+     up ordered above plain "auto" z-index content. Forcing this above the
+     canvas removes that ambiguity. */
+  z-index: 2;
 }
+canvas { position: relative; z-index: 1; }
+/* Black, not Nimiq Blue (#151833) — needs to stay in sync with #game-card's
+   own background above. Deeper again (140px, was 100px, was 56px before
+   that) and more/closer stops each round per explicit request, for a
+   progressively more gradual, less noticeable ramp each time. */
 #stage-wrap::before {
-  bottom: calc(100% - 24px);
+  top: 0;
   background: linear-gradient(to top,
-    rgba(21,24,51,0) 0%,
-    rgba(21,24,51,0.04) 10%,
-    rgba(21,24,51,0.12) 25%,
-    rgba(21,24,51,0.25) 40%,
-    rgba(21,24,51,0.42) 55%,
-    rgba(21,24,51,0.62) 70%,
-    rgba(21,24,51,0.83) 85%,
-    #151833 100%);
+    rgba(0,0,0,0) 0%,
+    rgba(0,0,0,0.03) 15%,
+    rgba(0,0,0,0.08) 30%,
+    rgba(0,0,0,0.16) 45%,
+    rgba(0,0,0,0.28) 58%,
+    rgba(0,0,0,0.42) 70%,
+    rgba(0,0,0,0.58) 80%,
+    rgba(0,0,0,0.74) 88%,
+    rgba(0,0,0,0.88) 94%,
+    #000 100%);
 }
 #stage-wrap::after {
-  top: calc(100% - 24px);
+  bottom: 0;
   background: linear-gradient(to bottom,
-    rgba(21,24,51,0) 0%,
-    rgba(21,24,51,0.04) 10%,
-    rgba(21,24,51,0.12) 25%,
-    rgba(21,24,51,0.25) 40%,
-    rgba(21,24,51,0.42) 55%,
-    rgba(21,24,51,0.62) 70%,
-    rgba(21,24,51,0.83) 85%,
-    #151833 100%);
+    rgba(0,0,0,0) 0%,
+    rgba(0,0,0,0.03) 15%,
+    rgba(0,0,0,0.08) 30%,
+    rgba(0,0,0,0.16) 45%,
+    rgba(0,0,0,0.28) 58%,
+    rgba(0,0,0,0.42) 70%,
+    rgba(0,0,0,0.58) 80%,
+    rgba(0,0,0,0.74) 88%,
+    rgba(0,0,0,0.88) 94%,
+    #000 100%);
 }
 
 /* Desktop-only menu stage (see index.html's own comment + main.js's
@@ -554,7 +771,7 @@ body:not(.mobile-layout) #homeOverlay.leaving { transform: translateX(-10vw); cl
   top: 0;
   left: 0;
   width: 80vw;
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   /* This box stays mounted (empty) even during live gameplay, when none of
      its children are shown — without this, its own invisible full-size box
@@ -1017,6 +1234,43 @@ button:disabled { opacity: 0.35; cursor: default; }
   z-index: 10;
 }
 #overlay.hidden { display: none; }
+#overlay.mode-passplay { background: rgba(5, 130, 202, 0.55); }
+#overlay.mode-solo { background: rgba(31, 35, 72, 0.55); }
+#overlay.mode-replay { background: rgba(33, 188, 165, 0.55); }
+#overlay.mode-remote { background: rgba(233, 178, 19, 0.55); }
+#overlay.mode-remote, #overlay.mode-replay { color: var(--bg-deep); --ink-dim: rgba(11, 31, 42, 0.7); }
+#overlay.mode-remote h2, #overlay.mode-replay h2 { color: var(--bg-deep); }
+/* Dark/blue tints (default scrim, passplay, solo) fail contrast with the
+   default dim --ink-dim paragraph color (both blue-ish, similar luminance) —
+   full-brightness ink instead. Gold/green tints already get proper dark ink
+   above, so they're excluded here. */
+#overlay:not(.mode-remote):not(.mode-replay) p { color: var(--ink); }
+/* Same fit-content pill shell as .config-panel (Classic/Custom, Custom
+   Settings) — applied only for main.js's showLobby() dialogs (exit/back-to-
+   menu confirm, LAN lobby screens), not game.js's own showOverlay() (goal/
+   victory panels), which keep the full-bleed inset:0 backdrop. */
+#overlay.overlay-boxed {
+  inset: auto; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: fit-content; max-width: calc(100% - 12%);
+  height: fit-content; max-height: 88%;
+  border-radius: 24px; padding: 26px 30px;
+  box-shadow: 0 4px 14px rgba(31, 35, 72, 0.38);
+}
+.mobile-layout #overlay.overlay-boxed {
+  right: auto;
+  left: calc((6% + (100% - var(--controller-reserved-w))) / 2);
+  max-width: calc(100% - 6% - var(--controller-reserved-w));
+}
+#overlay.overlay-boxed:not(.hidden) { animation: panel-in 260ms cubic-bezier(.16,1,.3,1); }
+/* Same translucent-white treatment as .config-preset-btn (Classic/Custom,
+   Connect/Guest) instead of solid gold .bigbtn — a fixed gold button read
+   fine on the old plain-scrim backdrop but disappears against the gold
+   mode-remote tint above; translucent white reads on any of the 4 tints. */
+#overlay.overlay-boxed .bigbtn {
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
+  transition: background .15s ease, border-color .15s ease;
+}
+#overlay.overlay-boxed .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
 /* Mobile: the goal (+1) and end-of-match ticket panel — by far the most
    frequently-seen DOM overlay in a live match — should read as centered on
    the visible arena, not the full screen: #game-card (this panel's
@@ -1118,8 +1372,15 @@ button:disabled { opacity: 0.35; cursor: default; }
    (into the forest / mobile joystick column) since the old right inset
    (12.83%) was less than half the correct value. */
 /* Shared by #startOverlay (local pass-and-play ready-tap) and #modeOverlay
-   (local vs LAN mode picker, shown first) — same two-column layout/palette. */
-.team-select { position: absolute; inset: 33.02% 31.70% 32.81% 32.79%; border-radius: 28px; display: flex; flex-direction: row; overflow: hidden; }
+   (local vs LAN mode picker, shown first) — same two-column layout/palette.
+   Explicit z-index (not left to auto): both live inside #stage-wrap
+   alongside <canvas>, which now has its own z-index:1 (see that rule's
+   comment) — without this, #startOverlay stacks *below* the canvas once a
+   match starts (canvas gets an explicit z-index, .team-select doesn't, and
+   an explicit z-index always wins over auto regardless of DOM order), so
+   the ready-tap screen goes invisible and unclickable right as a match
+   begins. Above the canvas(1)/edge-fade(2), below #overlay's 10. */
+.team-select { position: absolute; inset: 33.02% 31.70% 32.81% 32.79%; border-radius: 28px; display: flex; flex-direction: row; overflow: hidden; z-index: 3; }
 .team-select.hidden { display: none; }
 /* No mobile counter-scale needed here anymore. #startOverlay (ready-tap team
    pick) uses this base ice-rect-aligned inset as-is — its team-color wash
@@ -1191,7 +1452,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    itself still clips this back down to 80vw (inherits .team-select's own
    overflow:hidden), so the image is never resized, only cropped 10vw off
    each side. */
-#modeOverlayBg { position: absolute; top: 0; left: -10vw; width: 100vw; height: 100vh; background-size: cover; background-position: center; }
+#modeOverlayBg { position: absolute; top: 0; left: -10vw; width: 100vw; height: 100dvh; background-size: cover; background-position: center; }
 .mode-select-scrim { position: absolute; inset: 0; background: rgba(6,14,18,0.28); }
 .mode-drawer {
   position: absolute;
@@ -1477,11 +1738,19 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 
 #overlay input[type="text"], .config-lobby-content input[type="text"] {
-  font-family: inherit; font-size: 15px; color: var(--ink); background: var(--bg-mid);
+  font-family: inherit; font-size: 15px;
   border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; padding: 12px 14px;
   width: 260px; max-width: 100%; text-align: center;
 }
-#overlay input[type="text"]::placeholder, .config-lobby-content input[type="text"]::placeholder { color: var(--ink-dim); }
+#overlay input[type="text"] { color: var(--ink); background: var(--bg-mid); }
+#overlay input[type="text"]::placeholder { color: var(--ink-dim); }
+/* Nimiq White (--nimiq-white in the official nimiq-style kit — #FFF exactly,
+   see conversation) rather than the dark #overlay treatment above — the
+   Remote Match "Rejoindre" code field specifically. Ink color to match is
+   Nimiq Blue (--nimiq-blue), same "dark text on white" pairing the kit's
+   own default body color uses. */
+.config-lobby-content input[type="text"] { color: #1F2348; background: #FFF; }
+.config-lobby-content input[type="text"]::placeholder { color: rgba(31,35,72,0.5); }
 .lan-error { color: var(--error) !important; }
 
 /* ---- Pinède night forest layers, ported from design-lab's

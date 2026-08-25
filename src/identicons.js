@@ -50,11 +50,26 @@ export async function getIdenticonPngDataUrl(address, size = 512) {
 const BG_RECT_RE = /<rect fill="[^"]*" x="0" y="0" width="160" height="160"\/>/;
 const BOTTOM_LINE_FROM_END = 3;
 const stoneBustCanvasCache = new Map();
+const bgColorCache = new Map();
 
 export function getIdenticonCanvasStoneBust(address, size = 512) {
   const key = `${address}:${size}`;
   if (!stoneBustCanvasCache.has(key)) stoneBustCanvasCache.set(key, rasterize(address, size, { stripBackground: true, stripLegs: true }));
   return stoneBustCanvasCache.get(key);
+}
+
+// The solid fill color of that same background rect (see BG_RECT_RE above),
+// stripped out of the stone-bust canvas but still needed by the stone bake
+// (game.js's bakeBubble) to color the hex window's floor per-player instead
+// of the fixed per-team navy/gold from the stone art.
+export function getIdenticonBgColor(address) {
+  if (!bgColorCache.has(address)) {
+    bgColorCache.set(address, Identicons.svg(address).then((svgMarkup) => {
+      const rect = svgMarkup.match(BG_RECT_RE);
+      return rect ? rect[0].match(/fill="([^"]*)"/)[1] : null;
+    }));
+  }
+  return bgColorCache.get(address);
 }
 
 async function rasterize(address, size, { stripBackground = false, stripLegs = false } = {}) {

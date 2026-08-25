@@ -6,7 +6,7 @@
 // still resolve when the app is served from a subpath, e.g. GitHub Pages at
 // https://danyx11.github.io/NIM-Ball/.
 import { audio } from './audio.js';
-import { getIdenticonCanvasStoneBust, getIdenticonPngDataUrl } from './identicons.js';
+import { getIdenticonCanvasStoneBust, getIdenticonPngDataUrl, getIdenticonBgColor } from './identicons.js';
 import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
 import { isBasicLaser } from './settings.js';
 import { preloadTicketAssets, renderTicket } from './ticket.js';
@@ -316,6 +316,7 @@ export function startGame(opts = {}) {
   }
 
   const identiconSources = {};
+  const identiconBgColors = {};
   const moduleImages = {};
   const bubbleSprites = {};
   // Glass-window treatment applied to the identicon only (not the wood rim
@@ -328,7 +329,7 @@ export function startGame(opts = {}) {
   const IDENTICON_GLASS = { desaturate: 0.55, contrast: 0.82, tintColor: '#b8e7ff', tintOpacity: 0.30 };
   // Bakes the stone art + identicon into one sprite, at the given on-screen
   // diameter (2x-oversampled, same convention as ballSprite).
-  function bakeBubble(mod, id, diameterPx) {
+  function bakeBubble(mod, id, diameterPx, bgColor) {
     const S = Math.round(diameterPx * 2);
     const cx = S * HEX.cxFrac, cy = S * HEX.cyFrac;
     const halfW = S * HEX.halfWFrac, halfH = S * HEX.halfHFrac;
@@ -365,6 +366,24 @@ export function startGame(opts = {}) {
     bctx.save();
     hexPath(bctx, cx, cy, halfW, halfH);
     bctx.clip();
+    // Floor of the hex window: the player's own identicon background color
+    // (stripped out of the bust canvas — see getIdenticonBgColor) run through
+    // the same desaturate/contrast/tint pass as IDENTICON_GLASS below, so it
+    // reads as part of the same "behind glass" surface instead of a flat
+    // sticker color sitting under the character. Falls back to whatever the
+    // stone art (sizedModule) already drew there if the color never resolved.
+    if (bgColor) {
+      bctx.filter = `saturate(${1 - IDENTICON_GLASS.desaturate}) contrast(${IDENTICON_GLASS.contrast})`;
+      bctx.fillStyle = bgColor;
+      bctx.fillRect(cx - halfW, cy - halfH, halfW * 2, halfH * 2);
+      bctx.filter = 'none';
+      bctx.globalCompositeOperation = 'soft-light';
+      bctx.globalAlpha = IDENTICON_GLASS.tintOpacity;
+      bctx.fillStyle = IDENTICON_GLASS.tintColor;
+      bctx.fillRect(cx - halfW, cy - halfH, halfW * 2, halfH * 2);
+      bctx.globalAlpha = 1;
+      bctx.globalCompositeOperation = 'source-over';
+    }
     bctx.drawImage(glass, cx - dw / 2, cy - dh / 2);
     bctx.restore();
     return bubble;
@@ -417,11 +436,14 @@ export function startGame(opts = {}) {
     if (!id || !imgs) return;
     for (const key of LED_STATE_KEYS) if (!imgs[key]) return;
     bubbleSprites[team] = {};
-    for (const key of LED_STATE_KEYS) bubbleSprites[team][key] = bakeBubble(imgs[key], id, STONE_R * 2);
+    for (const key of LED_STATE_KEYS) bubbleSprites[team][key] = bakeBubble(imgs[key], id, STONE_R * 2, identiconBgColors[team]);
     bubbleSprites[team].dead = desaturateSprite(bubbleSprites[team]['0'], DEAD_SATURATION, DEAD_LIGHTEN);
   }
   for (const team of ['A', 'B']) {
-    getIdenticonCanvasStoneBust(IDENTICON_ADDRESS[team]).then((canvas) => {
+    Promise.all([
+      getIdenticonCanvasStoneBust(IDENTICON_ADDRESS[team]),
+      getIdenticonBgColor(IDENTICON_ADDRESS[team]),
+    ]).then(([canvas, bgColor]) => {
       let source = canvas;
       // team B starts on the right side of the pitch, so mirror it to face the
       // ball at kickoff instead of away from it
@@ -434,6 +456,7 @@ export function startGame(opts = {}) {
         fctx.drawImage(source, 0, 0);
         source = flipped;
       }
+      identiconBgColors[team] = bgColor;
       identiconSources[team] = source;
       tryBakeBubble(team);
     });

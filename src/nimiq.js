@@ -119,3 +119,17 @@ export function clearIdentity() {
   localStorage.removeItem(HUB_ADDRESS_KEY);
   localStorage.removeItem(GUEST_KEY);
 }
+
+// ---- NimConnect handle (placeholder) ----------------------------------
+// No real handle registry exists yet — this is local-only scaffolding for
+// the sidebar identity pill's "Claim a handle" flow (see main.js's
+// openClaimHandleDialog()) so that UI/data flow already works end to end and
+// only this storage layer needs swapping for the real NimConnect lookup/
+// claim API once it exists, not the call sites.
+const HANDLE_KEY_PREFIX = 'nimball-handle-';
+export function getHandle(address) {
+  return localStorage.getItem(HANDLE_KEY_PREFIX + address) || null;
+}
+export function setHandle(address, handle) {
+  localStorage.setItem(HANDLE_KEY_PREFIX + address, handle);
+}
