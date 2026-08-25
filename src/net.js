@@ -75,6 +75,14 @@ function connectSocket(url) {
       sendMatchConfig(config) {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matchConfig', config }));
       },
+      // Creator only, sent right before close() when leaving the "share this
+      // code" screen with nobody having joined yet (see main.js's
+      // matchNetworkBackBtn) — the room refuses any further connection after
+      // this, which is the closest thing to "invalidating" a code that's
+      // really just this room's own name (see party/arbiter.js's `closed`).
+      cancelRoom() {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'cancelRoom' }));
+      },
       sendShots(stones, sweep = null) {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'shots', stones, sweep }));
       },
@@ -140,6 +148,9 @@ function connectSocket(url) {
         resolve(net);
       } else if (msg.type === 'full') {
         if (!settled) { settled = true; reject(new Error('Partie déjà complète.')); }
+        ws.close();
+      } else if (msg.type === 'closed') {
+        if (!settled) { settled = true; reject(new Error('Ce code de partie n’est plus valide.')); }
         ws.close();
       } else if (msg.type === 'opponentJoined') {
         if (opponentJoinedCb) opponentJoinedCb();

@@ -65,6 +65,13 @@ export class Arbiter extends Server {
     // other relayed payload here — matchConfig shape/defaults live in
     // src/matchConfig.js, not duplicated here.
     this.matchConfig = null;
+    // Set by the creator explicitly leaving the "share this code" screen
+    // before anyone joined (see main.js's matchNetworkBackBtn / net.js's
+    // cancelRoom) — the code itself is just this room's name, so there's no
+    // way to actually invalidate it; instead the room refuses any further
+    // connection once closed, which reads the same as "the code no longer
+    // works" from a player's perspective.
+    this.closed = false;
     this.shots = { A: null, B: null };
     this.sweeps = { A: null, B: null };
     // Same per-team rolling cooldown as server/arbiter.js — independent of
@@ -110,6 +117,11 @@ export class Arbiter extends Server {
   }
 
   onConnect(connection) {
+    if (this.closed) {
+      this.send(connection, { type: 'closed' });
+      connection.close();
+      return;
+    }
     const team = !this.players.A ? 'A' : !this.players.B ? 'B' : null;
     if (!team) {
       this.send(connection, { type: 'full' });
@@ -138,7 +150,12 @@ export class Arbiter extends Server {
     if (team !== 'A' && team !== 'B') return;
     let msg;
     try { msg = JSON.parse(message); } catch { return; }
-    if (msg.type === 'matchConfig') {
+    if (msg.type === 'cancelRoom') {
+      // No server-side check that only the creator can do this — same trust
+      // model as matchConfig above (a modified client could send it anyway);
+      // in the normal flow only the creator's own back button ever does.
+      this.closed = true;
+    } else if (msg.type === 'matchConfig') {
       // Only the creator (team A) is ever in a position to send this in the
       // normal flow (see main.js's hostMatch) — no server-side enforcement
       // beyond that, same trust model as every other client-sent field this

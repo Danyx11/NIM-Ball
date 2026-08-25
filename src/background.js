@@ -6,6 +6,11 @@ import { loadImages } from './preload.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 const LOGO_SRC = `${ASSET_BASE}bg/nimiq-logo-transparent.webp`;
+// Dark-wordmark variant for #bg-logo's desktop position, which now sits on
+// the light Nimiq Gray page background — the original LOGO_SRC (white
+// wordmark) stays in use on mobile, where #bg-logo still sits over the
+// mobile card's own dark art, not the gray page.
+const LOGO_SRC_LIGHT = `${ASSET_BASE}bg/nimiq-logo-transparent whiteback.webp`;
 const HOME_SRC = `${ASSET_BASE}home/home-screen.webp`;
 const MODE_SELECT_BG_SRC = `${ASSET_BASE}home/mode-select-bg.webp`;
 // nature-pinede.webp/arbres-ombres.webp (#bg-nature/#fg-ombres) intentionally
@@ -20,9 +25,9 @@ const MODE_SELECT_BG_SRC = `${ASSET_BASE}home/mode-select-bg.webp`;
 // still live under design/bg/fond-constel-v4*.png if a future skin goes back
 // to a small inset board and wants it again.
 
-export function initBackground() {
+export function initBackground(isMobile) {
   const logo = document.getElementById('bg-logo');
-  if (logo) logo.src = LOGO_SRC;
+  if (logo) logo.src = isMobile ? LOGO_SRC : LOGO_SRC_LIGHT;
   const home = document.getElementById('homeOverlay');
   if (home) home.style.backgroundImage = `url('${HOME_SRC}')`;
   const modeBg = document.getElementById('modeOverlayBg');
@@ -31,6 +36,6 @@ export function initBackground() {
 
 // Awaited by main.js before the branded #loadingOverlay lifts, so the
 // home/mode-select screens it reveals never flash without their backgrounds.
-export function preloadBackgroundAssets() {
-  return loadImages([LOGO_SRC, HOME_SRC, MODE_SELECT_BG_SRC]);
+export function preloadBackgroundAssets(isMobile) {
+  return loadImages([isMobile ? LOGO_SRC : LOGO_SRC_LIGHT, HOME_SRC, MODE_SELECT_BG_SRC]);
 }
