@@ -317,13 +317,51 @@
     </div>
     <div id="replayUploadOverlay" class="hidden">
       <div id="replayUploadBox">
-        <div class="tag">CHARGER UN REPLAY</div>
-        <div class="sub">Dépose le ticket de match (image) ici, ou choisis un fichier</div>
+        <!-- Same back-arrow control as Classic/Custom/Settings/Remote Match
+             (.config-back, see main.js) rather than the old separate
+             "Annuler" bigbtn — one exit affordance, consistent with every
+             other mode screen. -->
+        <button class="config-back" id="replayUploadBackBtn" type="button" aria-label="Back">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+        </button>
+        <!-- Same icon+title header as Classic/Custom/Settings/Remote Match
+             (.config-header, filled by main.js's fillModeHeader-style logic)
+             instead of a standalone task-description tag — matches "the
+             other modes" per explicit request. -->
+        <div class="config-header">
+          <span class="config-mode-icon" id="replayModeIcon"></span>
+          <span class="config-mode-title" id="replayModeTitle"></span>
+        </div>
+        <div class="sub">Drop your match ticket (image) here, or choose a file</div>
         <input type="file" id="replayFileInput" accept="image/*" hidden>
-        <button class="bigbtn" id="replayChooseFileBtn">📁 Choisir un fichier</button>
-        <button class="bigbtn" id="replayUploadCancelBtn">Annuler</button>
+        <button class="bigbtn" id="replayChooseFileBtn">📁 Choose a file</button>
         <p id="replayUploadStatus"></p>
       </div>
+    </div>
+    <!-- Connect gate (see main.js's showConnectGate/revealAfterGates) — shown
+         once right after the home screen, before mode-select, whenever
+         getIdentity() (src/nimiq.js) says the player hasn't decided yet.
+         Same config-panel/preset-tile charte as Classic/Custom just below,
+         no back arrow since there's no earlier menu step to return to.
+         Reopened later from the corner identity pill's disconnect action. -->
+    <div id="connectGateOverlay" class="config-panel mode-connect hidden">
+      <div class="config-header">
+        <span class="config-mode-icon">
+          <svg viewBox="0 0 54 54" aria-hidden="true"><path fill="currentColor" d="M26.95 0A27.05 27.05 0 0 0 .21 22.32a1.12 1.12 0 0 0 1.13 1.3h18.72c.62 0 1.12-.5 1.12-1.12v-8.1a2.25 2.25 0 0 1 3.66-1.76l15.75 12.6a2.25 2.25 0 0 1 0 3.52l-15.75 12.6a2.25 2.25 0 0 1-3.66-1.76v-8.1c0-.62-.5-1.12-1.12-1.12H1.35a1.14 1.14 0 0 0-1.13 1.3 27 27 0 0 0 53.55-5.78A27.25 27.25 0 0 0 26.95 0z"/></svg>
+        </span>
+        <span class="config-mode-title">PLAY AS</span>
+      </div>
+      <div class="config-presets">
+        <button class="config-preset-btn" id="cgConnectBtn" type="button">
+          <div class="config-preset-name">CONNECT</div>
+          <div class="config-preset-sub">Sign in with your Nimiq wallet</div>
+        </button>
+        <button class="config-preset-btn" id="cgGuestBtn" type="button">
+          <div class="config-preset-name">GUEST</div>
+          <div class="config-preset-sub">Play without an account</div>
+        </button>
+      </div>
+      <p class="lan-error hidden" id="cgError"></p>
     </div>
     <!-- Classic/Custom + Custom Settings screens (see main.js) — inserted
          between #modeOverlay's tiles (unchanged, see conversation) and the
@@ -393,6 +431,22 @@
         <button class="bigbtn config-save" id="csSaveBtn" type="button">SAVE</button>
       </div>
     </div>
+    <!-- Remote Match's own 3 sub-screens (choice, generated code, code to
+         fill in — see main.js's showNetPanel) — same visual language as the
+         two screens above (tile-colored panel, centered icon+title header,
+         exit-styled back arrow), always the Remote Match tint since this
+         whole overlay is Remote-Match-only. Its Back always returns straight
+         to mode-select (see conversation), unlike the two screens above. -->
+    <div id="matchNetworkOverlay" class="config-panel mode-remote hidden">
+      <button class="config-back" id="matchNetworkBackBtn" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="config-header">
+        <span class="config-mode-icon" id="matchNetworkModeIcon"></span>
+        <span class="config-mode-title">REMOTE MATCH</span>
+      </div>
+      <div id="matchNetworkContent" class="config-lobby-content"></div>
+    </div>
     <div id="startOverlay" class="team-select hidden">
       <div class="half a" id="halfA">
         <div class="check" id="checkA">○</div>
@@ -431,7 +485,7 @@
               <circle class="chat-timer-fill" id="chatTimerFillA" cx="10" cy="10" r="8"></circle>
             </svg>
             <button class="chat-emoji-btn" id="chatEmojiBtnA" type="button" aria-label="Emoji" disabled>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
             </button>
           </div>
           <button class="chat-window-send" id="chatSendBtnA" type="submit" aria-label="Envoyer" disabled>➤</button>
@@ -450,7 +504,7 @@
               <circle class="chat-timer-fill" id="chatTimerFillB" cx="10" cy="10" r="8"></circle>
             </svg>
             <button class="chat-emoji-btn" id="chatEmojiBtnB" type="button" aria-label="Emoji" disabled>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
             </button>
           </div>
           <button class="chat-window-send" id="chatSendBtnB" type="submit" aria-label="Envoyer" disabled>➤</button>
@@ -468,6 +522,16 @@
   </div>
   </div>
   </div>
+  <!-- Desktop-only menu stage (see main.js's detachment block + style.css):
+       a fixed, viewport-relative 80vw x 100vh box, independent of #game-card
+       (which stays a smaller, aspect-ratio-locked box for live gameplay).
+       #modeOverlay + the Classic/Custom/Settings/Remote-Match-lobby screens
+       move here instead of into #game-card, so the pre-game menu can render
+       at the same full-screen scale as #homeOverlay rather than shrunk to
+       fit the game's own letterboxed box. Empty by default; main.js
+       populates it, mobile-gated (mobile keeps its own existing behavior,
+       untouched). -->
+  <div id="menuStage"></div>
 
 <script type="module" src="./src/main.js"></script>
 </body>

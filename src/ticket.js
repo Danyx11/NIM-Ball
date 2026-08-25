@@ -21,7 +21,9 @@ const COLORS = {
   inkDim: '#9fb8bc',
   teamA: '#3fa9f5',
   teamB: '#ffc94d',
-  accent: '#ffd166',
+  // Nimiq Gold (--nimiq-gold in the official nimiq-style kit) — kept in sync
+  // by hand with src/style.css's --accent, see that var's own comment.
+  accent: '#e9b213',
   panel: '#143844',
 };
 

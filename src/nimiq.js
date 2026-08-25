@@ -31,12 +31,16 @@ export function getDeviceId(reason) {
 // DEFAULT_ENDPOINT only auto-resolves when this page is served from
 // nimiq.com/nimiq-testnet.com itself, so on any other origin (ours) it
 // silently falls back to a local Hub dev server (localhost:8080) — the
-// endpoint below has to be passed explicitly. Testnet for now, while
-// this is still exploratory (see chooseAddressTest in main.js).
-const HUB_TESTNET_ENDPOINT = 'https://hub.nimiq-testnet.com';
+// endpoint below has to be passed explicitly. Mainnet (was testnet during
+// early exploration) — a player's real wallets live in the mainnet Hub's own
+// browser storage, a completely separate origin/store from the testnet
+// Hub's, so pointing here at testnet only ever offered whatever unrelated
+// account happened to exist there, never the accounts a real player expects
+// to pick from.
+const HUB_ENDPOINT = 'https://hub.nimiq.com';
 let hubApi = null;
 function getHubApi() {
-  if (!hubApi) hubApi = new HubApi(HUB_TESTNET_ENDPOINT);
+  if (!hubApi) hubApi = new HubApi(HUB_ENDPOINT);
   return hubApi;
 }
 
@@ -54,8 +58,64 @@ export function getStoredAddress() {
 // Opens the Hub's account-picker popup and resolves with the chosen
 // address. Works in any desktop browser (no Nimiq Pay required).
 export function chooseAddress() {
-  return getHubApi().chooseAddress({ appName: 'Nim-Curl' }).then((result) => {
+  return getHubApi().chooseAddress({ appName: 'NimiCurl' }).then((result) => {
     localStorage.setItem(HUB_ADDRESS_KEY, result.address);
     return result;
   });
+}
+
+// ---- Nimiq Pay wallet identity (Mini App SDK provider) ----
+// Inside Nimiq Pay the player already has an active wallet in the host app —
+// no popup needed, just ask the injected provider for it. connectNimiq()
+// itself rejects/times out when not running inside Nimiq Pay (see above),
+// which is what lets connectIdentity() below use it as the "are we in Pay?"
+// check rather than a separate UA sniff.
+async function connectPayAccount() {
+  const provider = await connectNimiq();
+  await provider.connect();
+  const accounts = await provider.listAccounts();
+  if (!Array.isArray(accounts)) throw new Error(accounts?.error?.message || 'No wallet account available.');
+  const [address] = accounts;
+  if (!address) throw new Error('No wallet account available.');
+  localStorage.setItem(HUB_ADDRESS_KEY, address);
+  return address;
+}
+
+// ---- Connect gate (main.js's #connectGateOverlay: "Connect" or "Play as
+// guest", shown once before mode-select) ----
+// The gate's "Connect" button doesn't need to know ahead of time whether
+// it's running inside Nimiq Pay or a plain desktop browser — try the Pay
+// account first (fast/instant once connectNimiq() has already settled from
+// its boot-time call in main.js) and fall back to the Hub popup, which works
+// in any browser.
+export async function connectIdentity() {
+  try {
+    return await connectPayAccount();
+  } catch {
+    const result = await chooseAddress();
+    return result.address;
+  }
+}
+
+const GUEST_KEY = 'nimball-guest';
+
+// null = never decided yet (gate should show); otherwise the persisted
+// choice from a previous visit (see HUB_ADDRESS_KEY/GUEST_KEY above).
+export function getIdentity() {
+  const address = getStoredAddress();
+  if (address) return { type: 'address', address };
+  if (localStorage.getItem(GUEST_KEY)) return { type: 'guest' };
+  return null;
+}
+
+export function setGuest() {
+  localStorage.removeItem(HUB_ADDRESS_KEY);
+  localStorage.setItem(GUEST_KEY, '1');
+}
+
+// Back to "never decided" — used by the corner identity pill's disconnect
+// action to reopen the gate (see main.js).
+export function clearIdentity() {
+  localStorage.removeItem(HUB_ADDRESS_KEY);
+  localStorage.removeItem(GUEST_KEY);
 }

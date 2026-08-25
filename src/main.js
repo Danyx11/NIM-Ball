@@ -1,8 +1,13 @@
 import './style.css';
-// Nimiq's brand typeface (nimiq-style design system) — used for the score digits.
+// Nimiq's brand typeface (nimiq-style design system: Muli/Mulish 400/600/700,
+// per the official kit's own typography.css) — now the default UI font, not
+// just the score digits; 800 kept for the score/ticket's existing bold use.
+import '@fontsource/mulish/400.css';
+import '@fontsource/mulish/600.css';
+import '@fontsource/mulish/700.css';
 import '@fontsource/mulish/800.css';
 import { startGame, preloadCoreAssets } from './game.js';
-import { connectNimiq, chooseAddress, getStoredAddress } from './nimiq.js';
+import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity } from './nimiq.js';
 import { initBackground, preloadBackgroundAssets } from './background.js';
 import { connectLan, connectMatch } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
@@ -151,8 +156,23 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
     // longer participate in as a #game-card child.
     gameCard.appendChild(document.getElementById('chatBar'));
   }
-  ['overlay', 'replayBar', 'modeOverlay', 'replayUploadOverlay', 'syncToast', 'classicCustomOverlay', 'customSettingsOverlay'].forEach((id) => {
+  ['overlay', 'replayBar', 'syncToast'].forEach((id) => {
     gameCard.appendChild(document.getElementById(id));
+  });
+  // The pre-game menu screens (mode-select + Classic/Custom + Settings +
+  // Remote Match lobby + the Replay upload picker — everything reached from
+  // a mode tile before a match/replay actually starts) go to #menuStage
+  // instead of #game-card, desktop only — #menuStage is sized off the true
+  // viewport (see style.css), not #card-w/#card-h, so these render at
+  // #homeOverlay's own full-screen scale rather than shrunk into the game's
+  // smaller box. #replayBar (live replay PLAYBACK chrome, shown over the
+  // canvas once a replay is actually running) stays with #game-card above,
+  // same as #overlay/#syncToast — it's gameplay chrome, not a menu screen.
+  // Mobile keeps its existing behavior untouched (still #game-card children)
+  // — #menuStage isn't part of mobile's layout yet.
+  const menuHost = IS_MOBILE ? gameCard : document.getElementById('menuStage');
+  ['modeOverlay', 'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'replayUploadOverlay'].forEach((id) => {
+    menuHost.appendChild(document.getElementById(id));
   });
 }
 
@@ -176,14 +196,14 @@ const IS_STANDALONE_MODE = window.matchMedia('(display-mode: standalone)').match
 const FULLSCREEN_SUPPORTED = IOS_FULLSCREEN_FIX_ENABLED ? FULLSCREEN_API_AVAILABLE : true;
 const IS_STANDALONE = IOS_FULLSCREEN_FIX_ENABLED && IS_STANDALONE_MODE;
 
-initBackground();
+initBackground(IS_MOBILE);
 
 // Guards the loading screen against one slow/broken menu asset hanging it
 // forever — after this, the game just proceeds and lets the normal
 // per-frame .complete checks in game.js fill sprites in as they arrive.
 const ASSET_PRELOAD_TIMEOUT_MS = 8000;
 Promise.race([
-  preloadBackgroundAssets(),
+  preloadBackgroundAssets(IS_MOBILE),
   new Promise((resolve) => setTimeout(resolve, ASSET_PRELOAD_TIMEOUT_MS)),
 ]).then(() => {
   hideLoadingOverlay();
@@ -411,16 +431,20 @@ const rotateOverlay = document.getElementById('rotateOverlay');
 function isPortraitMobile() { return IS_MOBILE && window.matchMedia('(orientation: portrait)').matches; }
 // What comes after the gate(s): the fullscreen-recommend prompt if that
 // parked feature gets switched back on (IOS_FULLSCREEN_FIX_ENABLED above),
-// otherwise straight to the mode-select screen. Self-contained (sets the
-// final state outright rather than assuming what ran before it), so both
-// the initial entry below and the orientation listener can just call it.
+// otherwise the connect gate (#connectGateOverlay, see showConnectGate below)
+// if the player hasn't decided Connect/Guest yet, otherwise straight to the
+// mode-select screen. Self-contained (sets the final state outright rather
+// than assuming what ran before it), so both the initial entry below and the
+// orientation listener can just call it.
 function revealAfterGates() {
   if (IOS_FULLSCREEN_FIX_ENABLED && !IS_STANDALONE) {
     modeOverlay.classList.add('hidden');
     fsRecommendOverlay.style.display = '';
     fsRecommendOverlay.classList.remove('hidden');
+  } else if (!getIdentity()) {
+    showConnectGate();
   } else {
-    modeOverlay.classList.remove('hidden');
+    showModeDrawer();
   }
 }
 window.matchMedia('(orientation: portrait)').addEventListener('change', (e) => {
@@ -440,31 +464,43 @@ connectNimiq()
   .then((nimiq) => console.log('[nimiq] provider ready', nimiq))
   .catch((err) => console.log('[nimiq] not running inside Nimiq Pay:', err.message));
 
-// ---- Desktop wallet identity (Nimiq Hub, see src/nimiq.js's chooseAddress,
-// still pointed at testnet — see CLAUDE.md-worthy note there on the endpoint
-// gotcha). The chosen address is remembered and swapped into whichever team
-// the local player ends up controlling, in place of the placeholder
-// identicon, so it's visible in-game once a match starts.
-let hubAddress = getStoredAddress();
+// ---- Player identity (see src/nimiq.js's getIdentity/connectIdentity) —
+// resolved once via the #connectGateOverlay gate below (Connect or Play as
+// guest), right after the home screen. A connected address is remembered and
+// swapped into whichever team the local player ends up controlling, in
+// place of the placeholder identicon, so it's visible in-game once a match
+// starts.
+let hubAddress = getIdentity()?.address || null;
 function identiconOverride(team) {
   return hubAddress ? { [team]: hubAddress } : {};
 }
+// The corner pill is now a pure display of the resolved identity (address,
+// or "Guest") — no longer the connect trigger itself, that's #connectGateOverlay's
+// job. Clicking it reopens the gate to switch (disconnect), same "tap your
+// own identity to change it" pattern as elsewhere, gated to mode-select only
+// (activeStopGame, set further down) — reopening the gate mid-match would
+// yank the identicon out from under a running game.
 const connectBtn = document.getElementById('connectBtn');
 const connectBtnLabel = document.getElementById('connectBtnLabel');
-if (hubAddress) {
-  connectBtnLabel.textContent = `${hubAddress.slice(0, 9)}…`;
-  connectBtn.classList.add('connected');
+// Hidden entirely until the player has actually been through the connect
+// gate at least once (still hubAddress===null AND no persisted 'guest' flag
+// right after a disconnect too) — showing "Guest" here while the gate is
+// still open asking the player to decide would read as already decided.
+function syncIdentityPill() {
+  const decided = !!hubAddress || getIdentity()?.type === 'guest';
+  connectBtn.classList.toggle('hidden', !decided);
+  if (!decided) return;
+  connectBtnLabel.textContent = hubAddress ? `${hubAddress.slice(0, 9)}…` : 'Guest';
+  connectBtn.classList.toggle('connected', !!hubAddress);
 }
+syncIdentityPill();
 connectBtn.addEventListener('click', () => {
+  if (activeStopGame) return;
   audio.play('button');
-  chooseAddress()
-    .then((result) => {
-      hubAddress = result.address;
-      connectBtnLabel.textContent = `${result.address.slice(0, 9)}…`;
-      connectBtn.classList.add('connected');
-      console.log('[hub] address chosen', result);
-    })
-    .catch((err) => console.log('[hub] chooseAddress failed:', err.message || err));
+  clearIdentity();
+  hubAddress = null;
+  syncIdentityPill();
+  showConnectGate();
 });
 
 // ---- Mode select: Pass & Play / Remote Match / AI Training / Replay ----
@@ -479,6 +515,14 @@ const modeOverlay = document.getElementById('modeOverlay');
 // own translucent panel, same as the mode tiles do; only the tiles
 // themselves need hiding underneath.
 const modeDrawer = modeOverlay.querySelector('.mode-drawer');
+// Reveals the tile grid — the staggered pop-in (see style.css's
+// .mode-drawer:not(.hidden) .half) is driven entirely by CSS off .hidden
+// itself, so it replays every time this is called: home screen handoff,
+// Classic/Custom's back arrow, returnToModeSelect, the connect gate, etc.
+function showModeDrawer() {
+  modeDrawer.classList.remove('hidden');
+  modeOverlay.classList.remove('hidden');
+}
 const modeLocal = document.getElementById('modeLocal');
 const modeMatch = document.getElementById('modeMatch');
 const modeSolo = document.getElementById('modeSolo');
@@ -544,8 +588,7 @@ function hideMatchChrome() {
 
 function returnToModeSelect() {
   hideMatchChrome();
-  modeDrawer.classList.remove('hidden');
-  modeOverlay.classList.remove('hidden');
+  showModeDrawer();
 }
 
 // ---- Classic / Custom match settings (Pass & Play + Remote Match only —
@@ -569,13 +612,22 @@ const csBackBtn = document.getElementById('csBackBtn');
 const csResetBtn = document.getElementById('csResetBtn');
 const csSaveBtn = document.getElementById('csSaveBtn');
 const segControls = [...customSettingsOverlay.querySelectorAll('.seg-control')];
+// Remote Match's own 3 sub-screens (choice, generated code, code to fill in)
+// — same tile-colored/centered-header/exit-arrow language as the two
+// screens above, always the Remote Match tint (fixed in the markup, unlike
+// classicCustomOverlay/customSettingsOverlay which switch tint per mode)
+// since this whole overlay is Remote-Match-only.
+const matchNetworkOverlay = document.getElementById('matchNetworkOverlay');
+const matchNetworkContent = document.getElementById('matchNetworkContent');
+const matchNetworkBackBtn = document.getElementById('matchNetworkBackBtn');
+const matchNetworkModeIcon = document.getElementById('matchNetworkModeIcon');
 
-const MODE_LABELS = { passplay: 'PASS & PLAY', remote: 'REMOTE MATCH' };
+const MODE_LABELS = { passplay: 'PASS & PLAY', remote: 'REMOTE MATCH', replay: 'REPLAY' };
 // Reuses #modeOverlay's own tile icons (cloned, never a new asset) — see
 // explicit request not to introduce a new logo for these screens.
+const MODE_TILES = { passplay: modeLocal, remote: modeMatch, replay: modeReplay };
 function modeIconSvg(mode) {
-  const tile = mode === 'passplay' ? modeLocal : modeMatch;
-  return tile.querySelector('.mode-icon').cloneNode(true);
+  return MODE_TILES[mode].querySelector('.mode-icon').cloneNode(true);
 }
 // Also tints the panel itself with the same background as the mode-select
 // tile this screen follows (see .half.a/.half.e in style.css) — both screens
@@ -587,6 +639,47 @@ function fillModeHeader(panelEl, iconEl, titleEl, mode) {
   panelEl.classList.remove('mode-passplay', 'mode-remote');
   panelEl.classList.add(mode === 'passplay' ? 'mode-passplay' : 'mode-remote');
 }
+
+// Set once — this panel's icon never changes (always Remote Match).
+matchNetworkModeIcon.replaceChildren(modeIconSvg('remote'));
+
+// Tracks a room this client created and is still alone in (generated code
+// shown, nobody joined yet) — see matchNetworkBackBtn below: leaving one of
+// these 3 screens while this is set cancels that room server-side instead of
+// just walking away and leaving the code silently still working for anyone
+// who has it. Cleared the moment an opponent actually joins (showReadyScreen
+// takes over from there, out of this scope — see conversation) or the room
+// is cancelled/left.
+let hostedRoomNet = null;
+
+function showNetPanel(html) {
+  matchNetworkContent.innerHTML = html;
+  hideLobby();
+  classicCustomOverlay.classList.add('hidden');
+  customSettingsOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  matchNetworkOverlay.classList.remove('hidden');
+}
+function hideNetPanel() { matchNetworkOverlay.classList.add('hidden'); }
+
+// Always straight back to mode-select (see conversation) — none of these 3
+// screens has an earlier step of its own the way Classic/Custom's Back does.
+matchNetworkBackBtn.addEventListener('click', () => {
+  audio.play('button');
+  if (hostedRoomNet) {
+    // Suppress the stale "opponent disconnected" handler this same net
+    // still has registered (showMatchHostWaitingScreen's own onDisconnect)
+    // — this is an intentional cancel, not a dropped connection, same
+    // reasoning as game.js's stopGame() doing this before net.close().
+    hostedRoomNet.onDisconnect(() => {});
+    hostedRoomNet.cancelRoom();
+    hostedRoomNet.close();
+    hostedRoomNet = null;
+  }
+  hideNetPanel();
+  returnToModeSelect();
+});
 
 // Called once a mode/config choice is actually ready to launch — resumes
 // that mode's own existing entry flow exactly as before this feature
@@ -605,6 +698,7 @@ function showClassicCustomScreen(mode, launch, goBack) {
   onConfigBack = goBack;
   fillModeHeader(classicCustomOverlay, ccModeIcon, ccModeTitle, mode);
   hideLobby();
+  hideNetPanel();
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   customSettingsOverlay.classList.add('hidden');
@@ -649,6 +743,7 @@ function showCustomSettingsScreen(mode, initialConfig) {
   fillModeHeader(customSettingsOverlay, csModeIcon, csModeTitle, mode);
   renderCustomSettingsDraft();
   hideLobby();
+  hideNetPanel();
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   classicCustomOverlay.classList.add('hidden');
@@ -694,6 +789,76 @@ csSaveBtn.addEventListener('click', () => {
   onConfigReady?.({ ...customSettingsDraft });
 });
 
+// ---- Connect gate (#connectGateOverlay) — shown once, right after the home
+// screen and before mode-select, whenever getIdentity() (src/nimiq.js) says
+// the player hasn't decided yet (never chose Connect or Guest this device).
+// Reuses #modeOverlay's own arena backdrop, same trick as Classic/Custom
+// above: only #modeDrawer (the tile grid) needs hiding underneath. Also
+// reopened later by the corner identity pill's disconnect action (see
+// connectBtn above).
+const connectGateOverlay = document.getElementById('connectGateOverlay');
+const cgConnectBtn = document.getElementById('cgConnectBtn');
+const cgGuestBtn = document.getElementById('cgGuestBtn');
+const cgError = document.getElementById('cgError');
+
+function showConnectGate() {
+  cgError.classList.add('hidden');
+  cgConnectBtn.disabled = false;
+  cgGuestBtn.disabled = false;
+  hideLobby();
+  hideNetPanel();
+  classicCustomOverlay.classList.add('hidden');
+  customSettingsOverlay.classList.add('hidden');
+  replayUploadOverlay.classList.add('hidden');
+  modeDrawer.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  connectGateOverlay.classList.remove('hidden');
+}
+
+// Lands on the actual mode tiles once the gate resolves either way — same
+// reveal returnToModeSelect() does, minus the match-teardown half (there's
+// never a match running yet at this point).
+function proceedPastConnectGate() {
+  connectGateOverlay.classList.add('hidden');
+  showModeDrawer();
+}
+
+cgConnectBtn.addEventListener('click', () => {
+  audio.play('button');
+  cgError.classList.add('hidden');
+  cgConnectBtn.disabled = true;
+  cgGuestBtn.disabled = true;
+  connectIdentity()
+    .then((address) => {
+      hubAddress = address;
+      syncIdentityPill();
+      proceedPastConnectGate();
+    })
+    .catch((err) => {
+      // The player simply closing the Hub popup/Nimiq Pay prompt without
+      // picking anything isn't a failure worth a red error message — just
+      // silently drop back to the two tiles so they can try again (or pick
+      // Guest instead). Hub's own popup rejects with a "CANCELED"-style
+      // message for this; anything else (popup blocked, network error, no
+      // account returned) still surfaces.
+      if (/cancel/i.test(err.message || '')) return;
+      cgError.textContent = err.message || 'Connection failed.';
+      cgError.classList.remove('hidden');
+    })
+    .finally(() => {
+      cgConnectBtn.disabled = false;
+      cgGuestBtn.disabled = false;
+    });
+});
+
+cgGuestBtn.addEventListener('click', () => {
+  audio.play('button');
+  setGuest();
+  hubAddress = null;
+  syncIdentityPill();
+  proceedPastConnectGate();
+});
+
 modeLocal.addEventListener('click', () => {
   audio.play('button');
   showClassicCustomScreen('passplay', (config) => {
@@ -732,19 +897,24 @@ const replayUploadOverlay = document.getElementById('replayUploadOverlay');
 const replayUploadBox = document.getElementById('replayUploadBox');
 const replayFileInput = document.getElementById('replayFileInput');
 const replayChooseFileBtn = document.getElementById('replayChooseFileBtn');
-const replayUploadCancelBtn = document.getElementById('replayUploadCancelBtn');
+const replayUploadBackBtn = document.getElementById('replayUploadBackBtn');
 const replayUploadStatus = document.getElementById('replayUploadStatus');
+const replayModeIcon = document.getElementById('replayModeIcon');
+const replayModeTitle = document.getElementById('replayModeTitle');
 
 modeReplay.addEventListener('click', () => {
   audio.play('button');
-  modeOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  replayModeIcon.replaceChildren(modeIconSvg('replay'));
+  replayModeTitle.textContent = MODE_LABELS.replay;
   replayUploadStatus.textContent = '';
   replayUploadOverlay.classList.remove('hidden');
 });
-replayUploadCancelBtn.addEventListener('click', () => {
+replayUploadBackBtn.addEventListener('click', () => {
   audio.play('button');
   replayUploadOverlay.classList.add('hidden');
-  modeOverlay.classList.remove('hidden');
+  returnToModeSelect();
 });
 replayChooseFileBtn.addEventListener('click', () => { audio.play('button'); replayFileInput.click(); });
 replayFileInput.addEventListener('change', () => {
@@ -767,7 +937,7 @@ async function handleReplayFile(file) {
     const points = await decodePointsFromTicketImage(file);
     hideLoadingOverlay();
     if (points.length === 0) {
-      replayUploadStatus.textContent = 'Aucun point trouvé sur ce ticket.';
+      replayUploadStatus.textContent = 'No points found on this ticket.';
       return;
     }
     replayUploadOverlay.classList.add('hidden');
@@ -775,7 +945,7 @@ async function handleReplayFile(file) {
     activeStopGame = startGame({ ...rockHandlers, replayPoints: points, mobile: IS_MOBILE });
   } catch (err) {
     hideLoadingOverlay();
-    replayUploadStatus.textContent = 'Impossible de lire ce fichier.';
+    replayUploadStatus.textContent = "Couldn't read this file.";
     console.log('[replay] decode failed:', err);
   }
 }
@@ -901,9 +1071,9 @@ function generateMatchCode() {
 }
 
 function showMatchChoiceScreen(errorMsg) {
-  showLobby(`
+  hostedRoomNet = null;
+  showNetPanel(`
     <h2>Match réseau</h2>
-    <p>Crée une partie et partage le code, ou rejoins avec un code reçu.</p>
     <div style="display:flex; gap:12px;">
       <button class="bigbtn" id="matchHostBtn">Créer</button>
       <button class="bigbtn" id="matchJoinBtn">Rejoindre</button>
@@ -917,7 +1087,7 @@ function showMatchChoiceScreen(errorMsg) {
   // Pass & Play's (src/matchConfig.js).
   document.getElementById('matchHostBtn').onclick = () => {
     audio.play('button');
-    showClassicCustomScreen('remote', (config) => { modeOverlay.classList.add('hidden'); hostMatch(config); }, () => { modeOverlay.classList.add('hidden'); showMatchChoiceScreen(); });
+    showClassicCustomScreen('remote', (config) => hostMatch(config), () => showMatchChoiceScreen());
   };
   document.getElementById('matchJoinBtn').onclick = () => { audio.play('button'); showMatchJoinScreen(); };
 }
@@ -947,20 +1117,25 @@ async function hostMatch(matchConfig) {
 function showMatchHostWaitingScreen(net, code, matchConfig) {
   const teamLabel = net.myTeam === 'A' ? 'ÉQUIPE BLEUE' : 'ÉQUIPE JAUNE';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
-  showLobby(`
+  // Alone with a generated code, nobody's joined yet — see
+  // matchNetworkBackBtn's own comment for what this gates.
+  hostedRoomNet = net;
+  showNetPanel(`
     <span class="team-pill ${cls}">${teamLabel}</span>
     <h2>En attente de l'adversaire…</h2>
-    <p>Donne-lui ce code :</p>
     <div class="match-code">${code}</div>
   `);
-  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, (msg) => showMatchChoiceScreen(msg), matchConfig));
-  net.onDisconnect(() => showMatchChoiceScreen("L'autre joueur s'est déconnecté."));
+  net.onOpponentJoined(() => {
+    hostedRoomNet = null;
+    showReadyScreen(net, teamLabel, cls, (msg) => showMatchChoiceScreen(msg), matchConfig);
+  });
+  net.onDisconnect(() => { hostedRoomNet = null; showMatchChoiceScreen("L'autre joueur s'est déconnecté."); });
 }
 
 function showMatchJoinScreen(errorMsg) {
-  showLobby(`
+  hostedRoomNet = null;
+  showNetPanel(`
     <h2>Rejoindre un match</h2>
-    <p>Code donné par l'autre joueur :</p>
     <input id="matchCodeInput" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="XXXX" />
     <button class="bigbtn" id="matchJoinSubmitBtn">Rejoindre</button>
     ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
@@ -1006,10 +1181,21 @@ function revealMenu() {
     revealAfterGates();
   }
 }
+// Timings mirror style.css's #homeOverlay.leaving transition (480ms slide,
+// then a 160ms fade once it's lined up with whatever comes next). What's
+// revealed underneath (rotate gate / connect gate / mode tiles — see
+// revealMenu() above) only appears once the slide itself is done, same "not
+// before it's aligned" beat the fade waits for.
+const HOME_SLIDE_MS = 480;
+const HOME_FADE_MS = 160;
 homeOverlay.addEventListener('click', () => {
   audio.play('button');
-  homeOverlay.classList.add('hidden');
-  revealMenu();
+  homeOverlay.classList.add('leaving');
+  setTimeout(revealMenu, HOME_SLIDE_MS);
+  setTimeout(() => {
+    homeOverlay.classList.add('hidden');
+    homeOverlay.classList.remove('leaving');
+  }, HOME_SLIDE_MS + HOME_FADE_MS);
 });
 
 // Magic links, all three skip mode-select (and now the home screen) entirely:

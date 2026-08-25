@@ -10,18 +10,33 @@
   --teamB: #ffc94d;
   --teamB-dark: #b8862e;
   --error: #ff4d5e;
-  --accent: #ffd166;
+  /* Nimiq Gold (--nimiq-gold in the official nimiq-style kit, theme.css) —
+     was an ad-hoc amber (#ffd166) picked independently of the brand palette;
+     this is the verified official hex, not an approximation. */
+  --accent: #e9b213;
   --panel: #143844;
-  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Scrim depths reused across every full-panel dark backdrop (#overlay,
+     .config-panel, #replayUploadOverlay, #syncToast, #replayExitBtn) — same
+     rgb triple (Nimiq-Blue-ish near-black), only the alpha differs by how
+     much of the scene behind still needs to read through. */
+  --scrim-92: rgba(6, 16, 20, 0.92);
+  --scrim-85: rgba(6, 16, 20, 0.85);
+  --scrim-70: rgba(6, 16, 20, 0.7);
+  /* Nimiq's own UI font (nimiq-style's typography.css loads 'Muli' — the
+     pre-rename Google Fonts name for what ships today as Mulish — at
+     400/600/700; see main.js's @fontsource imports). Was the OS system
+     stack; that stack stays as the fallback chain. */
+  font-family: 'Mulish', -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 html, body {
   margin: 0; padding: 0; height: 100%;
-  background:
-    radial-gradient(1100px 700px at 15% -10%, rgba(232,169,79,0.08), transparent 60%),
-    #0b0d12;
+  /* Nimiq Gray (--nimiq-gray in the official kit) — was a near-black
+     (#0b0d12) + faint warm glow, sized for a dark page; that glow doesn't
+     read on a light ground so it's dropped rather than kept underneath. */
+  background: #f4f4f4;
   color: var(--ink);
   overflow: hidden;
   touch-action: none;
@@ -42,20 +57,23 @@ html, body {
      separate constellation background needed underneath it, see
      conversation), so the card's shape IS the board's shape, not an
      independent frame around a smaller inset board like the old 2400/1450
-     card was. Every var() below (right-margin, joystick geometry, etc.) is
-     formula-driven off --card-w, not a hardcoded px, so this one ratio
-     change is the only edit needed for the whole cascade to follow. */
-  --card-w: min(82vw, 1300px, calc(90vh * 3312 / 1896));
-  /* Card's own aspect ratio as a height, so anything anchored above the
-     card (the connect button below) can stay clear of its actual top edge
-     instead of a hardcoded offset that only works at one viewport size. */
-  --card-h: calc(var(--card-w) * 1896 / 3312);
-  /* Card now sits flush against the left edge (see #game-card) instead of
-     centered, so the entire leftover width becomes one right-side margin
-     column (logo/connect/reserved slots below, eventually the mobile
-     joystick) instead of being split into two half-margins. */
+     card was.
+     Desktop layout (per explicit request, replacing the old flush-left/
+     margin-derived one): the right column is a FIXED reserved width, not a
+     leftover — 20vw, taking the proportion from the Nimiq UI Kit's own
+     doc-site sidebar (nimiqtoolbox.github.io/nimiq-ui-kit, mirrored to the
+     right here since their nav sits on the left). #game-card itself (see
+     that rule) is now a fixed 80vw x 100vh box, decoupled from the arena
+     art's own 3312/1896 ratio entirely — the canvas still renders at its
+     own true aspect ratio inside it (#app's existing flex centering, no
+     changes needed there), just no longer forced to match the box's shape,
+     so any leftover space reads as a soft fade to Nimiq Blue instead of
+     grey letterboxing. See #game-card's own comment for the fade mechanics. */
+  --right-margin: 20vw;
+  /* No longer used by the desktop card itself — kept only because
+     .mobile-layout's own separate --card-w/--right-margin override further
+     down still reads it, untouched by this change. */
   --card-left-gap: 16px;
-  --right-margin: calc(100vw - var(--card-w) - var(--card-left-gap));
 
   /* Leftover half of what used to be the full mobile joystick column
      geometry — the ring/toolbar-sizing half (--joy-d, --joy-center-y,
@@ -140,13 +158,14 @@ html, body {
   z-index: 2;
   top: 16px;
   cursor: pointer;
-  /* Centered in the margin strip right of the card: that margin spans from
-     the card's right edge to the viewport edge ((100vw - card-w)/2), so
-     the logo's own center sits at a quarter of (100vw - card-w) in from
-     the right edge. Now shares that margin/column with #connectBtn (bottom)
-     and the reserved menu/fullscreen slots stacked below (see .reserved-slot). */
-  right: calc(var(--right-margin) / 2 - 127.5px);
-  width: 255px;
+  /* Centered in the 20vw reserved column (--right-margin) — the same clamp()
+     expression appears in both width and right so the centering math stays
+     correct at every size, not just the design-reference one. Was a fixed
+     255px (~90% of the column on a narrower desktop window, edge-to-edge);
+     shrunk to a comfortable fraction of the column itself instead, per
+     explicit request. */
+  width: clamp(140px, 12vw, 210px);
+  right: calc((var(--right-margin) - clamp(140px, 12vw, 210px)) / 2);
   height: auto;
 }
 
@@ -181,6 +200,7 @@ html, body {
 
 .nq-connect-btn:active { transform: translateY(0); }
 .nq-connect-btn.connected { background: #1F2348; }
+.nq-connect-btn.hidden { display: none; }
 .nq-connect-icon { width: 12px; height: 12px; flex: none; }
 
 /* Mobile layout (see src/main.js's coarse-pointer detection, which toggles
@@ -296,8 +316,8 @@ html, body {
   animation: joyLockPulse 1.6s ease-in-out infinite;
 }
 @keyframes joyLockPulse {
-  0%, 100% { box-shadow: 0 0 6px 2px rgba(255,209,102,0.6); }
-  50% { box-shadow: 0 0 14px 5px rgba(255,209,102,0.95); }
+  0%, 100% { box-shadow: 0 0 6px 2px rgba(233,178,19,0.6); }
+  50% { box-shadow: 0 0 14px 5px rgba(233,178,19,0.95); }
 }
 
 /* play/sweep/power/chat/sound/exit — reparented in from #toolbar-bottom/
@@ -395,23 +415,157 @@ html, body {
   background-size: cover;
   background-position: center;
   cursor: pointer;
+  /* Two distinct beats on dismiss (see main.js's homeOverlay click handler,
+     which adds/removes .leaving): a slide first, at full opacity, then only
+     once it's aligned with whatever comes next (connect gate or, if already
+     decided, the mode tiles) a quick fade. transition-delay is what
+     sequences the two — opacity doesn't even start moving until the slide's
+     own duration has elapsed. clip-path rides the same duration/easing as
+     transform (see the .leaving rule below for why) so the two stay in
+     lockstep the whole way through, not just matching at the end. */
+  clip-path: inset(0 0 0 0);
+  transition: transform 480ms cubic-bezier(.22,.68,0,1), clip-path 480ms cubic-bezier(.22,.68,0,1), opacity 160ms ease-in 480ms;
 }
 #homeOverlay.hidden { display: none; }
+/* Slides left by HALF of --right-margin (10vw), not the full column width —
+   counterintuitive, but it's what keeps the arena art itself visually
+   still. home-screen.webp and mode-select-bg.webp are the same base render
+   (mode-select-bg just has the logo/PLAY layers stripped), but they're not
+   *positioned* the same way: #homeOverlay is a 100vw box centered on the
+   full viewport (arena lands at 50vw), while #modeOverlayBg is a 100vw box
+   shifted left:-10vw inside the 80vw menu zone (arena lands at 40vw, see
+   that rule's own comment). Translate alone only fixes the CENTER, though —
+   #homeOverlay's own right edge is a real box boundary (transform doesn't
+   resize it), so right after a plain -10vw slide it still sits at 90vw,
+   10vw past #modeOverlayBg's own clipped edge at 80vw. Left alone, that
+   read as two steps: the image visibly slides at full width, then the
+   *next* layer's already-narrower crop replaces it — a size jump, not a
+   continuous motion. clip-path shaves that same 10vw off the element's own
+   right edge in step with the translate (both use the same transition
+   timing above), so the visible content finishes the move at the correct
+   WIDTH as well as the correct position — one continuous "slide-and-crop",
+   not slide-then-swap. Transform/clip-path are both skipped on mobile
+   (.mobile-layout's own --right-margin collapses to ~0 there, see :root's
+   comment — nothing meaningful to slide into), so mobile gets just the
+   fade. */
+body:not(.mobile-layout) #homeOverlay.leaving { transform: translateX(-10vw); clip-path: inset(0 10vw 0 0); }
+#homeOverlay.leaving { opacity: 0; pointer-events: none; }
 
 #game-card {
   position: fixed;
   z-index: 1;
-  top: 50%;
-  left: var(--card-left-gap);
-  transform: translateY(-50%);
-  width: var(--card-w);
-  aspect-ratio: 3312 / 1896;
-  border: 1px solid #232838;
-  border-radius: 14px;
+  top: 0;
+  left: 0;
+  /* Fixed 80vw x 100vh — same box as #menuStage, no longer locked to the
+     arena art's own 3312/1896 ratio (was width:var(--card-w) + aspect-ratio,
+     which is what produced the grey letterboxing above/below on any screen
+     narrower than ~2.18:1). The canvas inside still renders at its own true
+     ratio (#app's flex centering does this for free, unchanged) — it just
+     isn't forced to fill this box's exact shape anymore. */
+  width: calc(100vw - var(--right-margin));
+  height: 100vh;
+  /* No border/radius framing the box anymore (was 1px solid + 14px radius)
+     — per explicit request, dropped now that the card isn't a smaller
+     margin-surrounded box on every side. */
   overflow: hidden;
-  background: #060716;
-  box-shadow: 0 30px 80px -30px rgba(0,0,0,0.6);
+  /* Nimiq Blue, darkened (--nimiq-blue-darkened in the official kit) — was
+     a near-black #060716 that only ever showed as a same-frame loading
+     flash. Now it's also whatever shows in the gap above/below the canvas
+     when this box is taller than the art's own rendered height (any screen
+     narrower than ~2.18:1 — see :root's own comment) — #stage-wrap's fade
+     below blends the canvas's real edge into this same color instead of a
+     hard cut. */
+  background: #151833;
 }
+/* Soft fade from the canvas into #game-card's surrounding Nimiq Blue.
+   Genuinely important detail: this has to dip a little INTO the canvas
+   (per explicit request/confirmation — was tried living entirely outside
+   it first, anchored exactly at the edge, and turned out invisible by
+   construction: a semi-transparent #151833 painted over #game-card's own
+   solid #151833 background composites to the exact same #151833 regardless
+   of opacity, so a "fade" confined only to the margin has nothing to
+   actually fade against). The 24px offset (bottom/top: calc(100% - 24px),
+   not a plain 100%) shifts the whole gradient that far into the real image,
+   where the colors are actually different from the surrounding blue and a
+   fade becomes visible — small enough not to meaningfully eat into the
+   playing field. Stops run transparent-near-the-image to solid-out-in-the-
+   margin (mirrored from a first attempt that had this backwards — solid
+   would land ON the image at the overlap point, opaque near-margin end
+   fading to nothing well before reaching the image, backwards from the
+   intended effect). Eased (8 stops, not a flat 2-color gradient) for the
+   same reason as before: a plain linear alpha ramp still reads as an
+   abrupt cutoff perceptually.
+   height: vh, not a % of #stage-wrap's own box — #stage-wrap has no
+   explicit height (it shrink-wraps to the canvas's own auto height), and a
+   percentage height on an absolutely-positioned child of an auto-height
+   containing block is one of the genuinely inconsistent corners of CSS
+   (resolved fine in Chromium during testing, collapsed to nothing in a
+   real user's Firefox). vh sidesteps that ambiguity entirely. 20vh
+   comfortably covers the realistic margin range (~9-13vh per side on
+   common desktop ratios, see :root's own comment) with room to spare; any
+   excess simply gets clipped by #game-card's own overflow:hidden rather
+   than causing a hard edge — on an ultra-wide screen with no margin left,
+   only the small 24px in-image portion would show, which is fine. */
+#stage-wrap::before, #stage-wrap::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 20vh;
+  pointer-events: none;
+}
+#stage-wrap::before {
+  bottom: calc(100% - 24px);
+  background: linear-gradient(to top,
+    rgba(21,24,51,0) 0%,
+    rgba(21,24,51,0.04) 10%,
+    rgba(21,24,51,0.12) 25%,
+    rgba(21,24,51,0.25) 40%,
+    rgba(21,24,51,0.42) 55%,
+    rgba(21,24,51,0.62) 70%,
+    rgba(21,24,51,0.83) 85%,
+    #151833 100%);
+}
+#stage-wrap::after {
+  top: calc(100% - 24px);
+  background: linear-gradient(to bottom,
+    rgba(21,24,51,0) 0%,
+    rgba(21,24,51,0.04) 10%,
+    rgba(21,24,51,0.12) 25%,
+    rgba(21,24,51,0.25) 40%,
+    rgba(21,24,51,0.42) 55%,
+    rgba(21,24,51,0.62) 70%,
+    rgba(21,24,51,0.83) 85%,
+    #151833 100%);
+}
+
+/* Desktop-only menu stage (see index.html's own comment + main.js's
+   detachment block, mobile-gated there) — independent of #game-card, sized
+   directly off the true viewport rather than off #card-w/#card-h, so the
+   pre-game menu (mode-select + Classic/Custom + Settings + Remote Match
+   lobby) can render at the same full-screen scale as #homeOverlay instead
+   of being shrunk into the game's own smaller, aspect-ratio-locked box.
+   z-index matches #game-card's own (1) — DOM order (this element comes
+   after #game-card in index.html) settles the tie in this element's favor,
+   no higher number needed since nothing else in this z tier needs to beat
+   it specifically. */
+#menuStage {
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  width: 80vw;
+  height: 100vh;
+  overflow: hidden;
+  /* This box stays mounted (empty) even during live gameplay, when none of
+     its children are shown — without this, its own invisible full-size box
+     was silently swallowing every click meant for the game underneath
+     (confirmed via elementFromPoint() landing on #menuStage, not the
+     canvas — the "no game button works" bug). Same pattern #toolbar-top
+     already uses: pointer-events:none on the shell, auto on whichever
+     child is actually visible/interactive. */
+  pointer-events: none;
+}
+#menuStage > * { pointer-events: auto; }
 /* Mobile: --card-w now covers the full viewport (see .mobile-layout's own
    --card-w above) instead of fitting inside it with room to spare on the
    right for the old joystick column — centered on both axes so the excess
@@ -575,12 +729,6 @@ html, body {
    overflow:hidden — the real "seam" being reported. 70% restores a safe
    margin on both edges; still bigger in absolute px than the board was
    before this session's #game-card enlargement. */
-/* container-type lets .tbtn (see #toolbar-top/#toolbar-bottom below) size
-   itself in cqw units off THIS box's width no matter how deeply it's nested
-   inside — e.g. chat/exit sit inside .tbtn-group, a plain flex item with no
-   width of its own, and a plain % width there would resolve against that
-   group's own indefinite size (silently landing at the wrong, smaller size)
-   rather than the toolbar's actual full-width bar. */
 /* Was 70% width + translateY(6.52%): the old frame.webp had a big
    asymmetric transparent margin (~8% above the scoreboard plank, ~21%
    below) that those numbers corrected for, centering the art actually
@@ -588,7 +736,19 @@ html, body {
    transparent margin at all (fully opaque self-contained scene, see
    #game-card above) — it fills #game-card exactly by design, so the board
    is simply the whole card now, no correction needed. */
-#stage-wrap { position: relative; width: 100%; container-type: inline-size; }
+/* container-type: inline-size dropped — it existed only so .tbtn (the old
+   #toolbar-top/#toolbar-bottom buttons) could size itself in cqw units off
+   this box; those toolbars are `display:none !important` for the V2 art
+   (see their own rule) and have been for a while, so the containment was
+   already dead weight. Worth removing on its own merits, but it also turned
+   out to be the actual cause of the #stage-wrap::before/::after fade being
+   invisible in a real browser (confirmed correct computed styles, never
+   painted): container-type establishes size containment on this axis,
+   which several engines pair with an implicit paint clip — silently
+   cutting off exactly the kind of "positioned pseudo-element extending
+   outside its own box" the fade relies on, apparently inconsistently
+   between Chromium (fine) and Firefox (clipped). */
+#stage-wrap { position: relative; width: 100%; }
 canvas {
   display: block; width: 100%; height: auto; touch-action: none;
 }
@@ -848,7 +1008,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   transform: translate(-50%, -50%) rotate(-45deg);
 }
 #overlay {
-  position: absolute; inset: 0; background: rgba(6,16,20,0.92); border-radius: 18px;
+  position: absolute; inset: 0; background: var(--scrim-92); border-radius: 18px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; padding: 30px;
   /* Above #modeOverlay/#startOverlay (DOM siblings, no z-index of their own —
      #startOverlay comes later in source order and would otherwise win the
@@ -877,7 +1037,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    reports state, nothing to click. */
 #syncToast {
   position: absolute; left: 50%; top: 6%; transform: translateX(-50%);
-  background: rgba(6,16,20,0.85); color: var(--ink, #eef4f6);
+  background: var(--scrim-85); color: var(--ink, #eef4f6);
   padding: 10px 22px; border-radius: 18px; font-size: 14px; font-weight: 600;
   text-align: center; max-width: 85%; box-sizing: border-box; pointer-events: none; z-index: 11;
 }
@@ -897,9 +1057,26 @@ button:disabled { opacity: 0.35; cursor: default; }
    right-docked drawer specifically) — together what let panels run
    off-screen or half cut-off at some real phone aspect ratios despite
    looking fine in a quick emulator check. */
-#overlay h2 { margin: 0; font-size: 26px; }
-#overlay p { margin: 0; color: var(--ink-dim); max-width: 380px; font-size: 14px; line-height: 1.5; }
+#overlay h2, .config-lobby-content h2 { margin: 0; font-size: 26px; color: #fff; }
+#overlay p, .config-lobby-content p { margin: 0; color: var(--ink-dim); max-width: 380px; font-size: 14px; line-height: 1.5; }
+/* #matchNetworkOverlay's own content wrapper (see main.js's showNetPanel) —
+   same centered-column layout #overlay's own children get for free from its
+   own flex rules, replicated here since .config-panel's base flex-direction
+   is column but doesn't itself center/gap content (Classic/Custom and
+   Custom Settings above lay out their own children directly). */
+.config-lobby-content { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
 .bigbtn { background: var(--accent); color: #3a2900; padding: 14px 30px; font-size: 16px; border-radius: 14px; }
+/* Remote Match's 3 sub-screens (see main.js's showNetPanel) rebuild
+   #matchNetworkContent's innerHTML from scratch on every screen change, so a
+   fresh entrance for its button(s) needs no JS bookkeeping — new DOM nodes
+   naturally replay the animation. Scoped to #matchNetworkOverlay specifically
+   (not .config-lobby-content generally, which #overlay's in-match "back to
+   menu?" confirm dialog also reuses — that one isn't one of the menu panels
+   this is for). Two nth-of-type slots covers every sub-screen here (choice
+   screen's Créer/Rejoindre is the only one with 2; the rest have at most 1). */
+#matchNetworkOverlay:not(.hidden) .bigbtn { animation: item-pop-in 240ms cubic-bezier(.16,1,.3,1) both; }
+#matchNetworkOverlay:not(.hidden) .bigbtn:nth-of-type(1) { animation-delay: 90ms; }
+#matchNetworkOverlay:not(.hidden) .bigbtn:nth-of-type(2) { animation-delay: 150ms; }
 .team-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; border-radius: 999px; font-weight: 800; font-size: 18px; }
 .team-pill.a { background: rgba(63,169,245,0.15); color: var(--teamA); }
 .team-pill.b { background: rgba(255,201,77,0.15); color: var(--teamB); }
@@ -913,7 +1090,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 .goal-identicon { display: block; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.06); }
 .goal-badge {
   position: absolute; top: -8px; right: -18px; font-weight: 800; font-size: 26px;
-  background: rgba(6,16,20,0.85); padding: 2px 10px; border-radius: 999px;
+  background: var(--scrim-85); padding: 2px 10px; border-radius: 999px;
 }
 .goal-badge.a { color: var(--teamA); }
 .goal-badge.b { color: var(--teamB); }
@@ -965,6 +1142,16 @@ button:disabled { opacity: 0.35; cursor: default; }
    not a smaller version of the same wrong anchor) — together what let
    panels run off-screen or half cut-off at some real phone aspect ratios
    despite looking fine in a quick emulator check. */
+/* Mobile: the base inset above is FX0/FY0/FX1/FY1 expressed as fractions of
+   the full 3312x1896 canvas (32.79% == FX0/3312, etc.) — correct on desktop,
+   where #stage-wrap's own box keeps that same aspect, but wrong on mobile:
+   the canvas backing buffer itself is cropped to MOBILE_CROP (793,286)-
+   (3010,1580) there (see game.js), and that crop isn't centered on the ice
+   rect, so the same percentages land shifted right of where the ice actually
+   sits within the smaller cropped box. Re-expressed as fractions of the crop
+   itself (FX0-793)/2217, etc. — this is what actually centers the halfA/
+   halfB split on the arena's own vertical mid-line on mobile. */
+.mobile-layout #startOverlay { inset: 26.28% 33.74% 23.65% 13.22%; }
 .half { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: background .25s ease; text-align: center; padding: 16px; }
 .half.a { background: rgba(31,111,168,0.55); }
 .half.b { background: rgba(168,50,71,0.55); }
@@ -995,8 +1182,17 @@ button:disabled { opacity: 0.35; cursor: default; }
    class selector) able to win over this ID-scoped rule instead of being
    beaten by higher ID specificity. */
 #modeOverlay { inset: 0; border-radius: 0; }
-#modeOverlayBg { position: absolute; inset: 0; background-size: cover; background-position: center; }
-.mode-select-scrim { position: absolute; inset: 0; background: rgba(6,14,18,0.5); }
+/* Same size as #homeOverlay (100vw x 100vh, background-size:cover — vw/vh
+   are true-viewport units regardless of #modeOverlay's own 80vw box, so this
+   really is the same scale/crop the home screen uses, not a smaller version
+   of it), then shifted left by half of what #menuStage's 80vw leaves out
+   (10vw = half of the 20vw right column) so the arena recenters within the
+   visible 80vw window instead of just losing its right edge — #modeOverlay
+   itself still clips this back down to 80vw (inherits .team-select's own
+   overflow:hidden), so the image is never resized, only cropped 10vw off
+   each side. */
+#modeOverlayBg { position: absolute; top: 0; left: -10vw; width: 100vw; height: 100vh; background-size: cover; background-position: center; }
+.mode-select-scrim { position: absolute; inset: 0; background: rgba(6,14,18,0.28); }
 .mode-drawer {
   position: absolute;
   inset: 6%;
@@ -1006,6 +1202,22 @@ button:disabled { opacity: 0.35; cursor: default; }
   gap: 12px;
   border-radius: 20px;
   overflow: hidden;
+}
+/* Same "replay every time this screen opens" convention as every other menu
+   panel (.config-panel:not(.hidden), see that rule's own comment) — state-
+   based on :not(.hidden) rather than a one-shot class, so returning here via
+   Classic/Custom's back arrow, returnToModeSelect, the connect gate, etc.
+   all get the same cascade, not just the very first arrival. */
+.mode-drawer:not(.hidden) .half {
+  animation: tile-pop-in 300ms cubic-bezier(.16,1,.3,1) both;
+}
+.mode-drawer:not(.hidden) .half:nth-child(1) { animation-delay: 0ms; }
+.mode-drawer:not(.hidden) .half:nth-child(2) { animation-delay: 70ms; }
+.mode-drawer:not(.hidden) .half:nth-child(3) { animation-delay: 140ms; }
+.mode-drawer:not(.hidden) .half:nth-child(4) { animation-delay: 210ms; }
+@keyframes tile-pop-in {
+  from { opacity: 0; transform: translateY(14px) scale(.97); }
+  to { opacity: 1; transform: none; }
 }
 /* Mobile: leave the right-hand column (--controller-reserved-w, see
    .mobile-layout above) clear of tiles — that's the same column #bg-logo/
@@ -1030,6 +1242,43 @@ button:disabled { opacity: 0.35; cursor: default; }
 .mode-icon { height: 36px; width: auto; color: rgba(255,255,255,0.92); }
 .mode-icon-tall { height: 30.6px; }
 
+/* Elevation layer 2/3 (card/menu box -> tiles): scoped to #modeOverlay only,
+   same reasoning as the palette rule below it — .half is shared with
+   #startOverlay's team-ready screen (game UI, out of scope here). Tiles sit
+   edge-to-edge in a grid (.mode-drawer's own overflow:hidden, gap:12px), so
+   this only ever shows in the 12px seams between tiles, never as an outer
+   glow — exactly the "depth only near the contour" effect asked for, no
+   layout change needed to get it. One notch stronger than the card's own
+   layer-1 shadow, still short/faint/cool-tinted (Nimiq Blue), not a drop
+   shadow. */
+#modeOverlay .half { box-shadow: 0 3px 12px rgba(31, 35, 72, 0.30); }
+
+/* Mode-tile palette: the 4 base hues (.half.a/.b/.c above, .half.d/.e below)
+   were an unrelated color-wheel pick (blue/orange/purple/turquoise), not
+   drawn from the brand. Re-tinted here to the 4 official Nimiq brand colors
+   (Nimiq Style / nimiq-style theme.css — --nimiq-light-blue/-blue/-green/
+   -gold) and pushed more opaque (0.55 -> 0.72) so the forest art underneath
+   reads clearly as backdrop rather than blending into the tile color, per
+   explicit request. ID-scoped to #modeOverlay only, same convention as the
+   #modeOverlay rule above (comment: "so #startOverlay ... is unaffected") —
+   .half.a is shared with #startOverlay's team-blue-ready screen (game/team
+   color, not menu chrome), so its own base rule stays untouched; this only
+   overrides for elements actually inside #modeOverlay. */
+#modeOverlay .half.a { background: rgba(5, 130, 202, 0.72); }   /* Nimiq Light Blue — Pass & Play */
+#modeOverlay .half.c { background: rgba(31, 35, 72, 0.72); }    /* Nimiq Blue — AI Training */
+#modeOverlay .half.d { background: rgba(33, 188, 165, 0.72); }  /* Nimiq Green — Replay */
+#modeOverlay .half.e { background: rgba(233, 178, 19, 0.72); }  /* Nimiq Gold — Remote Match */
+/* Gold and Green are light enough that the shared white-ish text/icon color
+   (.half .tag inherits var(--ink), .half .sub/.mode-icon are literal near-
+   white) fails contrast against them — dark ink instead, same convention
+   already used for text-on-gold elsewhere (.bigbtn/.config-save use
+   #3a2900 on var(--accent)). .tag has no color of its own, so it picks this
+   up through inheritance; .sub/.mode-icon set their own color and need an
+   explicit override. */
+#modeOverlay .half.d, #modeOverlay .half.e { color: var(--bg-deep); }
+#modeOverlay .half.d .sub, #modeOverlay .half.e .sub { color: rgba(11,31,42,0.75); }
+#modeOverlay .half.d .mode-icon, #modeOverlay .half.e .mode-icon { color: var(--bg-deep); }
+
 /* ---- Classic/Custom + Custom Settings screens (see main.js) — shown after
    Pass & Play / Remote Match is picked from #modeOverlay above, never for
    vs AI. Left 3/4 of #game-card, same reasoning/technique as #overlay and
@@ -1046,13 +1295,27 @@ button:disabled { opacity: 0.35; cursor: default; }
    on both axes within the left-3/4 zone itself (the midpoint between the 6%
    left margin and the 25%-from-the-right boundary), not the full card. */
 .config-panel {
-  position: absolute; top: 50%; left: calc((6% + (100% - 25%)) / 2);
+  /* True center of #menuStage (which is just the arena crop now, see
+     CLAUDE.md-style comments on #modeOverlayBg) — was biased toward the
+     left, reserving a fixed 25% on the right so "game art" stayed visible
+     there when this panel lived inside the old #game-card box. #menuStage
+     doesn't have that same asymmetric reasoning (there's no separate
+     right-side art to protect, the whole box IS the cropped arena), so a
+     left-biased panel just reads as off-center against it — confirmed via
+     getBoundingClientRect (panel center sat ~110px left of #menuStage's own
+     center at 1440px wide). */
+  position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%); z-index: 5;
-  width: fit-content; max-width: calc(100% - 6% - 25%);
+  width: fit-content; max-width: calc(100% - 12%);
   height: fit-content; max-height: 88%;
-  background: rgba(6,16,20,0.92); border-radius: 24px;
+  background: var(--scrim-92); border-radius: 24px;
   display: flex; flex-direction: column; padding: 26px 30px;
   box-sizing: border-box; overflow: auto;
+  /* Elevation layer 3/3 (tile -> open tile menu): the strongest of the three
+     tiers, one notch past the tile's own layer-2 shadow, still short/faint/
+     cool-tinted (Nimiq Blue) — enough to read "this sits above the tile
+     underneath it", not a floating panel. */
+  box-shadow: 0 4px 14px rgba(31, 35, 72, 0.38);
 }
 .config-panel.hidden { display: none; }
 .mobile-layout .config-panel {
@@ -1063,14 +1326,74 @@ button:disabled { opacity: 0.35; cursor: default; }
    .half.a/.half.e in the mode-drawer rules above) — set via JS (main.js's
    applyPanelMode) since the same two panels are reused for both Pass & Play
    and Remote Match rather than duplicated per mode. */
-.config-panel.mode-passplay { background: rgba(31,111,168,0.55); }
-.config-panel.mode-remote { background: rgba(168,110,50,0.55); }
-.config-header { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 28px; }
+.config-panel.mode-passplay { background: rgba(5, 130, 202, 0.55); } /* Nimiq Light Blue */
+.config-panel.mode-remote { background: rgba(233, 178, 19, 0.55); }  /* Nimiq Gold */
+/* Connect gate isn't tied to any mode tile (it shows before mode-select is
+   even reachable), so it gets its own fixed tint rather than one picked via
+   applyPanelMode/fillModeHeader — Nimiq Light Blue again, same value as
+   .mode-passplay, since it reads as "wallet/identity" rather than a
+   specific game mode. */
+.config-panel.mode-connect { background: rgba(5, 130, 202, 0.55); }
+/* Small entrance every time ANY of these menu panels opens (Classic/Custom,
+   Custom Settings, Remote Match's 3 sub-screens, the connect gate) — one
+   shared rule/keyframe rather than one per screen, since they're all the
+   same .config-panel shell. Always a fresh entrance on open (no one-shot
+   class dance like .mode-drawer's .pop-in needs, see main.js): every one of
+   these screens is only ever reached by a deliberate tap (a mode tile, a
+   Back arrow, a Créer/Rejoindre choice), never passively re-shown as a side
+   effect the way the tile grid is. .config-panel's own translate(-50%,-50%)
+   centering is the animation's implicit "to" state (unspecified, so it
+   resolves to the element's normal computed transform), the keyframe only
+   needs to describe where it comes FROM. */
+.config-panel:not(.hidden) { animation: panel-in 260ms cubic-bezier(.16,1,.3,1); }
+@keyframes panel-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 10px)); }
+}
+/* #replayUploadBox isn't a .config-panel (its scrim wrapper/box split is its
+   own thing, see that rule's own comment further down) but gets the same
+   fade+lift treatment for consistency — it's the same kind of "a menu
+   screen just opened" moment. Its own base transform is just layout-centered
+   (position:relative, no translate), unlike .config-panel's translate(-50%,
+   -50%), so it needs its own keyframe rather than reusing panel-in's. */
+#replayUploadOverlay:not(.hidden) #replayUploadBox { animation: box-in 260ms cubic-bezier(.16,1,.3,1); }
+@keyframes box-in {
+  from { opacity: 0; transform: translateY(10px); }
+}
+#cgError.hidden { display: none; }
+/* Gold is light enough that this panel's default white-ish text (title,
+   icon, and anything unstyled that just inherits body's ink) reads poorly
+   on it — same dark-ink swap as the mode-select tile itself (see
+   #modeOverlay .half.e above). .mode-passplay's light blue keeps the
+   default white fine, so only .mode-remote needs an override.
+   Redefining --ink-dim locally (not just setting `color`) matters because
+   var() references re-resolve against it live — .config-lobby-content p and
+   .config-label both read var(--ink-dim) directly, so this alone fixes them
+   without a second rule; plain `color` inheritance only carries the
+   already-resolved value, which is why literal `color: #fff` spots
+   (.config-mode-title, .config-mode-icon svg, .config-lobby-content h2)
+   still need their own explicit override below. */
+.config-panel.mode-remote { color: var(--bg-deep); --ink-dim: rgba(11,31,42,0.7); }
+.config-panel.mode-remote .config-mode-title,
+.config-panel.mode-remote .config-mode-icon svg,
+.config-panel.mode-remote .config-lobby-content h2,
+.config-panel.mode-remote .config-back { color: var(--bg-deep); }
+/* Symmetric side padding reserves the exit button's own footprint
+   (top-right, see .config-back below) on both sides, so centering the
+   title+icon within this narrower box keeps it visually centered in the
+   panel as a whole instead of drifting under the button on wide titles
+   (e.g. "REMOTE MATCH" + its icon). */
+.config-header { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 28px; padding: 0 46px; }
 .config-mode-icon { display: flex; align-items: center; }
 .config-mode-icon svg { height: 32px; width: auto; color: #fff; }
-.config-mode-title { font-weight: 800; font-size: 20px; letter-spacing: 0.5px; color: #fff; }
+/* Weights/sizes here were tuned down a notch across the whole panel (800->700
+   titles, 700->600 labels/pills) — closer to the Nimiq UI Kit's own type
+   scale (its buttons/labels top out at 700, 800 is a game-HUD-only weight
+   in this app, see game.js's score digits/ticket.js), and reads less heavy
+   per explicit request, without dropping into a lighter register the kit
+   doesn't actually use either. */
+.config-mode-title { font-weight: 700; font-size: 19px; letter-spacing: 0.3px; color: #fff; }
 .config-back {
-  position: absolute; top: 24px; left: 28px; width: 40px; height: 40px;
+  position: absolute; top: 24px; right: 28px; width: 40px; height: 40px;
   border-radius: 50%; background: rgba(255,255,255,0.12); color: #fff;
   display: flex; align-items: center; justify-content: center;
 }
@@ -1081,26 +1404,59 @@ button:disabled { opacity: 0.35; cursor: default; }
 .config-presets { display: flex; flex-direction: row; gap: 16px; justify-content: center; align-items: center; flex: 1; }
 .config-preset-btn {
   flex: 1; max-width: 260px;
-  background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.18);
-  border-radius: 18px; padding: 28px 26px; text-align: center; color: #fff;
+  /* 2px -> 1px border, 18px -> 14px radius (closer to the Nimiq UI Kit's own
+     --nimiq-radius-card, 10px, without losing the "tile" feel entirely),
+     tighter padding — same finer/lighter direction as the type changes
+     above, per explicit request. */
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 14px; padding: 22px 20px; text-align: center; color: #fff;
   transition: background .15s ease, border-color .15s ease;
 }
 .config-preset-btn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
-.config-preset-name { font-weight: 800; font-size: 22px; letter-spacing: 0.5px; color: #fff; }
+.config-preset-btn:disabled { opacity: 0.6; pointer-events: none; }
+/* Staggered right after the panel itself (panel-in above), not from the
+   very start — a beat behind its own container reads as "the panel arrived,
+   then its choices settled in", not two unrelated things animating at once.
+   Covers both places this class is used: Classic/Custom's CLASSIC/CUSTOM
+   tiles and the connect gate's CONNECT/GUEST tiles. */
+.config-panel:not(.hidden) .config-preset-btn { animation: item-pop-in 260ms cubic-bezier(.16,1,.3,1) both; }
+.config-panel:not(.hidden) .config-preset-btn:nth-child(1) { animation-delay: 90ms; }
+.config-panel:not(.hidden) .config-preset-btn:nth-child(2) { animation-delay: 150ms; }
+@keyframes item-pop-in {
+  from { opacity: 0; transform: translateY(10px); }
+}
+.config-preset-name { font-weight: 700; font-size: 19px; letter-spacing: 0.3px; color: #fff; }
+/* Connect gate's two tiles (#connectGateOverlay) are the only .config-preset-btn
+   use with an explanatory line under the name — Classic/Custom's own two
+   tiles are self-explanatory without one. */
+.config-preset-sub { margin-top: 6px; font-size: 12px; color: rgba(255,255,255,0.75); }
 
 .config-rows { display: flex; flex-direction: column; gap: 22px; flex: 1; justify-content: center; }
 /* Label left, control right, one line — never stacked, mobile included (see
    explicit request: no label-above-control layout on narrow screens). */
 .config-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
-.config-label { font-weight: 700; font-size: 13px; letter-spacing: 0.6px; color: var(--ink-dim); white-space: nowrap; }
+.config-label { font-weight: 600; font-size: 12.5px; letter-spacing: 0.5px; color: var(--ink-dim); white-space: nowrap; }
+/* Same "arrive a beat after the panel, then stagger" pattern as
+   .config-preset-btn above — 4 rows here instead of 2 tiles, tighter gap
+   between them since there are more of them to get through. */
+#customSettingsOverlay:not(.hidden) .config-row { animation: item-pop-in 240ms cubic-bezier(.16,1,.3,1) both; }
+#customSettingsOverlay:not(.hidden) .config-row:nth-child(1) { animation-delay: 90ms; }
+#customSettingsOverlay:not(.hidden) .config-row:nth-child(2) { animation-delay: 135ms; }
+#customSettingsOverlay:not(.hidden) .config-row:nth-child(3) { animation-delay: 180ms; }
+#customSettingsOverlay:not(.hidden) .config-row:nth-child(4) { animation-delay: 225ms; }
 
+/* True pills now (999px, matching --nimiq-radius-pill/.nq-button in the
+   Nimiq UI Kit and this app's own base `button` rule) — were a 12px/9px
+   rounded-rect, the one spot in the config panels that didn't actually
+   follow the pill convention already established everywhere else
+   (.bigbtn/.nq-connect-btn/etc.). Slightly smaller/lighter to match. */
 .seg-control {
   display: flex; flex-direction: row; background: rgba(255,255,255,0.06);
-  border-radius: 12px; padding: 4px; gap: 4px; flex-shrink: 0;
+  border-radius: 999px; padding: 4px; gap: 4px; flex-shrink: 0;
 }
 .seg-btn {
-  min-width: 44px; min-height: 40px; padding: 8px 14px; border-radius: 9px;
-  font-weight: 700; font-size: 13px; color: var(--ink-dim); letter-spacing: 0.3px;
+  min-width: 42px; min-height: 36px; padding: 7px 15px; border-radius: 999px;
+  font-weight: 600; font-size: 13px; color: var(--ink-dim); letter-spacing: 0.2px;
   transition: background .15s ease, color .15s ease;
 }
 .seg-btn.active { background: var(--accent); color: #3a2900; }
@@ -1109,13 +1465,23 @@ button:disabled { opacity: 0.35; cursor: default; }
 .config-footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
 .config-reset { background: rgba(255,255,255,0.1); color: var(--ink); }
 .config-save { background: var(--accent); color: #3a2900; }
+/* Continues the 4-row cascade above rather than restarting its own — RESET/
+   SAVE read as the last two items in the same sequence, not a separate
+   afterthought. */
+#customSettingsOverlay:not(.hidden) .config-footer .bigbtn { animation: item-pop-in 240ms cubic-bezier(.16,1,.3,1) both; animation-delay: 270ms; }
+/* Scoped to just these two (not the shared .bigbtn itself, which the replay
+   upload screen also uses and wasn't asked about here) — true pill (999px,
+   was 14px) + a touch lighter, same direction as the rest of this panel. */
+.config-footer .bigbtn {
+  border-radius: 999px; padding: 12px 26px; font-size: 15px; font-weight: 600;
+}
 
-#overlay input[type="text"] {
+#overlay input[type="text"], .config-lobby-content input[type="text"] {
   font-family: inherit; font-size: 15px; color: var(--ink); background: var(--bg-mid);
   border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; padding: 12px 14px;
   width: 260px; max-width: 100%; text-align: center;
 }
-#overlay input[type="text"]::placeholder { color: var(--ink-dim); }
+#overlay input[type="text"]::placeholder, .config-lobby-content input[type="text"]::placeholder { color: var(--ink-dim); }
 .lan-error { color: var(--error) !important; }
 
 /* ---- Pinède night forest layers, ported from design-lab's
@@ -1241,18 +1607,59 @@ button:disabled { opacity: 0.35; cursor: default; }
 .ticket-point-hit:hover { background: rgba(255,255,255,0.08); }
 
 #replayUploadOverlay {
-  position: absolute; inset: 0; background: rgba(6,16,20,0.92); border-radius: 18px;
+  /* No background of its own (was --scrim-92, hiding the arena almost
+     entirely) — this is just the full-stage positioner now, same role
+     #menuStage's other screens give their own outer wrapper. The tinted
+     "panel" look lives on #replayUploadBox below instead, matching
+     .config-panel.mode-X's own model (color wash + arena visible through
+     it), per explicit request. */
+  position: absolute; inset: 0;
+  border-radius: 0;
   display: flex; align-items: center; justify-content: center; z-index: 10;
 }
 #replayUploadOverlay.hidden { display: none; }
 #replayUploadBox {
+  position: relative;
   display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center;
-  padding: 30px; max-width: 380px; border: 2px dashed rgba(255,255,255,0.25); border-radius: 18px;
+  /* Same padding as .config-panel itself — .config-header (see below) gives
+     its own margin-bottom/side-padding, same as it does there, so no extra
+     top clearance hack is needed here either. */
+  padding: 26px 30px;
+  max-width: 380px; border-radius: 24px;
+  /* Nimiq Green (--nimiq-gold in the official kit is the *other* tinted
+     panel — this is Replay's own tile color, #modeOverlay .half.d), same
+     0.55 wash convention as .config-panel.mode-passplay/.mode-remote. */
+  background: rgba(33, 188, 165, 0.55);
+  /* No border by default (was a dashed drop-zone outline — read as a
+     scissor-cut edge against the new tinted background, and none of the
+     other mode panels have a border at all). Transparent, not removed
+     entirely, so .dragover below can show one without shifting the box's
+     own size. */
+  border: 2px solid transparent;
   transition: border-color .2s ease, background .2s ease;
+  /* Green is light enough to fail white-text contrast, same issue Gold had
+     on .config-panel.mode-remote (see that rule's own comment) — dark ink
+     instead. --ink-dim redefined locally (not just `color`) so .sub and
+     #replayUploadStatus, which read var(--ink-dim) directly, pick it up too. */
+  color: var(--bg-deep);
+  --ink-dim: rgba(11, 31, 42, 0.7);
 }
-#replayUploadBox.dragover { border-color: var(--accent); background: rgba(255,209,102,0.08); }
-#replayUploadBox .tag { font-weight: 800; font-size: 18px; letter-spacing: 0.5px; }
-#replayUploadBox .sub { font-size: 13px; color: var(--ink-dim); }
+/* .config-back/.config-mode-title/.config-mode-icon svg all have their own
+   literal color:#fff (not a var), so each needs the same explicit override
+   .config-panel.mode-remote gives them. */
+#replayUploadBox .config-back,
+#replayUploadBox .config-mode-title,
+#replayUploadBox .config-mode-icon svg { color: var(--bg-deep); }
+#replayUploadBox.dragover { border-color: var(--accent); background: rgba(233,178,19,0.18); }
+/* Matches .config-lobby-content p's own body-text convention (14px/1.5),
+   not the smaller ad hoc 13px this had before. */
+#replayUploadBox .sub { font-size: 14px; line-height: 1.5; color: var(--ink-dim); }
+/* True pill (999px) + lighter weight, same scoped treatment as
+   .config-footer .bigbtn — was the plain 14px-radius/700-weight .bigbtn
+   default, the one pair of buttons in the menu flow still using it. */
+#replayUploadBox .bigbtn {
+  border-radius: 999px; padding: 12px 26px; font-size: 15px; font-weight: 600;
+}
 #replayUploadStatus { font-size: 13px; color: var(--ink-dim); min-height: 18px; margin: 0; }
 
 /* Custom replay playback chrome — deliberately not the arcade #toolbar (see
@@ -1297,7 +1704,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   position: absolute; left: 0; right: 0; bottom: 0;
   display: flex; flex-direction: column; align-items: center; gap: 10px;
   padding: 10px 16px 14px;
-  background: linear-gradient(0deg, rgba(6,16,20,0.92), rgba(6,16,20,0));
+  background: linear-gradient(0deg, var(--scrim-92), rgba(6,16,20,0));
 }
 /* Mobile: bottom:0 sits at #game-card's own bottom edge, but #game-card is
    deliberately oversized and overflows the real viewport on every side (see
@@ -1310,7 +1717,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 .replay-segment {
   flex: 1; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.15); cursor: pointer;
 }
-.replay-segment.done { background: rgba(255,209,102,0.4); }
+.replay-segment.done { background: rgba(233,178,19,0.4); }
 .replay-segment.current { background: var(--accent); }
 #replayTransport { display: flex; align-items: center; gap: 22px; }
 #replaySoundBtn, #replayPrevBtn, #replayNextBtn {
@@ -1328,7 +1735,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 #replayExitBtn {
   flex: 0 0 auto; width: 36px; height: 36px; padding: 0; margin-left: 14px;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 50%; border: none; background: rgba(6,16,20,0.7); color: var(--ink);
+  border-radius: 50%; border: none; background: var(--scrim-70); color: var(--ink);
   cursor: pointer;
 }
 #replayExitBtn svg { width: 18px; height: 18px; display: block; }
