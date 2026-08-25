@@ -6,14 +6,30 @@ import '@fontsource/mulish/400.css';
 import '@fontsource/mulish/600.css';
 import '@fontsource/mulish/700.css';
 import '@fontsource/mulish/800.css';
+// Nimiq UI Kit's monospace pairing for addresses/on-chain data — the sidebar
+// identity pill's address line (see style.css's #connectBtnLabel).
+import '@fontsource/fira-mono/500.css';
 import { startGame, preloadCoreAssets } from './game.js';
-import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity } from './nimiq.js';
+import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, getHandle, setHandle } from './nimiq.js';
+import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets } from './background.js';
 import { connectLan, connectMatch } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
 import { audio } from './audio.js';
+import { COLORS, CSS_VAR_NAMES } from './colors.js';
+
+// Single source of truth for the 7 colors style.css and ticket.js both need
+// (see src/colors.js) — pushed onto :root here, synchronously, before
+// anything else in this module runs (in particular before the branded
+// #loadingOverlay in index.html ever lifts), so style.css's own literal
+// :root values — kept as a static fallback, not the live source anymore —
+// are overwritten before a single frame the player sees. setProperty() is
+// an in-memory operation (no network, no async), effectively instant.
+for (const key in COLORS) {
+  document.documentElement.style.setProperty(CSS_VAR_NAMES[key], COLORS[key]);
+}
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 
@@ -196,14 +212,14 @@ const IS_STANDALONE_MODE = window.matchMedia('(display-mode: standalone)').match
 const FULLSCREEN_SUPPORTED = IOS_FULLSCREEN_FIX_ENABLED ? FULLSCREEN_API_AVAILABLE : true;
 const IS_STANDALONE = IOS_FULLSCREEN_FIX_ENABLED && IS_STANDALONE_MODE;
 
-initBackground(IS_MOBILE);
+initBackground();
 
 // Guards the loading screen against one slow/broken menu asset hanging it
 // forever — after this, the game just proceeds and lets the normal
 // per-frame .complete checks in game.js fill sprites in as they arrive.
 const ASSET_PRELOAD_TIMEOUT_MS = 8000;
 Promise.race([
-  preloadBackgroundAssets(IS_MOBILE),
+  preloadBackgroundAssets(),
   new Promise((resolve) => setTimeout(resolve, ASSET_PRELOAD_TIMEOUT_MS)),
 ]).then(() => {
   hideLoadingOverlay();
@@ -322,13 +338,13 @@ const exitCap = document.getElementById('tbtn-exit-cap');
 function triggerExit() {
   playToolbarClick(exitCap);
   showLobby(`
-    <h2>Quitter la partie ?</h2>
-    <p>La partie en cours sera perdue.</p>
+    <h2>Quit the match?</h2>
+    <p>The current match will be lost.</p>
     <div style="display:flex; gap:12px;">
-      <button class="bigbtn" id="exitYesBtn">Oui</button>
-      <button class="bigbtn" id="exitNoBtn">Non</button>
+      <button class="bigbtn" id="exitYesBtn">Yes</button>
+      <button class="bigbtn" id="exitNoBtn">No</button>
     </div>
-  `);
+  `, activeMatchMode);
   document.getElementById('exitYesBtn').onclick = () => {
     audio.stopAmbience();
     audio.play('exitPanel', { volume: 0.501 }); // -6dB, fire-and-forget
@@ -352,6 +368,9 @@ exitBtn.addEventListener('click', triggerExit);
 // startGame() — see each call site below) — null on mode-select, where
 // there's nothing running to tear down.
 let activeStopGame = null;
+// Set alongside activeStopGame at every startGame() call site, cleared in
+// hideMatchChrome() — drives showLobby()'s mode-tint below.
+let activeMatchMode = null;
 // onExit: returnToModeSelect (a hoisted function declaration further down —
 // safe to reference here) is how game.js's own internal exit buttons
 // (post-match "Menu", replay's exit) reach the same "show mode-select" reveal
@@ -373,13 +392,13 @@ bgLogo.addEventListener('click', () => {
   audio.play('button');
   const inReplay = !replayBar.classList.contains('hidden');
   showLobby(`
-    <h2>Revenir au menu ?</h2>
-    <p>${inReplay ? 'Le replay en cours sera interrompu.' : 'La partie en cours sera perdue.'}</p>
+    <h2>Back to menu?</h2>
+    <p>${inReplay ? 'The current replay will be stopped.' : 'The current match will be lost.'}</p>
     <div style="display:flex; gap:12px;">
-      <button class="bigbtn" id="logoYesBtn">Oui</button>
-      <button class="bigbtn" id="logoNoBtn">Non</button>
+      <button class="bigbtn" id="logoYesBtn">Yes</button>
+      <button class="bigbtn" id="logoNoBtn">No</button>
     </div>
-  `);
+  `, activeMatchMode);
   document.getElementById('logoYesBtn').onclick = () => {
     audio.stopAmbience();
     // Replay's "Oui" keeps the plain button click — only a live match's
@@ -482,6 +501,15 @@ function identiconOverride(team) {
 // yank the identicon out from under a running game.
 const connectBtn = document.getElementById('connectBtn');
 const connectBtnLabel = document.getElementById('connectBtnLabel');
+const connectBtnStatus = document.getElementById('connectBtnStatus');
+const connectAvatar = document.getElementById('connectAvatar');
+// address -> "abc…xyz" (first/last 3 chars), the sidebar pill's own compact
+// format for the status line — distinct from the `${slice(0,9)}…` format
+// mobile's pill still uses (see below), which predates this and has its own
+// established look, not revisited here.
+function shortenAddressCompact(address) {
+  return address.length <= 8 ? address : `${address.slice(0, 3)}…${address.slice(-3)}`;
+}
 // Hidden entirely until the player has actually been through the connect
 // gate at least once (still hubAddress===null AND no persisted 'guest' flag
 // right after a disconnect too) — showing "Guest" here while the gate is
@@ -490,8 +518,32 @@ function syncIdentityPill() {
   const decided = !!hubAddress || getIdentity()?.type === 'guest';
   connectBtn.classList.toggle('hidden', !decided);
   if (!decided) return;
-  connectBtnLabel.textContent = hubAddress ? `${hubAddress.slice(0, 9)}…` : 'Guest';
   connectBtn.classList.toggle('connected', !!hubAddress);
+  connectBtnLabel.classList.remove('claim-cta');
+  connectBtnStatus.classList.remove('mono');
+  connectAvatar.classList.toggle('has-identicon', !!hubAddress);
+  connectAvatar.style.backgroundImage = '';
+  if (!hubAddress) {
+    connectBtnLabel.textContent = 'Guest';
+    connectBtnStatus.textContent = 'Connect wallet';
+    return;
+  }
+  getIdenticonPngDataUrl(hubAddress).then((url) => {
+    if (hubAddress) connectAvatar.style.backgroundImage = `url(${url})`;
+  });
+  // Mobile's pill predates the handle-claim flow below and hasn't been
+  // redesigned for it yet (see CLAUDE.md's mobile-deferred stance) — keeps
+  // its original plain address/"Connected" pairing instead.
+  if (IS_MOBILE) {
+    connectBtnLabel.textContent = `${hubAddress.slice(0, 9)}…`;
+    connectBtnStatus.textContent = 'Connected';
+    return;
+  }
+  const handle = getHandle(hubAddress);
+  connectBtnLabel.textContent = handle || 'Claim a handle';
+  connectBtnLabel.classList.toggle('claim-cta', !handle);
+  connectBtnStatus.textContent = shortenAddressCompact(hubAddress);
+  connectBtnStatus.classList.add('mono');
 }
 syncIdentityPill();
 connectBtn.addEventListener('click', () => {
@@ -502,6 +554,45 @@ connectBtn.addEventListener('click', () => {
   syncIdentityPill();
   showConnectGate();
 });
+// "Claim a handle" CTA (desktop only, see syncIdentityPill above — the label
+// never gets the .claim-cta class on mobile, so this never fires there):
+// stopPropagation so it doesn't also trigger #connectBtn's own
+// disconnect-and-reopen-the-gate click above. Reuses the same
+// showLobby()/#overlay dialog mechanism as the "Revenir au menu ?" confirm
+// (bgLogo's own click handler above) rather than a new component, and the
+// same activeStopGame guard as #connectBtn's click, since #sidebar stays
+// visible (and #overlay may be mid-match's own goal panel) during a live
+// match on desktop, unlike mobile's match-only controller.
+connectBtnLabel.addEventListener('click', (e) => {
+  if (!connectBtnLabel.classList.contains('claim-cta')) return;
+  e.stopPropagation();
+  if (activeStopGame) return;
+  audio.play('button');
+  openClaimHandleDialog();
+});
+function openClaimHandleDialog() {
+  if (!hubAddress) return;
+  showLobby(`
+    <h2>Claim a handle</h2>
+    <p>Pick a public display name for ${shortenAddressCompact(hubAddress)}. You'll be able to change it later.</p>
+    <input type="text" id="handleInput" maxlength="20" placeholder="Your handle">
+    <div style="display:flex; gap:12px;">
+      <button class="bigbtn" id="handleConfirmBtn">Claim</button>
+      <button class="bigbtn" id="handleCancelBtn">Cancel</button>
+    </div>
+  `);
+  const handleInput = document.getElementById('handleInput');
+  handleInput.focus();
+  document.getElementById('handleConfirmBtn').onclick = () => {
+    const value = handleInput.value.trim();
+    if (!value) return;
+    audio.play('button');
+    setHandle(hubAddress, value);
+    hideLobby();
+    syncIdentityPill();
+  };
+  document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); hideLobby(); };
+}
 
 // ---- Mode select: Pass & Play / Remote Match / AI Training / Replay ----
 // startGame() isn't called until a mode is picked, so it only ever runs once
@@ -531,8 +622,15 @@ const startOverlay = document.getElementById('startOverlay');
 const overlay = document.getElementById('overlay');
 const ovContent = document.getElementById('ovContent');
 
-function showLobby(html) { overlay.classList.remove('hidden'); ovContent.innerHTML = html; }
-function hideLobby() { overlay.classList.add('hidden'); }
+const OVERLAY_TINT_CLASSES = ['mode-passplay', 'mode-solo', 'mode-replay', 'mode-remote'];
+function showLobby(html, mode = null) {
+  overlay.classList.remove(...OVERLAY_TINT_CLASSES);
+  if (mode) overlay.classList.add(`mode-${mode}`);
+  overlay.classList.add('overlay-boxed');
+  overlay.classList.remove('hidden');
+  ovContent.innerHTML = html;
+}
+function hideLobby() { overlay.classList.add('hidden'); overlay.classList.remove(...OVERLAY_TINT_CLASSES, 'overlay-boxed'); }
 
 // Ambience plays during an actual match or replay, never behind the
 // mode-select menu — called directly from the replay entry points below
@@ -580,6 +678,7 @@ function showToolbar() {
 // Custom Settings instead, pre-filled with the match that just ended.
 function hideMatchChrome() {
   activeStopGame = null;
+  activeMatchMode = null;
   toolbarTop.classList.add('hidden');
   toolbarBottom.classList.add('hidden');
   mobileController.classList.add('hidden');
@@ -865,6 +964,7 @@ modeLocal.addEventListener('click', () => {
     modeOverlay.classList.add('hidden');
     startOverlay.classList.remove('hidden');
     showToolbar();
+    activeMatchMode = 'passplay';
     activeStopGame = startGame({
       ...rockHandlers, identiconAddress: identiconOverride('A'), mobile: IS_MOBILE, matchConfig: config,
       onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('passplay', config); },
@@ -884,6 +984,7 @@ modeSolo.addEventListener('click', () => {
   audio.play('button');
   modeOverlay.classList.add('hidden');
   showToolbar();
+  activeMatchMode = 'solo';
   activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), mobile: IS_MOBILE });
 });
 
@@ -911,6 +1012,14 @@ modeReplay.addEventListener('click', () => {
   replayUploadStatus.textContent = '';
   replayUploadOverlay.classList.remove('hidden');
 });
+// Sidebar's own Replay entry (see index.html) reuses the exact tile above
+// rather than duplicating its upload-flow logic — same activeStopGame guard
+// as the identity pill, since this is reachable from outside mode-select too.
+const navReplay = document.getElementById('navReplay');
+navReplay.addEventListener('click', () => { if (!activeStopGame) modeReplay.click(); });
+// League/How to/About/Partnership (index.html's #navLeague/#navHowTo/
+// #navAbout/#navPartnership) have no destination yet — visual sidebar shell
+// only for this pass, intentionally left unwired.
 replayUploadBackBtn.addEventListener('click', () => {
   audio.play('button');
   replayUploadOverlay.classList.add('hidden');
@@ -942,6 +1051,7 @@ async function handleReplayFile(file) {
     }
     replayUploadOverlay.classList.add('hidden');
     beginAmbience();
+    activeMatchMode = 'replay';
     activeStopGame = startGame({ ...rockHandlers, replayPoints: points, mobile: IS_MOBILE });
   } catch (err) {
     hideLoadingOverlay();
@@ -1039,6 +1149,7 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
   net.onBothReady(() => {
     hideLobby();
     showToolbar();
+    activeMatchMode = 'remote';
     activeStopGame = startGame({
       ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), mobile: IS_MOBILE, matchConfig,
       // Remote Match only in practice (Duel LAN's magic link never goes
@@ -1207,6 +1318,7 @@ const replayFromLink = parseReplayFromLocation();
 if (replayFromLink) {
   homeOverlay.classList.add('hidden');
   beginAmbience();
+  activeMatchMode = 'replay';
   activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], mobile: IS_MOBILE });
 } else if (new URLSearchParams(location.search).has('duel')) {
   homeOverlay.classList.add('hidden');

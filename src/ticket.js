@@ -9,23 +9,10 @@
 import { getIdenticonCanvas } from './identicons.js';
 import QRCode from 'qrcode';
 import { buildReplayUrl, pointTileRect, MAX_POINTS_ON_TICKET, POINTS_SECTION_H, TICKET_W, TICKET_H } from './replay.js';
+import { COLORS } from './colors.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 const HERO_SRC = `${ASSET_BASE}ticket/hero.webp`;
-
-// Mirrors the :root custom properties in style.css — copied as literal hex
-// here since this is drawn on a plain Canvas2D context, not styled via CSS.
-const COLORS = {
-  bgDeep: '#0b1f2a',
-  ink: '#eef6f4',
-  inkDim: '#9fb8bc',
-  teamA: '#3fa9f5',
-  teamB: '#ffc94d',
-  // Nimiq Gold (--nimiq-gold in the official nimiq-style kit) — kept in sync
-  // by hand with src/style.css's --accent, see that var's own comment.
-  accent: '#e9b213',
-  panel: '#143844',
-};
 
 const W = TICKET_W, H = TICKET_H;
 

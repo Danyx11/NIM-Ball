@@ -91,14 +91,64 @@
       <div class="label">Loading<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>
     </div>
   </div>
-  <img id="bg-logo" alt="logo">
-  <!-- Nimiq wallet identity: real "nq-login" glyph from @nimiq/style's icon
-       sprite (see src/nimiq.js's chooseAddress()), inlined rather than
-       pulling in the whole @nimiq/style CSS package for one icon. -->
-  <button id="connectBtn" class="nq-connect-btn" type="button">
-    <svg class="nq-connect-icon" viewBox="0 0 54 54" aria-hidden="true"><path fill="currentColor" d="M26.95 0A27.05 27.05 0 0 0 .21 22.32a1.12 1.12 0 0 0 1.13 1.3h18.72c.62 0 1.12-.5 1.12-1.12v-8.1a2.25 2.25 0 0 1 3.66-1.76l15.75 12.6a2.25 2.25 0 0 1 0 3.52l-15.75 12.6a2.25 2.25 0 0 1-3.66-1.76v-8.1c0-.62-.5-1.12-1.12-1.12H1.35a1.14 1.14 0 0 0-1.13 1.3 27 27 0 0 0 53.55-5.78A27.25 27.25 0 0 0 26.95 0z"/></svg>
-    <span id="connectBtnLabel">Connecter</span>
-  </button>
+  <!-- Desktop utility sidebar (Nimiq UI Kit language: Nimiq Gray column,
+       Nimiq Blue text/icons) — occupies the --right-margin column reserved
+       in style.css, three flex-column zones: brand tile, nav, identity pill
+       (pinned to the bottom via margin-top:auto on #connectBtn itself).
+       #bg-logo and #connectBtn keep their original ids/JS (main.js) — only
+       reparented + restyled here. On mobile this wrapper (and .sidebar-brand)
+       collapse to display:contents (see .mobile-layout #sidebar in
+       style.css) so those two elements fall back to their own original
+       independent fixed positioning, unchanged; .sidebar-nav is hidden
+       outright there — mobile's own take on this nav is a separate,
+       later task. -->
+  <div id="sidebar">
+    <div class="sidebar-brand">
+      <img id="bg-logo" alt="logo">
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-label">
+          <svg class="nav-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 6H4.5A1.5 1.5 0 0 0 3 7.5 3.5 3.5 0 0 0 6.5 11H7"/><path d="M17 6h2.5A1.5 1.5 0 0 1 21 7.5 3.5 3.5 0 0 1 17.5 11H17"/><path d="M12 14v4"/><path d="M8 21h8"/></svg>
+          <span>Compete</span>
+        </div>
+        <button class="nav-item" id="navLeague" type="button">League</button>
+        <button class="nav-item" id="navReplay" type="button">Replay</button>
+      </div>
+      <div class="nav-section">
+        <div class="nav-label">
+          <svg class="nav-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.5"/><path d="M12 17.2h.01"/></svg>
+          <span>Info</span>
+        </div>
+        <button class="nav-item" id="navHowTo" type="button">How to</button>
+        <button class="nav-item" id="navAbout" type="button">About</button>
+        <button class="nav-item" id="navPartnership" type="button">Partnership</button>
+      </div>
+    </nav>
+    <!-- Nimiq wallet identity pill: real "nq-login" glyph from @nimiq/style's
+         icon sprite (see src/nimiq.js's chooseAddress()), inlined rather than
+         pulling in the whole @nimiq/style CSS package for one icon — kept as
+         the mobile pill's own leading icon (see .mobile-layout .nq-connect-icon
+         in style.css); the desktop pill leads with the identicon avatar
+         instead (.connect-avatar, filled in by main.js's syncIdentityPill()).
+         A plain div (not <button>), since it now nests a real, separately
+         clickable <button> (#connectBtnLabel, the "Claim a handle" CTA) —
+         two nested <button>s isn't valid HTML. role="button"/tabindex mirror
+         #homeOverlay's own div-as-button pattern elsewhere in this file. -->
+    <div id="connectBtn" class="nq-connect-btn" role="button" tabindex="0">
+      <svg class="nq-connect-icon" viewBox="0 0 54 54" aria-hidden="true"><path fill="currentColor" d="M26.95 0A27.05 27.05 0 0 0 .21 22.32a1.12 1.12 0 0 0 1.13 1.3h18.72c.62 0 1.12-.5 1.12-1.12v-8.1a2.25 2.25 0 0 1 3.66-1.76l15.75 12.6a2.25 2.25 0 0 1 0 3.52l-15.75 12.6a2.25 2.25 0 0 1-3.66-1.76v-8.1c0-.62-.5-1.12-1.12-1.12H1.35a1.14 1.14 0 0 0-1.13 1.3 27 27 0 0 0 53.55-5.78A27.25 27.25 0 0 0 26.95 0z"/></svg>
+      <span class="connect-avatar" id="connectAvatar" aria-hidden="true">
+        <svg class="connect-avatar-default" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 19.2a6.5 6.5 0 0 1 13 0"/></svg>
+      </span>
+      <span class="connect-text">
+        <!-- Guest: "Guest". Connected, no handle claimed: "Claim a handle"
+             (gold CTA, .claim-cta — see main.js's syncIdentityPill()).
+             Connected, handle claimed: the handle itself, plain text. -->
+        <button type="button" id="connectBtnLabel">Connecter</button>
+        <span class="connect-status" id="connectBtnStatus"></span>
+      </span>
+    </div>
+  </div>
   <!-- Mobile-only unified controller — one flat white panel (the validated
        "remote control" mockup, design/ui/ChatGPT Image 19 août 2026,
        22_39_44.png, baked as two real assets: public/ui/controller-top.webp
@@ -418,7 +468,7 @@
           </div>
         </div>
         <div class="config-row">
-          <span class="config-label">TURN TIMER</span>
+          <span class="config-label">AIM TIMER</span>
           <div class="seg-control" data-field="turnTime">
             <button class="seg-btn" type="button" data-value="10">10</button>
             <button class="seg-btn" type="button" data-value="20">20</button>
