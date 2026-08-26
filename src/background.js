@@ -5,10 +5,12 @@
 import { loadImages } from './preload.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
-// White wordmark — used everywhere now that desktop's #bg-logo also sits on
-// a dark Nimiq Blue surface (the sidebar's .sidebar-brand tile, see
-// style.css) instead of directly on the light Nimiq Gray page background.
-const LOGO_SRC = `${ASSET_BASE}bg/nimiq-logo-transparent.webp`;
+// Nimiq-Blue wordmark, not the white one (public/bg/nimiq-logo-transparent.webp,
+// left in place, reversible — swap this line back to restore it): #bg-logo now
+// sits directly on the sidebar's own light Nimiq Gray column background (see
+// .sidebar-brand in style.css, no tile behind it anymore), where blue-on-gray
+// reads instead of the white-on-dark-tile look this replaces.
+const LOGO_SRC = `${ASSET_BASE}bg/nimiq-logo-blue.webp`;
 const HOME_SRC = `${ASSET_BASE}home/home-screen.webp`;
 const MODE_SELECT_BG_SRC = `${ASSET_BASE}home/mode-select-bg.webp`;
 // nature-pinede.webp/arbres-ombres.webp (#bg-nature/#fg-ombres) intentionally
