@@ -91,38 +91,54 @@
       <div class="label">Loading<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>
     </div>
   </div>
-  <!-- Desktop utility sidebar (Nimiq UI Kit language: Nimiq Gray column,
-       Nimiq Blue text/icons) — occupies the --right-margin column reserved
-       in style.css, three flex-column zones: brand tile, nav, identity pill
-       (pinned to the bottom via margin-top:auto on #connectBtn itself).
-       #bg-logo and #connectBtn keep their original ids/JS (main.js) — only
-       reparented + restyled here. On mobile this wrapper (and .sidebar-brand)
-       collapse to display:contents (see .mobile-layout #sidebar in
-       style.css) so those two elements fall back to their own original
-       independent fixed positioning, unchanged; .sidebar-nav is hidden
-       outright there — mobile's own take on this nav is a separate,
-       later task. -->
+  <!-- Utility sidebar (Nimiq UI Kit language: Nimiq Gray column, Nimiq Blue
+       text/icons) — occupies the right-hand column reserved in style.css
+       (--right-margin on desktop, --controller-reserved-w on mobile — the
+       joystick/toolbar's own reserved width, reused rather than a fresh 20vw
+       so the tile grid/config panels never resize between the menu and
+       in-match layouts, see conversation), three flex-column zones: brand
+       tile, nav, identity pill (pinned to the bottom via margin-top:auto on
+       #connectBtn itself, both platforms). #bg-logo and #connectBtn keep
+       their original ids/JS (main.js) — only reparented + restyled here.
+       On mobile the whole column is also toggled hidden/shown by main.js in
+       lockstep with #mobileController (present only for mode-select/menus,
+       not during a live match — see showToolbar()/hideMatchChrome()), unlike
+       desktop where it stays up throughout a match.
+       .nav-label is inline/static on desktop but becomes a real accordion
+       trigger on mobile (role="button"/tabindex, same div-as-button pattern
+       as #homeOverlay elsewhere in this file) — both section titles (with
+       their icons) show at once, no single collapsed "Menu" line; tapping
+       one expands its own .nav-section-items and collapses the other
+       section if it was open (main.js enforces the "only one open" part —
+       plain CSS can't reach across sibling .nav-section boxes for that).
+       Tapping an already-open title just closes it. -->
   <div id="sidebar">
     <div class="sidebar-brand">
       <img id="bg-logo" alt="logo">
     </div>
     <nav class="sidebar-nav">
       <div class="nav-section">
-        <div class="nav-label">
+        <div class="nav-label" role="button" tabindex="0" aria-expanded="false">
           <svg class="nav-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 6H4.5A1.5 1.5 0 0 0 3 7.5 3.5 3.5 0 0 0 6.5 11H7"/><path d="M17 6h2.5A1.5 1.5 0 0 1 21 7.5 3.5 3.5 0 0 1 17.5 11H17"/><path d="M12 14v4"/><path d="M8 21h8"/></svg>
           <span>Compete</span>
+          <svg class="nav-label-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         </div>
-        <button class="nav-item" id="navLeague" type="button">League</button>
-        <button class="nav-item" id="navReplay" type="button">Replay</button>
+        <div class="nav-section-items">
+          <button class="nav-item" id="navLeague" type="button">League</button>
+          <button class="nav-item" id="navReplay" type="button">Replay</button>
+        </div>
       </div>
       <div class="nav-section">
-        <div class="nav-label">
+        <div class="nav-label" role="button" tabindex="0" aria-expanded="false">
           <svg class="nav-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.5"/><path d="M12 17.2h.01"/></svg>
           <span>Info</span>
+          <svg class="nav-label-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         </div>
-        <button class="nav-item" id="navHowTo" type="button">How to</button>
-        <button class="nav-item" id="navAbout" type="button">About</button>
-        <button class="nav-item" id="navPartnership" type="button">Partnership</button>
+        <div class="nav-section-items">
+          <button class="nav-item" id="navHowTo" type="button">How to</button>
+          <button class="nav-item" id="navAbout" type="button">About</button>
+          <button class="nav-item" id="navPartnership" type="button">Partnership</button>
+        </div>
       </div>
     </nav>
     <!-- Nimiq wallet identity pill: real "nq-login" glyph from @nimiq/style's

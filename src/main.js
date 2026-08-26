@@ -503,10 +503,36 @@ const connectBtn = document.getElementById('connectBtn');
 const connectBtnLabel = document.getElementById('connectBtnLabel');
 const connectBtnStatus = document.getElementById('connectBtnStatus');
 const connectAvatar = document.getElementById('connectAvatar');
-// address -> "abc…xyz" (first/last 3 chars), the sidebar pill's own compact
-// format for the status line — distinct from the `${slice(0,9)}…` format
-// mobile's pill still uses (see below), which predates this and has its own
-// established look, not revisited here.
+const sidebar = document.getElementById('sidebar');
+// Mobile-only nav accordion (see style.css's .mobile-layout .nav-section) —
+// desktop's .nav-label click never does anything visible there (.open has no
+// desktop CSS effect), so this listener is just inert weight on desktop, not
+// worth an IS_MOBILE guard around it. Each .nav-label toggles its own
+// .nav-section's .open; opening one always closes every other section
+// first, so at most one is ever expanded — plain CSS siblings-only selectors
+// (~, +) can't reach "every other section" from one label, hence doing the
+// accordion exclusivity here instead.
+const navSections = [...document.querySelectorAll('.nav-section')];
+navSections.forEach((section) => {
+  const label = section.querySelector('.nav-label');
+  label.addEventListener('click', () => {
+    const wasOpen = section.classList.contains('open');
+    navSections.forEach((s) => {
+      s.classList.remove('open');
+      s.querySelector('.nav-label').setAttribute('aria-expanded', 'false');
+    });
+    if (!wasOpen) {
+      section.classList.add('open');
+      label.setAttribute('aria-expanded', 'true');
+    }
+  });
+});
+// address -> "abc…xyz" (first/last 3 chars), the sidebar pill's compact
+// format for the status line (both platforms now — mobile used to keep its
+// own plain `${slice(0,9)}…`/"Connected" pairing here, predating the
+// handle-claim flow below, but that was its own bottom-right CTA pill; now
+// that mobile reuses this same in-column sidebar pill, it gets the same
+// handle-claim treatment too).
 function shortenAddressCompact(address) {
   return address.length <= 8 ? address : `${address.slice(0, 3)}…${address.slice(-3)}`;
 }
@@ -531,14 +557,6 @@ function syncIdentityPill() {
   getIdenticonPngDataUrl(hubAddress).then((url) => {
     if (hubAddress) connectAvatar.style.backgroundImage = `url(${url})`;
   });
-  // Mobile's pill predates the handle-claim flow below and hasn't been
-  // redesigned for it yet (see CLAUDE.md's mobile-deferred stance) — keeps
-  // its original plain address/"Connected" pairing instead.
-  if (IS_MOBILE) {
-    connectBtnLabel.textContent = `${hubAddress.slice(0, 9)}…`;
-    connectBtnStatus.textContent = 'Connected';
-    return;
-  }
   const handle = getHandle(hubAddress);
   connectBtnLabel.textContent = handle || 'Claim a handle';
   connectBtnLabel.classList.toggle('claim-cta', !handle);
@@ -662,6 +680,12 @@ function showToolbar() {
   toolbarTop.classList.remove('hidden');
   toolbarBottom.classList.remove('hidden');
   mobileController.classList.remove('hidden');
+  // Mobile's utility column (logo/nav/identity pill) shares #mobileController's
+  // reserved width and is a menu-only affordance — swap the two in lockstep
+  // rather than letting both compete for the same strip during a match.
+  // Desktop's #sidebar has no such rule and stays up throughout (see its own
+  // comment in style.css).
+  if (IS_MOBILE) sidebar.classList.add('hidden');
 }
 
 // "Now show mode-select" half of the exit flow — the actual match teardown
@@ -683,6 +707,7 @@ function hideMatchChrome() {
   toolbarBottom.classList.add('hidden');
   mobileController.classList.add('hidden');
   startOverlay.classList.add('hidden');
+  if (IS_MOBILE) sidebar.classList.remove('hidden');
 }
 
 function returnToModeSelect() {

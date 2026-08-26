@@ -156,24 +156,16 @@ html, body {
      the smaller cropped reference frame. */
   --card-w: max(100vw, calc(100dvh * 2218 / 1295));
   --right-margin: calc(100vw - var(--card-w) - var(--card-left-gap));
-  /* #bg-logo/#connectBtn's own alignment reference (see their rules further
-     down) — the old --joy-d-full/--joy-shift-x/--joy-center-right chain
-     this replaces computed a joystick-ring diameter/offset out of
-     --right-margin, which went negative/meaningless the moment --card-w
-     above became a full-viewport max() (no more leftover margin to size a
-     ring into). #mobileController (the actual joystick/toolbar panel now,
-     see its own rule below) sizes and positions itself directly instead —
-     `right: 36px; width: clamp(147px, 23vw, 225px)` — so its horizontal
-     center as a same-units `right` offset is just half that width plus the
-     36px gap. */
-  --controller-center-right: calc(36px + clamp(147px, 23vw, 225px) / 2);
-  /* Full reserved width of the controller column (gap + panel), not just the
-     half-width --controller-center-right above needs for its own centering —
-     used by #overlay on mobile (see its own rule further down) to inset the
-     goal/ticket panel's box away from the controller instead of centering it
-     across the full screen width: the panel should read as centered on the
-     visible arena, with the controller's own column left untouched/"safe",
-     not straddling both per explicit request. */
+  /* Reserved width of the controller column (gap + panel) — #mobileController
+     (the actual joystick/toolbar panel, see its own rule below) sizes itself
+     directly (`right: 36px; width: clamp(147px, 23vw, 225px)`), this is just
+     that same box's full footprint. Used by #overlay on mobile (see its own
+     rule further down) to inset the goal/ticket panel's box away from the
+     controller instead of centering it across the full screen width: the
+     panel should read as centered on the visible arena, with the
+     controller's own column left untouched/"safe", not straddling both per
+     explicit request. Also reused as-is (not a fresh 20vw) for #sidebar's
+     own mobile width, see index.html's comment on that element. */
   --controller-reserved-w: calc(36px + clamp(147px, 23vw, 225px));
 }
 
@@ -240,6 +232,11 @@ html, body {
   gap: 32px;
 }
 .nav-section { display: flex; flex-direction: column; gap: 4px; }
+/* Wraps just the <button>s below a .nav-label (see index.html) so mobile can
+   collapse/expand them independently per section (accordion) without
+   touching the label itself — plain flex column on desktop, same 4px
+   rhythm .nav-section used to apply directly to its children. */
+.nav-section-items { display: flex; flex-direction: column; gap: 4px; }
 /* Nav items are text-only, right-aligned flush to the sidebar's own right
    edge — no icons there (dropped per explicit request). The group label
    above them is the one exception: icon + text as a unit, that unit still
@@ -261,6 +258,9 @@ html, body {
   color: var(--nb-50);
 }
 .nav-label-icon { width: 13px; height: 13px; flex: none; }
+/* Accordion state affordance, mobile only (see .mobile-layout .nav-label
+   below) — desktop's label isn't a trigger, nothing to point at. */
+.nav-label-chevron { display: none; }
 /* Resting/hover/active read as one continuous step up the same --nb-*
    ladder (80 -> 100, plus a bold jump at .active) rather than three
    unrelated colors — the kit's own idiom of driving hierarchy through alpha,
@@ -363,82 +363,80 @@ html, body {
 .connect-status.mono { font-family: 'Fira Mono', ui-monospace, SFMono-Regular, monospace; letter-spacing: .01em; }
 
 /* Mobile layout (see src/main.js's coarse-pointer detection, which toggles
-   this class on <body>): the sidebar wrapper/brand tile drop their desktop
-   box (display:contents) so #bg-logo/#connectBtn fall back to their own
-   plain fixed positioning below, regrouped into one compact bottom-anchored
-   stack (top to bottom: logo, connect) instead of spanning the whole column
-   top-to-bottom — freeing the upper part of the column for #mobileController.
-   .sidebar-nav has no mobile design yet, so it's hidden outright rather than
-   left to lay out however the desktop flex rules above would place it. */
-.mobile-layout #sidebar { display: contents; }
-.mobile-layout .sidebar-brand { display: contents; }
-.mobile-layout .sidebar-nav { display: none; }
-/* Sized down from desktop dimensions (170px logo) and tightly gapped (6px)
-   since landscape phone viewports are short on vertical room and the
-   joystick — explicitly asked to be sized as big as this layout allows —
-   competes with this stack for the same column. Each offset is hand-stacked
-   off the one below it (own height + 6px gap); bump MOBILE_STACK_H
-   (joystick's own comment below) if any of these sizes change. */
-.mobile-layout #bg-logo {
-  position: fixed;
-  z-index: 2;
-  cursor: pointer;
-  top: auto;
-  bottom: 54px;
-  width: 105px;
-  height: auto;
-  right: calc(var(--controller-center-right) - 52.5px);
+   this class on <body>): the sidebar becomes a real column here too, same
+   spirit as desktop (brand tile, nav, identity pill) rather than the two
+   independently-floating #bg-logo/#connectBtn this replaces — just narrower
+   (--controller-reserved-w, the joystick's own reserved width, not a fresh
+   20vw — see index.html's comment on why) and only ever shown on
+   mode-select/menus, never during a live match (main.js toggles this same
+   .hidden class on #sidebar in lockstep with #mobileController's, inside
+   showToolbar()/hideMatchChrome()) — desktop's column, by contrast, stays up
+   through a live match too. */
+.mobile-layout #sidebar {
+  width: var(--controller-reserved-w);
+  height: 100dvh;
+  padding: 14px 12px;
+  gap: 10px;
+  background: #f4f4f4;
 }
-/* Restores the pre-sidebar CTA look (light-blue/dark-navy pill) exactly —
-   the desktop rules above repurpose the base .nq-connect-btn/.connected
-   selectors for the new white card look, so mobile re-declares its own
-   colors/sizing/position rather than inheriting them. -58px is #connectBtn's
-   own actual measured half-width (116px rendered, confirmed via
-   getBoundingClientRect). Aligned to the joystick ring's own horizontal
-   center (--controller-center-right) rather than the plain right-margin
-   midpoint, per explicit request — overlap with the controller is
-   expected/acceptable for now, not fixed up yet. */
-.mobile-layout .nq-connect-btn {
-  position: fixed;
-  z-index: 3;
-  bottom: 16px;
-  right: calc(var(--controller-center-right) - 58px);
-  height: 32px;
-  width: auto;
-  gap: 6px;
-  padding: 6px 13px;
-  background: #0582CA;
-  color: #fff;
-  font-weight: 800;
-  font-size: 11px;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  box-shadow: 0 6px 18px -6px rgba(5,130,202,0.6);
-  transition: transform .12s ease, box-shadow .12s ease;
+.mobile-layout #sidebar.hidden { display: none; }
+.mobile-layout .sidebar-brand { padding: 10px 12px; }
+.mobile-layout #bg-logo { max-width: 120px; }
+/* Both section titles (Compete/Info, icon included) show at once on mobile —
+   no collapsed single "Menu" line — each is its own accordion trigger (see
+   .mobile-layout .nav-label below); only its own .nav-section-items
+   collapses/expands, main.js is what enforces "only one section open at a
+   time" across the two (plain CSS can't reach a sibling .nav-section from
+   here). flex:1/min-height:0/overflow-y:auto is the same "grow into
+   whatever's left, scroll internally if it's not enough" pattern the whole
+   nav used before switching to this per-section design — still needed as a
+   fallback (a short landscape phone + an open section can still outgrow the
+   column) since a earlier fixed max-height here once shoved the identity
+   pill fully off-screen at 812x375 (see git history) rather than just
+   clipping. Thin, muted overlay-style scrollbar to match (WebKit + Firefox
+   properties both declared, real support varies but neither has a
+   fallback-fails-loud case). */
+.mobile-layout .sidebar-nav {
+  margin-top: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 10px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--nb-16) transparent;
 }
-.mobile-layout .nq-connect-btn:hover { background: #0582CA; transform: translateY(-1px); box-shadow: 0 10px 22px -6px rgba(5,130,202,0.7); }
-.mobile-layout .nq-connect-btn:active { transform: translateY(0); }
-.mobile-layout .nq-connect-btn.connected { background: #1F2348; }
-.mobile-layout .nq-connect-icon { display: block; width: 12px; height: 12px; flex: none; }
-.mobile-layout .connect-avatar, .mobile-layout .connect-status { display: none; }
-/* #connectBtnLabel's own font-size/weight/color (all:unset + explicit values,
-   see its default rule above) are specified directly on the element, so they
-   don't fall back to inheriting .nq-connect-btn's mobile color/font-size/
-   weight above the way a plain unstyled <span> would have — re-declared here
-   in full, matching this pill's original look exactly (white/800/11px/
-   uppercase), same self-contained-override pattern as the rest of this
-   mobile block. */
-.mobile-layout #connectBtnLabel {
-  all: unset;
-  display: block;
-  cursor: default;
-  color: #fff;
-  font-family: 'Mulish', -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+.mobile-layout .sidebar-nav::-webkit-scrollbar { width: 5px; }
+.mobile-layout .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.mobile-layout .sidebar-nav::-webkit-scrollbar-thumb { background: var(--nb-16); border-radius: 999px; }
+.mobile-layout .nav-section { flex: none; gap: 0; }
+.mobile-layout .nav-label { padding: 8px 10px; font-size: 11px; cursor: pointer; }
+.mobile-layout .nav-label-chevron { display: block; width: 13px; height: 13px; flex: none; transition: transform .18s ease; }
+.mobile-layout .nav-section.open .nav-label-chevron { transform: rotate(180deg); }
+/* Collapsed by default (max-height:0, not display:none, so the height
+   change itself can transition) — .open on the parent .nav-section
+   (main.js) is what a tap on its .nav-label above adds/removes. Only ever
+   holding 2-3 short links, unlike the whole-nav collapse this replaces, so
+   a fixed max-height is safe here (nothing device-height-dependent, the cap
+   just needs to clear real content once, not track available viewport). */
+.mobile-layout .nav-section-items {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: max-height .22s ease, opacity .15s ease;
 }
+.mobile-layout .nav-section.open .nav-section-items {
+  max-height: 220px;
+  opacity: 1;
+  pointer-events: auto;
+}
+.mobile-layout .nav-item { padding: 8px 10px; font-size: 13px; }
+/* Identity pill: inherits the desktop white-card look as-is (avatar + real
+   handle/address, see main.js's syncIdentityPill() — no more mobile-only
+   branch stripping that down to a bare address) rather than restoring the
+   old bottom-right CTA pill this replaces. margin-top:auto is what actually
+   pins it to the column's bottom edge, see .sidebar-nav's own comment above. */
+.mobile-layout #connectBtn { margin-top: auto; }
 
 /* Unified mobile controller — the validated white "remote control" mockup
    (design/ui/ChatGPT Image 19 août 2026, 22_39_44.png), baked as real art
@@ -453,6 +451,15 @@ html, body {
    responsive via clamp() instead of kept as that tool's raw px output, so
    it isn't pinned to one exact phone size. */
 #mobileController { display: none; }
+/* .hidden must win here (see this file's usual per-element .hidden scoping
+   convention, e.g. #overlay.hidden/.team-select.hidden above) — without it,
+   this rule's plain `.mobile-layout #mobileController` selector outranks the
+   base `#mobileController { display: none }` above (two selector segments
+   vs one) and forces the controller to always render on mobile, joystick and
+   all, right over mode-select/every other screen instead of only during a
+   match (confirmed: showed up pushing the whole page off-center before this
+   fix, .hidden class present and all). */
+.mobile-layout #mobileController.hidden { display: none; }
 .mobile-layout #mobileController {
   display: flex;
   flex-direction: column;
@@ -789,6 +796,7 @@ canvas { position: relative; z-index: 1; }
    overflows evenly off all 4 edges instead of just the right, clipped by
    the viewport's own overflow:hidden (html/body, top of this file). */
 .mobile-layout #game-card {
+  top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   /* Matches the canvas's own new intrinsic ratio (MOBILE_CROP in game.js:
@@ -1256,9 +1264,20 @@ button:disabled { opacity: 0.35; cursor: default; }
   border-radius: 24px; padding: 26px 30px;
   box-shadow: 0 4px 14px rgba(31, 35, 72, 0.38);
 }
+/* `left` here is the box's own CENTER (base rule's translate(-50%,-50%)),
+   not an edge inset like .mode-drawer — so the fix is just the arena's own
+   optical center, (100% - reserved)/2 (see .mobile-layout #modeOverlayBg's
+   comment above), no extra "6% +" term. That extra term used to be here
+   (and still is on .config-panel below, same bug) — it doesn't correspond
+   to anything in this box's own geometry, just a stray carry-over from
+   .mode-drawer's unrelated left-edge-inset formula, and it shifted this
+   dialog 3% right of center exactly like .mode-drawer was before its own
+   fix. max-width keeps its small 6% breathing margin, still safe since it's
+   less than the fully-symmetric (100% - reserved) available around the
+   corrected center. */
 .mobile-layout #overlay.overlay-boxed {
   right: auto;
-  left: calc((6% + (100% - var(--controller-reserved-w))) / 2);
+  left: calc((100% - var(--controller-reserved-w)) / 2);
   max-width: calc(100% - 6% - var(--controller-reserved-w));
 }
 #overlay.overlay-boxed:not(.hidden) { animation: panel-in 260ms cubic-bezier(.16,1,.3,1); }
@@ -1453,6 +1472,20 @@ button:disabled { opacity: 0.35; cursor: default; }
    overflow:hidden), so the image is never resized, only cropped 10vw off
    each side. */
 #modeOverlayBg { position: absolute; top: 0; left: -10vw; width: 100vw; height: 100dvh; background-size: cover; background-position: center; }
+/* Same recentering trick as the desktop rule above, just re-derived for
+   mobile's own reserved column: -10vw is exactly half of DESKTOP's fixed
+   20vw #menuStage margin, which doesn't mean anything on mobile — there the
+   backdrop lives inside #game-card, not #menuStage (see main.js's menuHost),
+   and the reserved strip is --controller-reserved-w (the joystick/sidebar
+   column, ~27% of a typical landscape phone, not 20%). #game-card's own
+   width equals 100vw on every real landscape phone in practice (its
+   max(100vw, 100dvh*2218/1295) picks the 100vw branch whenever the
+   viewport's own aspect ratio exceeds ~1.71, true of every phone from
+   16:9 up), so it sits flush with the viewport's left edge exactly like
+   #menuStage does on desktop — same "shift left by half the reserved
+   width" math applies, just with mobile's own half-width instead of
+   desktop's hardcoded 10vw. */
+.mobile-layout #modeOverlayBg { left: calc(-1 * var(--controller-reserved-w) / 2); }
 .mode-select-scrim { position: absolute; inset: 0; background: rgba(6,14,18,0.28); }
 .mode-drawer {
   position: absolute;
@@ -1463,6 +1496,13 @@ button:disabled { opacity: 0.35; cursor: default; }
   gap: 12px;
   border-radius: 20px;
   overflow: hidden;
+  /* Tiles at 90% of their inset-derived size, both platforms, per explicit
+     request — scale() over reworking the inset%/--controller-reserved-w mix
+     that sizes this box in the first place (desktop is a plain %, mobile
+     mixes in a fixed px column), since scale applies uniformly to whatever
+     box that math already produced instead of needing two separate re-derivations. */
+  transform: scale(0.9);
+  transform-origin: center;
 }
 /* Same "replay every time this screen opens" convention as every other menu
    panel (.config-panel:not(.hidden), see that rule's own comment) — state-
@@ -1484,8 +1524,15 @@ button:disabled { opacity: 0.35; cursor: default; }
    .mobile-layout above) clear of tiles — that's the same column #bg-logo/
    #connectBtn already live in and is earmarked for more controls later, so
    the grid needs to stay out of it instead of running full-bleed under
-   them, same inset pattern as .mobile-layout #overlay below. */
-.mobile-layout .mode-drawer { right: var(--controller-reserved-w); }
+   them, same inset pattern as .mobile-layout #overlay below.
+   left:3% (half the base rule's 6%), not the inherited plain 6%: with only
+   `right` overridden, the box sits centered between the 6% left inset and
+   the (100% - reserved-column) right edge — 3% off from the arena's own
+   optical center (see .mobile-layout #modeOverlayBg's recentering above,
+   same root cause). Halving the left inset while adding that same 3% to the
+   right one keeps the grid's overall size identical, just recentered on the
+   arena instead of the raw viewport. */
+.mobile-layout .mode-drawer { left: 3%; right: calc(var(--controller-reserved-w) + 3%); }
 /* Hidden while Classic/Custom or Custom Settings show over the same
    #modeOverlay backdrop (see main.js's modeDrawer) — every hideable element
    in this file gets its own scoped .hidden rule rather than a generic one,
@@ -1579,8 +1626,11 @@ button:disabled { opacity: 0.35; cursor: default; }
   box-shadow: 0 4px 14px rgba(31, 35, 72, 0.38);
 }
 .config-panel.hidden { display: none; }
+/* Same fix, same reasoning as .mobile-layout #overlay.overlay-boxed above
+   (both use the base rule's translate(-50%,-50%) center-point pattern): drop
+   the stray "6% +" term, `left` is just the arena's own optical center. */
 .mobile-layout .config-panel {
-  left: calc((6% + (100% - var(--controller-reserved-w))) / 2);
+  left: calc((100% - var(--controller-reserved-w)) / 2);
   max-width: calc(100% - 6% - var(--controller-reserved-w));
 }
 /* Same background tint as the mode-select tile this screen follows (see
