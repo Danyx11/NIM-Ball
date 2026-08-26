@@ -70,7 +70,7 @@
 <body>
   <div id="loadingOverlay">
     <div class="wrap">
-      <svg class="logo" viewBox="0 0 544 544" xmlns="http://www.w3.org/2000/svg">
+      <svg class="logo" viewBox="0 0 544 544" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
         <path id="hexGuide" fill="none" stroke="none"
               d="M147,222 L147,191 L279,115 L411,191 L411,344 L279,420 L147,344 L147,339 Z"/>
         <path d="M147,222 L147,191 L279,115 L411,191 L411,344 L279,420 L147,344 L147,339"
@@ -84,7 +84,7 @@
         <circle class="orb" r="13" fill="#fff">
           <animateMotion dur="2.5s" repeatCount="indefinite" rotate="auto"
                          keyPoints="0;1;1" keyTimes="0;0.6;1" calcMode="linear">
-            <mpath href="#hexGuide"/>
+            <mpath href="#hexGuide" xlink:href="#hexGuide"/>
           </animateMotion>
         </circle>
       </svg>
@@ -100,10 +100,12 @@
        tile, nav, identity pill (pinned to the bottom via margin-top:auto on
        #connectBtn itself, both platforms). #bg-logo and #connectBtn keep
        their original ids/JS (main.js) — only reparented + restyled here.
-       On mobile the whole column is also toggled hidden/shown by main.js in
-       lockstep with #mobileController (present only for mode-select/menus,
-       not during a live match — see showToolbar()/hideMatchChrome()), unlike
-       desktop where it stays up throughout a match.
+       On mobile, main.js's showToolbar()/hideMatchChrome() toggle an
+       .in-match class on this column in lockstep with #mobileController
+       appearing: brand/nav hide (menu-only, would otherwise fight the
+       controller for the same strip), but #connectBtn stays up through a
+       live match too now — persistent, per explicit request — same as
+       desktop's #sidebar always does.
        .nav-label is inline/static on desktop but becomes a real accordion
        trigger on mobile (role="button"/tabindex, same div-as-button pattern
        as #homeOverlay elsewhere in this file) — both section titles (with

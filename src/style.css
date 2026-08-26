@@ -194,23 +194,24 @@ html, body {
   gap: 32px;
 }
 
-/* Brand bar: a slim, full-width Nimiq-Blue strip just tall enough for the
-   logo — reads as a header, not a floating square card (that squarer,
-   heavily-padded version was tried first, see git history — too isolated,
-   too much of its own "block" sitting alone above all that nav whitespace). */
+/* Brand bar: the Nimiq-Blue wordmark (see background.js's LOGO_SRC) sitting
+   directly on the column's own Nimiq Gray background, right-aligned, per
+   explicit request — reversible: this replaces an earlier navy tile behind
+   a white logo (background:#1F2348; border-radius:10px; padding:14px 18px;
+   justify-content:center — restore those 4 lines + LOGO_SRC's old value to
+   revert). padding kept for breathing room off the column's own edges, not
+   because a tile needs filling anymore. */
 .sidebar-brand {
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: #1F2348;
-  border-radius: 10px;
+  justify-content: flex-end;
   padding: 14px 18px;
 }
 #bg-logo {
   display: block;
-  width: 100%;
-  max-width: 165px;
+  width: auto;
+  max-width: 219px;
   height: auto;
   cursor: pointer;
 }
@@ -379,9 +380,18 @@ html, body {
   gap: 10px;
   background: #f4f4f4;
 }
-.mobile-layout #sidebar.hidden { display: none; }
+/* In-match: only the identity pill stays up (persistent, per explicit
+   request) — brand/nav hide and the column's own gray background/hit area
+   go transparent + click-through so it doesn't block taps meant for
+   #mobileController/the board underneath; #connectBtn re-enables its own
+   pointer-events and keeps sitting at the column's bottom via its existing
+   margin-top:auto now that it's the only visible child left. */
+.mobile-layout #sidebar.in-match { background: transparent; pointer-events: none; }
+.mobile-layout #sidebar.in-match .sidebar-brand,
+.mobile-layout #sidebar.in-match .sidebar-nav { display: none; }
+.mobile-layout #sidebar.in-match #connectBtn { pointer-events: auto; }
 .mobile-layout .sidebar-brand { padding: 10px 12px; }
-.mobile-layout #bg-logo { max-width: 120px; }
+.mobile-layout #bg-logo { max-width: 160px; }
 /* Both section titles (Compete/Info, icon included) show at once on mobile —
    no collapsed single "Menu" line — each is its own accordion trigger (see
    .mobile-layout .nav-label below); only its own .nav-section-items
@@ -468,8 +478,17 @@ html, body {
   display: flex;
   position: fixed;
   z-index: 3;
-  top: 24px;
-  right: 36px;
+  top: 9px;
+  /* 18px centers this panel on the identity pill below it (not just matches
+     its right edge, per explicit correction) — the pill's own width is
+     #sidebar's content box (var(--controller-reserved-w) minus 24px
+     padding, i.e. 12px + this same clamp()), right-anchored 12px in from
+     #sidebar's own right:0. Both this panel and the pill share the exact
+     same clamp() as their width, so it cancels out of the center-alignment
+     algebra entirely: solving center_controller = center_pill for this
+     `right` value gives a flat 18px, valid at every viewport width, not
+     just one reference size. */
+  right: 18px;
   width: clamp(147px, 23vw, 225px);
 }
 #mcTopImg, #mcBodyImg {
@@ -908,7 +927,32 @@ canvas { position: relative; z-index: 1; }
      baked into the canvas backing buffer instead of the full 3312x1896 —
      see the .mobile-layout #scene rule above, kept in sync with these. */
   left: -6.49%;
-  top: -6.31%;
+  /* -26.03%, not -6.31%: that old value (and a -56.31% one tried in between,
+     see git history/conversation) both leaned on the CSS comment's "scale
+     about origin" shorthand (top = oy×(1−s)×100%), which silently assumes
+     #game-card has the SAME aspect ratio as the canvas crop (2218/1295) —
+     true only by coincidence, never on a real phone: #game-card is
+     width:100vw/height:100dvh, so its ratio is whatever the phone's own
+     landscape ratio is (confirmed: restoring the exact pre-existing pixel
+     position via that shorthand's math still read as "too high" on a real
+     device). Re-derived instead from real pixel geometry, ratio-independent
+     of that shortcut:
+       - MOBILE_CROP (game.js) is 2217x1294; the ice field (FX0..FY1 in
+         game.js, full-canvas coords) sits at y 626..1274 there, center
+         y=950, i.e. (950-286)/1294 = 51.31% down the crop — and since the
+         canvas is a 1:1 render of that crop (canvas{width:100%;height:auto}
+         inside this same element), that's also 51.31% down THIS element's
+         own rendered box.
+       - This box's rendered width is 108.94% of #game-card's own width (see
+         `width` below); its height instead follows the canvas's own
+         intrinsic 2217:1294 ratio at that width (independent of #game-card's
+         height — the two only coincide when #game-card happens to share the
+         crop's aspect ratio, which it doesn't here).
+       - Solved for a landscape 852x343 reference (matches #mobileController's
+         own calibration viewport above) targeting the ice's center dead on
+         mid-screen (tuned down from an initial 5%, then 3%, per explicit
+         request — no Nimiq Pay chrome offset after all). */
+  top: -31.03%;
   width: 108.94%;
   z-index: 0;
 }

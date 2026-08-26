@@ -680,12 +680,12 @@ function showToolbar() {
   toolbarTop.classList.remove('hidden');
   toolbarBottom.classList.remove('hidden');
   mobileController.classList.remove('hidden');
-  // Mobile's utility column (logo/nav/identity pill) shares #mobileController's
-  // reserved width and is a menu-only affordance — swap the two in lockstep
-  // rather than letting both compete for the same strip during a match.
-  // Desktop's #sidebar has no such rule and stays up throughout (see its own
-  // comment in style.css).
-  if (IS_MOBILE) sidebar.classList.add('hidden');
+  // Mobile's utility column shares #mobileController's reserved width —
+  // brand/nav are menu-only, hidden in lockstep with the controller
+  // appearing, but the identity pill stays up throughout a match too now
+  // (persistent, per explicit request), same as desktop's #sidebar always
+  // does (see style.css's .mobile-layout #sidebar.in-match).
+  if (IS_MOBILE) sidebar.classList.add('in-match');
 }
 
 // "Now show mode-select" half of the exit flow — the actual match teardown
@@ -707,7 +707,7 @@ function hideMatchChrome() {
   toolbarBottom.classList.add('hidden');
   mobileController.classList.add('hidden');
   startOverlay.classList.add('hidden');
-  if (IS_MOBILE) sidebar.classList.remove('hidden');
+  if (IS_MOBILE) sidebar.classList.remove('in-match');
 }
 
 function returnToModeSelect() {
