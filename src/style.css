@@ -257,7 +257,7 @@ html, body {
 .nav-label {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center; /* centered on brand/pill's shared center, see conversation */
   gap: 6px;
   padding: 0 12px 8px;
   font-size: 11px;
@@ -285,7 +285,7 @@ html, body {
   font-size: 15px;
   font-weight: 600;
   color: var(--nb-80);
-  text-align: right;
+  text-align: center; /* centered on brand/pill's shared center, see conversation */
   cursor: pointer;
   transition: background .12s ease, color .12s ease;
 }
@@ -338,7 +338,57 @@ html, body {
 }
 .connect-avatar-default { width: 20px; height: 20px; }
 .connect-avatar.has-identicon .connect-avatar-default { display: none; }
-.connect-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+/* perspective on the pill itself (not .connect-text) so the flip below has
+   real 3D depth instead of a flat vertical squash — but only for the ~500ms
+   the flip is actually running (main.js's flipConnectText toggles this
+   class on, then back off once the rotation settles), not left on
+   permanently. iOS Safari bug report: with perspective statically present
+   on .nq-connect-btn for the whole match, the *entire* pill (avatar
+   included, not just the rotating text) would flash fully transparent on
+   the very first tap during a live match — a known WebKit compositing bug
+   where a static 3D-context-establishing parent can drop its whole
+   subtree's layer on any touch repaint, with no animation needing to be
+   in flight at all. Scoping perspective to only the brief animation window
+   means a tap during normal play (the reported case) hits a plain 2D pill
+   with no 3D context to lose. */
+.nq-connect-btn.flip-perspective { perspective: 240px; }
+/* Menu <-> in-match transitions (main.js's syncIdentityPill, via flipConnectText)
+   spin this whole column on its own horizontal axis (rotateX) rather than
+   fading/collapsing the changed line — see conversation. transform-origin
+   center + a plain transition on transform; main.js does the two-lap timing
+   (out to 90deg, swap the actual DOM content while edge-on/invisible, back
+   in from -90deg) and owns the per-lap duration, this rule just needs to be
+   able to animate *a* transform smoothly. The avatar sits outside this
+   element (.connect-avatar is .connect-text's sibling, not its parent) so
+   it never rotates or fades — same spot throughout, per explicit request. */
+.connect-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  transform-origin: 50% 50%;
+  transition: transform .25s ease;
+  /* Mobile-only report: the pill could vanish on tap during a match, desktop
+     unaffected — the classic symptom of a rotateX+perspective element losing
+     its compositing layer on some mobile WebKit/Blink builds when something
+     nearby repaints (e.g. a touch-triggered :active/:hover elsewhere in the
+     column). backface-visibility pins the layer so it can't drop out; costs
+     nothing since this element's own rotation never goes past ±90deg anyway
+     (see flipConnectText in main.js), where backface visibility would never
+     have shown regardless. */
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+/* In-match, whichever line doesn't apply (see main.js's syncIdentityPill —
+   "Connect wallet"/"Claim a handle" never show once a match is running,
+   just whatever identity is already resolved) is hidden outright rather
+   than just emptied, so .connect-text shrinks to a single line — already
+   centered against the avatar's full height for free via .nq-connect-btn's
+   own align-items:center, no extra rule needed here. Left as a plain
+   display:none (no fade of its own) since the flip above is what sells the
+   transition now — this swap always happens while .connect-text is edge-on
+   mid-flip, so it's invisible regardless. */
+#connectBtnLabel.hidden, .connect-status.hidden { display: none; }
 /* Top line: "Guest", the claimed handle, or (all:unset resets its <button>
    chrome away, see index.html) the "Claim a handle" CTA — Mulish always,
    since none of those three are raw chain data. Nimiq Gold (.claim-cta,
@@ -392,13 +442,19 @@ html, body {
 /* In-match: only the identity pill stays up (persistent, per explicit
    request) — brand/nav hide and the column's own gray background/hit area
    go transparent + click-through so it doesn't block taps meant for
-   #mobileController/the board underneath; #connectBtn re-enables its own
-   pointer-events and keeps sitting at the column's bottom via its existing
-   margin-top:auto now that it's the only visible child left. */
+   #mobileController/the board underneath. #connectBtn used to re-enable its
+   own pointer-events here so it stayed tappable mid-match — but the click
+   handler was already a no-op then (main.js's `if (activeStopGame) return`,
+   disconnecting mid-match was never allowed), and letting real touches
+   reach it was itself the cause of an iOS Safari bug (whole pill flashing
+   transparent on tap, see conversation/[[project_identity_pill_flip_animation]]).
+   Purely a passive display now during a match, same as the logic already
+   intended — margin-top:auto still keeps it at the column's bottom now
+   that it's the only visible child left; it goes tappable again the moment
+   .in-match comes off (menu return, see hideMatchChrome in main.js). */
 .mobile-layout #sidebar.in-match { background: transparent; pointer-events: none; }
 .mobile-layout #sidebar.in-match .sidebar-brand,
 .mobile-layout #sidebar.in-match .sidebar-nav { display: none; }
-.mobile-layout #sidebar.in-match #connectBtn { pointer-events: auto; }
 .mobile-layout .sidebar-brand { padding: 10px 12px; }
 .mobile-layout #bg-logo { max-width: 160px; }
 /* Both section titles (More/Info, icon included) show at once on mobile —
@@ -427,16 +483,18 @@ html, body {
 .mobile-layout .sidebar-nav::-webkit-scrollbar { width: 5px; }
 .mobile-layout .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
 .mobile-layout .sidebar-nav::-webkit-scrollbar-thumb { background: var(--nb-16); border-radius: 999px; }
-.mobile-layout .nav-section { flex: none; gap: 0; }
+.mobile-layout .nav-section { flex: none; gap: 0; position: relative; }
 .mobile-layout .nav-label { padding: 8px 10px; font-size: 11px; cursor: pointer; }
 .mobile-layout .nav-label-chevron { display: block; width: 13px; height: 13px; flex: none; transition: transform .18s ease; }
 .mobile-layout .nav-section.open .nav-label-chevron { transform: rotate(180deg); }
 /* Collapsed by default (max-height:0, not display:none, so the height
    change itself can transition) — .open on the parent .nav-section
-   (main.js) is what a tap on its .nav-label above adds/removes. Only ever
-   holding 2-3 short links, unlike the whole-nav collapse this replaces, so
-   a fixed max-height is safe here (nothing device-height-dependent, the cap
-   just needs to clear real content once, not track available viewport). */
+   (main.js) is what a tap on its .nav-label above adds/removes. 220px is
+   comfortably more than the 2-4 short links this has held so far, but isn't
+   guaranteed to always be (see conversation — Nimiq was just added as a
+   4th Info entry) — overflow-y:auto once open, rather than clipping
+   silently, plus the scroll pill below, covers whatever list length this
+   ever grows to without needing to keep bumping this cap. */
 .mobile-layout .nav-section-items {
   max-height: 0;
   opacity: 0;
@@ -448,8 +506,23 @@ html, body {
   max-height: 220px;
   opacity: 1;
   pointer-events: auto;
+  overflow-y: auto;
 }
 .mobile-layout .nav-item { padding: 8px 10px; font-size: 13px; }
+/* Scroll thumb for the section above, real element rather than native
+   scrollbar styling (iOS Safari doesn't support ::-webkit-scrollbar at all,
+   unlike the desktop-only thin scrollbar further up this file) — main.js's
+   updateNavScrollPill sizes/positions/shows this only when that section is
+   both open and actually overflowing its own max-height. Absolute against
+   .nav-section (position:relative above), left edge, out of the scrolling
+   flow itself so it doesn't scroll away with the list it's representing. */
+.mobile-layout .nav-scroll-pill {
+  position: absolute; left: 1px; width: 3px; border-radius: 999px;
+  background: var(--nb-50);
+  opacity: 0; pointer-events: none;
+  transition: opacity .15s ease;
+}
+.mobile-layout .nav-scroll-pill.visible { opacity: 1; }
 /* Identity pill: inherits the desktop white-card look as-is (avatar + real
    handle/address, see main.js's syncIdentityPill() — no more mobile-only
    branch stripping that down to a bare address) rather than restoring the
@@ -586,6 +659,62 @@ html, body {
 #mobileController #tbtn-chat  { left: 4.09%;  top: 82.87%; width: 30.43%; height: 17.12%; aspect-ratio: unset; }
 #mobileController #tbtn-sound { left: 34.52%; top: 82.87%; width: 30.43%; height: 17.12%; aspect-ratio: unset; }
 #mobileController #tbtn-exit  { left: 64.95%; top: 82.87%; width: 30.43%; height: 17.12%; aspect-ratio: unset; }
+/* chat/sound state icons on the white panel — real 2-state vector icons
+   (see index.html's comment on #tbtn-sound for the full rationale),
+   toggled by main.js (sound) / game.js (chat) via plain .hidden. An
+   earlier pressed+darkened treatment lived here instead; replaced
+   wholesale per explicit request, not layered on top of it. Left the old
+   .tbtn-muted-slash diagonal-line indicator hidden in this context same
+   as before (superseded by these icons, not reinstated). */
+#mobileController .tbtn-muted-slash { display: none; }
+/* Same idea for ice: the gray overlay (.mc-gray-overlay further down) is
+   the whole story on mobile, the red X cross stays desktop-only. */
+#mobileController .tbtn-used-cross { display: none; }
+/* Positioned relative to each icon's own button (the nearest positioned
+   ancestor, since .tbtn above is itself position:absolute) — these %
+   are the icon's measured center converted into that button's own box,
+   e.g. sound: (49.8% of #mcBody − the button's own 34.52% origin) /
+   the button's own 30.43% width = 50.2%. Same conversion for chat. */
+.mc-icon-overlay {
+  position: absolute;
+  width: 26%;
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+/* This codebase has no generic bare `.hidden{display:none}` utility —
+   every other .hidden usage is scoped to its own element (grep for
+   `.hidden {` in this file) — so toggling the class alone did nothing here
+   without this rule: both icons/the backdrop stayed permanently visible,
+   stacked on top of each other, which is why clicking looked like it had
+   no effect at all. */
+.mc-icon-overlay.hidden, .mc-icon-backdrop.hidden { display: none; }
+.mc-icon-backdrop {
+  position: absolute;
+  width: 30%;
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  background: #fbfbfb;
+  border-radius: 30%;
+  pointer-events: none;
+}
+.mc-sound-anchor { left: 50.2%; top: 34%; }
+.mc-chat-anchor { left: 47.7%; top: 34%; }
+/* ice (sweep)/energy (power) "off"/"spent" look — a plain gray tint over
+   the whole circular button, not just its icon (unlike the chat/sound
+   icons above). energy reuses isBasicLaser()/syncPowerButton's own on/off
+   (same state as the cap-src swap) — gray while off. ice is normal by
+   default, grays the instant it's armed (one click, see syncSweepButton),
+   and simply stays gray once actually played that point — no separate
+   cross needed on top on mobile (see .tbtn-used-cross above, hidden here). */
+.mc-gray-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(120, 120, 120, 0.45);
+  pointer-events: none;
+}
+.mc-gray-overlay.hidden { display: none; }
 /* #toolbar-bottom itself stays mounted in #stage-wrap on mobile (its buttons
    are the ones that move, not the container) — hidden rather than left as an
    empty box, since an empty flex container with no children still occupies
@@ -1341,17 +1470,23 @@ button:disabled { opacity: 0.35; cursor: default; }
   z-index: 10;
 }
 #overlay.hidden { display: none; }
-#overlay.mode-passplay { background: rgba(5, 130, 202, 0.55); }
+/* mode-hockey/mode-curling: the two vibes (see conversation) — replace what
+   used to be a passplay-vs-remote split (mode-passplay/mode-remote). Both
+   P&P and Remote now tint the SAME color once a vibe is picked (blue for
+   Hockey, gold for Curling), driven by main.js's activeVibe rather than
+   whether a match happens to be networked. Solo/Replay are untouched, not
+   part of the vibe system. */
+#overlay.mode-hockey { background: rgba(5, 130, 202, 0.55); }
 #overlay.mode-solo { background: rgba(31, 35, 72, 0.55); }
 #overlay.mode-replay { background: rgba(33, 188, 165, 0.55); }
-#overlay.mode-remote { background: rgba(233, 178, 19, 0.55); }
-#overlay.mode-remote, #overlay.mode-replay { color: var(--bg-deep); --ink-dim: rgba(11, 31, 42, 0.7); }
-#overlay.mode-remote h2, #overlay.mode-replay h2 { color: var(--bg-deep); }
-/* Dark/blue tints (default scrim, passplay, solo) fail contrast with the
+#overlay.mode-curling { background: rgba(233, 178, 19, 0.55); }
+#overlay.mode-curling, #overlay.mode-replay { color: var(--bg-deep); --ink-dim: rgba(11, 31, 42, 0.7); }
+#overlay.mode-curling h2, #overlay.mode-replay h2 { color: var(--bg-deep); }
+/* Dark/blue tints (default scrim, hockey, solo) fail contrast with the
    default dim --ink-dim paragraph color (both blue-ish, similar luminance) —
    full-brightness ink instead. Gold/green tints already get proper dark ink
    above, so they're excluded here. */
-#overlay:not(.mode-remote):not(.mode-replay) p { color: var(--ink); }
+#overlay:not(.mode-curling):not(.mode-replay) p { color: var(--ink); }
 /* Shrinks just the +1 goal panel's own box to 70% of the full-bleed size
    (see showGoalPanel's goal-box-70 toggle in game.js) — content inside
    (identicon/badge/address/score) keeps its normal size untouched, just
@@ -1393,7 +1528,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* Same translucent-white treatment as .config-preset-btn (Classic/Custom,
    Connect/Guest) instead of solid gold .bigbtn — a fixed gold button read
    fine on the old plain-scrim backdrop but disappears against the gold
-   mode-remote tint above; translucent white reads on any of the 4 tints. */
+   mode-curling tint above; translucent white reads on any of the 4 tints. */
 #overlay.overlay-boxed .bigbtn {
   background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
   transition: background .15s ease, border-color .15s ease;
@@ -1448,6 +1583,21 @@ button:disabled { opacity: 0.35; cursor: default; }
    Custom Settings above lay out their own children directly). */
 .config-lobby-content { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
 .bigbtn { background: var(--accent); color: #3a2900; padding: 14px 30px; font-size: 16px; border-radius: 14px; }
+/* Same translucent-white treatment as #overlay.overlay-boxed .bigbtn above
+   (see that rule's own comment) — the solid gold default reads fine on the
+   old fixed-gold panel but disappears against Curling's own gold tint (or
+   goes muddy on Hockey's blue), now that this panel's background follows
+   the active vibe instead of being fixed. Covers Create/Join and the match-
+   code Join submit button — every .bigbtn this panel ever shows. */
+#matchNetworkOverlay .bigbtn {
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
+  transition: background .15s ease, border-color .15s ease;
+}
+#matchNetworkOverlay .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
+/* White text goes muddy on Curling's own gold tint (same issue the comment
+   above already fixed for the button's background) — dark ink instead,
+   matching every other piece of text on this panel under .mode-curling. */
+#matchNetworkOverlay.mode-curling .bigbtn { color: var(--bg-deep); }
 /* Remote Match's 3 sub-screens (see main.js's showNetPanel) rebuild
    #matchNetworkContent's innerHTML from scratch on every screen change, so a
    fresh entrance for its button(s) needs no JS bookkeeping — new DOM nodes
@@ -1455,7 +1605,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    (not .config-lobby-content generally, which #overlay's in-match "back to
    menu?" confirm dialog also reuses — that one isn't one of the menu panels
    this is for). Two nth-of-type slots covers every sub-screen here (choice
-   screen's Créer/Rejoindre is the only one with 2; the rest have at most 1). */
+   screen's Create/Join is the only one with 2; the rest have at most 1). */
 #matchNetworkOverlay:not(.hidden) .bigbtn { animation: item-pop-in 240ms cubic-bezier(.16,1,.3,1) both; }
 #matchNetworkOverlay:not(.hidden) .bigbtn:nth-of-type(1) { animation-delay: 90ms; }
 #matchNetworkOverlay:not(.hidden) .bigbtn:nth-of-type(2) { animation-delay: 150ms; }
@@ -1654,6 +1804,67 @@ button:disabled { opacity: 0.35; cursor: default; }
    in this file gets its own scoped .hidden rule rather than a generic one,
    same convention as #overlay.hidden/.team-select.hidden/etc. above. */
 .mode-drawer.hidden { display: none; }
+/* #vibeSubOverlay: the P&P/Remote picker shown one level under a chosen
+   vibe tile (#modeHockey/#modeCurling) — sibling of #modeOverlay, same
+   "stays over the shared arena backdrop" pattern as .config-panel below,
+   just not boxed/centered like those (it reuses .mode-drawer's own full
+   quadrant-grid footprint so the two tiles read at the same scale as the
+   top-level ones). No header/title bar anymore (see conversation): the vibe
+   logo and the back button both live INSIDE the tiles now (#modeLocal/
+   #modeMatch below), not floating above the grid. */
+#vibeSubOverlay {
+  position: absolute; inset: 6%;
+  display: flex; flex-direction: column;
+  /* Sibling of #modeOverlay now (not nested inside it, see main.js's
+     desktop menuHost move), so it needs its own explicit z-index above
+     #modeOverlay's own .team-select z-index:3 — otherwise #modeOverlayBg/
+     .mode-select-scrim (painted as #modeOverlay's own children, still
+     visible underneath since only #modeDrawer itself gets hidden) win the
+     stacking order and paint over this entirely. */
+  z-index: 4;
+}
+#vibeSubOverlay.hidden { display: none; }
+.mobile-layout #vibeSubOverlay { left: 3%; right: calc(var(--controller-reserved-w) + 3%); }
+/* Reuses .mode-drawer's grid/tile-pop-in/scale(0.9) look wholesale, just
+   flowed inside #vibeSubOverlay's flex column (its only child now) instead
+   of absolutely inset:6% of #modeOverlay itself. */
+#vibeSubOverlay .mode-drawer {
+  position: relative; inset: auto; flex: 1; min-height: 0;
+  grid-template-rows: 1fr;
+}
+/* #modeLocal/#modeMatch need their own positioning context (see conversation:
+   the vibe logo and, for #modeMatch, the back button are both pinned to a
+   tile edge now instead of sitting in the tile's own centered content flow)
+   — .half itself has no position of its own, so this is scoped to just
+   these two rather than every tile everywhere .half is reused. */
+#modeLocal, #modeMatch { position: relative; }
+/* Vibe logo cloned into each tile (main.js's showVibeDrawer) — pinned to the
+   tile's own top edge, centered, out of the tile's normal vertically-
+   centered flex flow (own icon/tag/sub below still center as a group without
+   this reserving space). Smaller than the tile's own .mode-icon below it
+   (reinforcing badge, not the primary icon), same color-inherits-from-.half
+   convention (its cloned svg keeps the .mode-icon class, so the
+   mode-hockey/mode-curling .mode-icon color overrides below already cover
+   it for free). */
+.tile-vibe-logo {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  display: flex; justify-content: center;
+}
+.tile-vibe-logo .mode-icon { height: 20px; }
+/* Pure Curling's own badge doubled (see conversation) — #vibeSubOverlay's
+   own mode-curling class (set in main.js's showVibeDrawer) scopes this to
+   just that vibe, Hockey's stays the base 20px. */
+#vibeSubOverlay.mode-curling .tile-vibe-logo .mode-icon { height: 40px; }
+/* Back button relocated here from a floating position above both tiles (see
+   conversation) — one button for the whole screen (main.js's vibeBackBtn),
+   just visually anchored to #modeMatch's own top-right corner now. Smaller
+   offsets than .config-back's own top:24px/right:28px defaults, which were
+   sized for a full ~600px .config-panel, not a single grid tile. */
+#modeMatch .config-back { top: 14px; right: 14px; }
+/* Pure Curling only (see conversation) — same dark-ink swap as every other
+   icon on this tile (#vibeSubOverlay.mode-curling .half.e .mode-icon below);
+   .config-back's own base color:#fff would otherwise go unreadable on gold. */
+#vibeSubOverlay.mode-curling #modeMatch .config-back { color: var(--bg-deep); }
 /* Per-tile line-art icon, one per mode (players-at-console, linked devices,
    robot-on-curling-stone, replay document) — ported from "Modes tuiles
    design ref.png"'s outlined icon set, redrawn as inline stroke SVGs so
@@ -1665,6 +1876,37 @@ button:disabled { opacity: 0.35; cursor: default; }
    different viewBox aspect ratios. */
 .mode-icon { height: 36px; width: auto; color: rgba(255,255,255,0.92); }
 .mode-icon-tall { height: 30.6px; }
+/* Per-tile size tweaks off the base 36px/30.6px (see conversation) — NimiCurl
+   -15% (30.6px), Pure Curling +40% (50.4px), AI Training +60% off its own
+   .mode-icon-tall base (49px). ID-scoped since .mode-icon/.mode-icon-tall are
+   shared bases every tile still needs (Replay keeps the plain 30.6px). */
+#modeHockey .mode-icon { height: 30.6px; }
+#modeCurling .mode-icon { height: 50.4px; }
+#modeSolo .mode-icon-tall { height: 49px; }
+#modeReplay .mode-icon-tall { height: 42.84px; }
+/* Logos aligned by vertical center across both grid rows (see conversation)
+   — fully reversible, purely additive: each icon gets equal top/bottom
+   margin compensation up to Curling's own 50.4px (the tallest of the 4
+   above — 0 margin needed there), splitting the difference instead of
+   parking it all below, so the icon's own center lands on the same Y in
+   every tile, not just its slot's. No min-height on .tag — title sits
+   flush under the icon slot in every tile already (that's what centering
+   the icon within a fixed-height slot buys for free); subtitle then sits
+   flush under the title's own actual height (1 or 2 lines, no reserved
+   gap), per explicit request. */
+#modeOverlay .mode-drawer .sub { min-height: 30px; }
+#modeHockey .mode-icon { margin-top: 9.9px; margin-bottom: 9.9px; }
+#modeSolo .mode-icon-tall { margin-top: 0.7px; margin-bottom: 0.7px; }
+#modeReplay .mode-icon-tall { margin-top: 3.78px; margin-bottom: 3.78px; }
+/* Mobile: all 4 mode-tile logos -30% (see conversation) — same ×0.7 applied
+   to each of the 4 desktop heights above, and the centering margins
+   recomputed against the new tallest one (Curling's 35.28px replaces
+   50.4px as the slot), so the vertical-center alignment from above still
+   holds at the smaller size instead of drifting. */
+.mobile-layout #modeHockey .mode-icon { height: 21.42px; margin-top: 6.93px; margin-bottom: 6.93px; }
+.mobile-layout #modeCurling .mode-icon { height: 35.28px; }
+.mobile-layout #modeSolo .mode-icon-tall { height: 34.3px; margin-top: 0.49px; margin-bottom: 0.49px; }
+.mobile-layout #modeReplay .mode-icon-tall { height: 29.99px; margin-top: 2.65px; margin-bottom: 2.65px; }
 
 /* Elevation layer 2/3 (card/menu box -> tiles): scoped to #modeOverlay only,
    same reasoning as the palette rule below it — .half is shared with
@@ -1688,10 +1930,10 @@ button:disabled { opacity: 0.35; cursor: default; }
    .half.a is shared with #startOverlay's team-blue-ready screen (game/team
    color, not menu chrome), so its own base rule stays untouched; this only
    overrides for elements actually inside #modeOverlay. */
-#modeOverlay .half.a { background: rgba(5, 130, 202, 0.72); }   /* Nimiq Light Blue — Pass & Play */
+#modeOverlay .half.a { background: rgba(5, 130, 202, 0.72); }   /* Nimiq Light Blue — Hockey Vibe */
 #modeOverlay .half.c { background: rgba(31, 35, 72, 0.72); }    /* Nimiq Blue — AI Training */
 #modeOverlay .half.d { background: rgba(33, 188, 165, 0.72); }  /* Nimiq Green — Replay */
-#modeOverlay .half.e { background: rgba(233, 178, 19, 0.72); }  /* Nimiq Gold — Remote Match */
+#modeOverlay .half.e { background: rgba(233, 178, 19, 0.72); }  /* Nimiq Gold — Curling Vibe */
 /* Gold and Green are light enough that the shared white-ish text/icon color
    (.half .tag inherits var(--ink), .half .sub/.mode-icon are literal near-
    white) fails contrast against them — dark ink instead, same convention
@@ -1702,6 +1944,33 @@ button:disabled { opacity: 0.35; cursor: default; }
 #modeOverlay .half.d, #modeOverlay .half.e { color: var(--bg-deep); }
 #modeOverlay .half.d .sub, #modeOverlay .half.e .sub { color: rgba(11,31,42,0.75); }
 #modeOverlay .half.d .mode-icon, #modeOverlay .half.e .mode-icon { color: var(--bg-deep); }
+
+/* #vibeSubOverlay's own two tiles (#modeLocal/#modeMatch, P&P/Remote) don't
+   keep the fixed per-slot a/e brand colors above — under a given vibe, both
+   should read as "the same game" rather than one blue/one gold. Overridden
+   here per active vibe (class set in main.js's showVibeDrawer), at higher
+   specificity than the #modeOverlay .half.a/.half.e rules above so it wins
+   despite #vibeSubOverlay's tiles also matching those broader selectors.
+   Hockey reuses the exact Light Blue wash + default light text (tile 'a'
+   already looks like this); Curling reuses the exact Gold wash + dark-ink
+   text (tile 'e' already looks like this) — same two brand colors, just no
+   longer tied to which physical slot a tile sits in. */
+#vibeSubOverlay.mode-hockey .half.a,
+#vibeSubOverlay.mode-hockey .half.e {
+  background: rgba(5, 130, 202, 0.72);
+  color: var(--ink);
+}
+#vibeSubOverlay.mode-hockey .half.e .sub { color: rgba(255,255,255,0.85); }
+#vibeSubOverlay.mode-hockey .half.e .mode-icon { color: rgba(255,255,255,0.92); }
+#vibeSubOverlay.mode-curling .half.a,
+#vibeSubOverlay.mode-curling .half.e {
+  background: rgba(233, 178, 19, 0.72);
+  color: var(--bg-deep);
+}
+#vibeSubOverlay.mode-curling .half.a .sub,
+#vibeSubOverlay.mode-curling .half.e .sub { color: rgba(11,31,42,0.75); }
+#vibeSubOverlay.mode-curling .half.a .mode-icon,
+#vibeSubOverlay.mode-curling .half.e .mode-icon { color: var(--bg-deep); }
 
 /* ---- Classic/Custom + Custom Settings screens (see main.js) — shown after
    Pass & Play / Remote Match is picked from #modeOverlay above, never for
@@ -1749,17 +2018,17 @@ button:disabled { opacity: 0.35; cursor: default; }
   left: calc((100% - var(--controller-reserved-w)) / 2);
   max-width: calc(100% - 6% - var(--controller-reserved-w));
 }
-/* Same background tint as the mode-select tile this screen follows (see
-   .half.a/.half.e in the mode-drawer rules above) — set via JS (main.js's
-   applyPanelMode) since the same two panels are reused for both Pass & Play
-   and Remote Match rather than duplicated per mode. */
-.config-panel.mode-passplay { background: rgba(5, 130, 202, 0.55); } /* Nimiq Light Blue */
-.config-panel.mode-remote { background: rgba(233, 178, 19, 0.55); }  /* Nimiq Gold */
-/* Connect gate isn't tied to any mode tile (it shows before mode-select is
-   even reachable), so it gets its own fixed tint rather than one picked via
-   applyPanelMode/fillModeHeader — Nimiq Light Blue again, same value as
-   .mode-passplay, since it reads as "wallet/identity" rather than a
-   specific game mode. */
+/* Background tint now follows the active vibe (mode-hockey/mode-curling),
+   not which mode tile (P&P/Remote) this screen follows — set via JS
+   (main.js's fillModeHeader/showNetPanel) since Classic/Custom, Custom
+   Settings and Remote Match's 3 sub-screens are all reused across both
+   P&P and Remote under either vibe, not duplicated per mode. */
+.config-panel.mode-hockey { background: rgba(5, 130, 202, 0.55); } /* Nimiq Light Blue */
+.config-panel.mode-curling { background: rgba(233, 178, 19, 0.55); }  /* Nimiq Gold */
+/* Connect gate isn't tied to any vibe (it shows before mode-select is even
+   reachable), so it gets its own fixed tint rather than one picked via
+   fillModeHeader — Nimiq Light Blue again, same value as .mode-hockey,
+   since it reads as "wallet/identity" rather than a specific game mode. */
 .config-panel.mode-connect { background: rgba(5, 130, 202, 0.55); }
 /* Small entrance every time ANY of these menu panels opens (Classic/Custom,
    Custom Settings, Remote Match's 3 sub-screens, the connect gate) — one
@@ -1790,8 +2059,8 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* Gold is light enough that this panel's default white-ish text (title,
    icon, and anything unstyled that just inherits body's ink) reads poorly
    on it — same dark-ink swap as the mode-select tile itself (see
-   #modeOverlay .half.e above). .mode-passplay's light blue keeps the
-   default white fine, so only .mode-remote needs an override.
+   #modeOverlay .half.e above). .mode-hockey's light blue keeps the
+   default white fine, so only .mode-curling needs an override.
    Redefining --ink-dim locally (not just setting `color`) matters because
    var() references re-resolve against it live — .config-lobby-content p and
    .config-label both read var(--ink-dim) directly, so this alone fixes them
@@ -1799,11 +2068,18 @@ button:disabled { opacity: 0.35; cursor: default; }
    already-resolved value, which is why literal `color: #fff` spots
    (.config-mode-title, .config-mode-icon svg, .config-lobby-content h2)
    still need their own explicit override below. */
-.config-panel.mode-remote { color: var(--bg-deep); --ink-dim: rgba(11,31,42,0.7); }
-.config-panel.mode-remote .config-mode-title,
-.config-panel.mode-remote .config-mode-icon svg,
-.config-panel.mode-remote .config-lobby-content h2,
-.config-panel.mode-remote .config-back { color: var(--bg-deep); }
+.config-panel.mode-curling { color: var(--bg-deep); --ink-dim: rgba(11,31,42,0.7); }
+.config-panel.mode-curling .config-mode-title,
+.config-panel.mode-curling .config-mode-icon svg,
+.config-panel.mode-curling .config-lobby-content h2,
+.config-panel.mode-curling .config-back { color: var(--bg-deep); }
+/* Same dark-ink swap for Classic/Custom's own two preset buttons (also
+   literal color:#fff, same reasoning as above) — Create/Join get their own
+   rule further down since they're .bigbtn, not .config-preset-btn (see
+   conversation: these went unfixed while everything else on this panel
+   already got the gold-vs-blue treatment). */
+.config-panel.mode-curling .config-preset-name { color: var(--bg-deep); }
+.config-panel.mode-curling .config-preset-sub { color: rgba(11,31,42,0.75); }
 /* Symmetric side padding reserves the exit button's own footprint
    (top-right, see .config-back below) on both sides, so centering the
    title+icon within this narrower box keeps it visually centered in the
@@ -2063,7 +2339,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   max-width: 380px; border-radius: 24px;
   /* Nimiq Green (--nimiq-gold in the official kit is the *other* tinted
      panel — this is Replay's own tile color, #modeOverlay .half.d), same
-     0.55 wash convention as .config-panel.mode-passplay/.mode-remote. */
+     0.55 wash convention as .config-panel.mode-hockey/.mode-curling. */
   background: rgba(33, 188, 165, 0.55);
   /* No border by default (was a dashed drop-zone outline — read as a
      scissor-cut edge against the new tinted background, and none of the
@@ -2073,7 +2349,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   border: 2px solid transparent;
   transition: border-color .2s ease, background .2s ease;
   /* Green is light enough to fail white-text contrast, same issue Gold had
-     on .config-panel.mode-remote (see that rule's own comment) — dark ink
+     on .config-panel.mode-curling (see that rule's own comment) — dark ink
      instead. --ink-dim redefined locally (not just `color`) so .sub and
      #replayUploadStatus, which read var(--ink-dim) directly, pick it up too. */
   color: var(--bg-deep);
@@ -2081,7 +2357,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 /* .config-back/.config-mode-title/.config-mode-icon svg all have their own
    literal color:#fff (not a var), so each needs the same explicit override
-   .config-panel.mode-remote gives them. */
+   .config-panel.mode-curling gives them. */
 #replayUploadBox .config-back,
 #replayUploadBox .config-mode-title,
 #replayUploadBox .config-mode-icon svg { color: var(--bg-deep); }

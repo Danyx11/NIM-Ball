@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -116,6 +116,13 @@
           <button class="nav-item" id="navLeague" type="button">League</button>
           <button class="nav-item" id="navReplay" type="button">Replay</button>
         </div>
+        <!-- Mobile-only scroll thumb (see style.css's .mobile-layout
+             .nav-scroll-pill + main.js's updateNavScrollPill) — a real
+             element instead of native scrollbar styling since iOS Safari
+             ignores ::-webkit-scrollbar entirely; shown/sized/positioned by
+             JS only when this section is open AND its own item list
+             overflows its max-height. -->
+        <div class="nav-scroll-pill" aria-hidden="true"></div>
       </div>
       <div class="nav-section">
         <div class="nav-label" role="button" tabindex="0" aria-expanded="false">
@@ -127,7 +134,9 @@
           <button class="nav-item" id="navHowTo" type="button">How to</button>
           <button class="nav-item" id="navAbout" type="button">About</button>
           <button class="nav-item" id="navPartnership" type="button">Partnership</button>
+          <button class="nav-item" id="navNimiq" type="button">Nimiq</button>
         </div>
+        <div class="nav-scroll-pill" aria-hidden="true"></div>
       </div>
     </nav>
     <!-- Nimiq wallet identity pill: real "nq-login" glyph from @nimiq/style's
@@ -246,14 +255,29 @@
   <div id="stage-wrap">
     <canvas id="stage" width="3312" height="1896"></canvas>
     <div id="toolbar-top" class="hidden">
+      <!-- #mobileController state icons for chat/sound (see style.css's
+           .mc-icon-overlay/.mc-icon-backdrop rules and main.js/game.js for
+           the toggling) — replaced an earlier pressed+darkened treatment,
+           per explicit request, with real 2-state vector icons instead:
+           chat gets a green fill over the existing baked outline once
+           muted — default/resting state is off (baked look: plain outline,
+           no fill, needs no overlay of its own); sound gets a white backdrop (blots out the
+           baked speaker+bar glyph, which is otherwise always drawn muted
+           regardless of actual state) plus a fresh vector glyph swapped
+           for on/off, since both states needed to be real vector icons,
+           not one borrowed from the baked art. -->
       <button class="tbtn" id="tbtn-sound" type="button" aria-label="Son">
         <img class="tbtn-base" id="tbtn-sound-img" alt=""><img class="tbtn-cap" id="tbtn-sound-cap" alt="">
         <div class="tbtn-muted-slash" id="tbtn-sound-slash"></div>
+        <div class="mc-icon-backdrop mc-sound-anchor"></div>
+        <svg class="mc-icon-overlay mc-sound-anchor" id="tbtn-sound-on-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#3a3a3a" d="M4 9v6h4l5 4V5L8 9H4z"/></svg>
+        <svg class="mc-icon-overlay mc-sound-anchor" id="tbtn-sound-off-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#3a3a3a" d="M4 9v6h4l5 4V5L8 9H4z"/><line x1="3" y1="20" x2="14" y2="4" stroke="#3a3a3a" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
       <div class="tbtn-group">
         <button class="tbtn" id="tbtn-chat" type="button" aria-label="Chat">
           <img class="tbtn-base" id="tbtn-chat-img" alt=""><img class="tbtn-cap" id="tbtn-chat-cap" alt="">
           <div class="tbtn-muted-slash" id="tbtn-chat-slash"></div>
+          <svg class="mc-icon-overlay mc-chat-anchor hidden" id="tbtn-chat-on-icon" viewBox="0 0 24 24" aria-hidden="true"><polygon fill="#c2e8f2" points="22.00,10.13 22.02,11.20 22.01,12.30 21.57,13.30 20.82,14.14 20.42,15.10 19.60,15.78 18.78,16.40 17.98,16.98 17.23,17.58 16.38,18.04 15.50,18.40 14.52,18.43 13.58,18.43 12.73,18.81 11.82,18.86 10.91,18.81 9.97,18.83 9.12,18.43 8.27,18.10 7.25,18.04 1.66,22.60 3.85,15.92 3.07,15.18 2.59,14.24 2.22,13.25 1.79,12.26 1.46,11.22 1.40,10.13 1.46,9.04 1.79,8.00 2.22,7.01 2.59,6.02 3.42,5.28 3.85,4.34 4.85,3.86 5.44,3.04 6.40,2.68 7.25,2.22 8.27,2.15 9.12,1.83 10.05,1.83 10.91,1.45 11.82,1.40 12.73,1.45 13.58,1.83 14.52,1.83 15.50,1.86 16.38,2.22 17.23,2.68 18.20,3.04 18.78,3.86 19.60,4.48 20.42,5.16 21.19,5.96 21.57,6.96 22.01,7.96 22.02,9.06"/></svg>
         </button>
         <button class="tbtn" id="tbtn-exit" type="button" aria-label="Quitter">
           <img class="tbtn-base" id="tbtn-exit-img" alt=""><img class="tbtn-cap" id="tbtn-exit-cap" alt="">
@@ -264,12 +288,14 @@
       <button class="tbtn" id="tbtn-sweep" type="button" aria-label="Balai">
         <img class="tbtn-base" id="tbtn-sweep-img" alt=""><img class="tbtn-cap" id="tbtn-sweep-cap" alt="">
         <div class="tbtn-used-cross" id="tbtn-sweep-cross"></div>
+        <div class="mc-gray-overlay hidden" id="tbtn-sweep-gray"></div>
       </button>
       <button class="tbtn" id="tbtn-play" type="button" aria-label="Play">
         <img class="tbtn-base" id="tbtn-play-img" alt=""><img class="tbtn-cap" id="tbtn-play-cap" alt="">
       </button>
       <button class="tbtn" id="tbtn-power" type="button" aria-label="Power">
         <img class="tbtn-base" id="tbtn-power-img" alt=""><img class="tbtn-cap" id="tbtn-power-cap" alt="">
+        <div class="mc-gray-overlay hidden" id="tbtn-power-gray"></div>
       </button>
     </div>
     <div id="overlay" class="hidden"><div id="ovContent"></div></div>
@@ -311,33 +337,39 @@
          every tile gets a share of the full card on any aspect ratio,
          instead of being squeezed into a slim docked strip that could clip
          tiles off-screen on short/narrow phones. Duel LAN dropped from the
-         picker (still reachable via the `?duel` magic link, see main.js). -->
+         picker (still reachable via the `?duel` magic link, see main.js).
+         Top row is now a "vibe" pick (Hockey/Curling, see conversation)
+         instead of P&P/Remote directly — those two moved one level deeper,
+         into #vibeSubOverlay's own #vibeDrawer below, reached via
+         #modeHockey/#modeCurling (main.js's showVibeDrawer). AI Training/
+         Replay (bottom row) are untouched — only the top two tiles gained a
+         layer. -->
     <div id="modeOverlay" class="team-select hidden">
       <div id="modeOverlayBg"></div>
       <div class="mode-select-scrim"></div>
-      <div class="mode-drawer">
-        <div class="half a" id="modeLocal">
-          <svg class="mode-icon" viewBox="0 0 64 48" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="21" cy="10" r="6"/>
-            <path d="M13 26v-1a8 8 0 0 1 16 0v1"/>
-            <circle cx="43" cy="10" r="6"/>
-            <path d="M35 26v-1a8 8 0 0 1 16 0v1"/>
-            <path d="M18 28h28l10 16H8z"/>
-            <circle cx="46" cy="34" r="1.9" fill="currentColor" stroke="none"/>
+      <div class="mode-drawer" id="modeDrawer">
+        <div class="half a" id="modeHockey">
+          <!-- Official Nimiq mark, hexagon dropped (see conversation) — same
+               3-line + hollow-pill geometry as #loadingOverlay's own logo
+               SVG above (literal coordinates copied from there, just the
+               hex outline path omitted), not a redrawn approximation. -->
+          <svg class="mode-icon" viewBox="40 210 350 130" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true">
+            <line x1="60" y1="250" x2="177" y2="250" stroke-width="10"/>
+            <line x1="82" y1="278" x2="169" y2="278" stroke-width="9"/>
+            <line x1="108" y1="307" x2="184" y2="307" stroke-width="9"/>
+            <rect x="189" y="231" width="182" height="86" rx="43" ry="43" stroke-width="15"/>
           </svg>
-          <div class="tag">PASS & PLAY</div>
-          <div class="sub">Play 1v1 on the same device</div>
+          <div class="tag">NIMICURL</div>
+          <div class="sub">score a goal</div>
         </div>
-        <div class="half e" id="modeMatch">
-          <svg class="mode-icon" viewBox="0 0 64 40" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="4" y="14" width="22" height="13" rx="4"/>
-            <circle cx="20" cy="20.5" r="1.9" fill="currentColor" stroke="none"/>
-            <rect x="38" y="14" width="22" height="13" rx="4"/>
-            <circle cx="44" cy="20.5" r="1.9" fill="currentColor" stroke="none"/>
-            <path d="M22 10Q32 -1 42 10" stroke-dasharray="0.1 7.64"/>
+        <div class="half e" id="modeCurling">
+          <svg class="mode-icon" viewBox="0 0 64 48" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="32" cy="24" r="18"/>
+            <circle cx="32" cy="24" r="11"/>
+            <circle cx="32" cy="24" r="4" fill="currentColor" stroke="none"/>
           </svg>
-          <div class="tag">REMOTE MATCH</div>
-          <div class="sub">Play 1v1 on separate devices</div>
+          <div class="tag">PURE CURLING</div>
+          <div class="sub">get closest</div>
         </div>
         <div class="half c" id="modeSolo">
           <svg class="mode-icon mode-icon-tall" viewBox="0 0 48 56" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -367,6 +399,65 @@
           </svg>
           <div class="tag">REPLAY</div>
           <div class="sub">Watch a match by uploading its ticket</div>
+        </div>
+      </div>
+    </div>
+    <!-- Vibe sub-drawer: P&P/Remote picker for whichever vibe was just
+         chosen above (#modeHockey/#modeCurling) — same sibling-of-
+         #modeOverlay pattern as #classicCustomOverlay etc. below (shown
+         while #modeOverlay itself stays visible for its bg/scrim, with only
+         #modeDrawer's own tile grid hidden, see main.js's showVibeDrawer).
+         #vibeDrawer reuses .mode-drawer's own tile grid/animation CSS
+         (single row here, not 2x2) so these two tiles keep the exact same
+         visual language as the top-level ones; its two tiles are #modeLocal/
+         #modeMatch themselves (same ids, same click handlers as before this
+         feature, just relocated one level deeper — see conversation) so
+         nothing else downstream (Classic/Custom, Match réseau, etc.) had to
+         change shape. Both tiles are re-tinted to the ACTIVE VIBE's single
+         color here (blue for Hockey, gold for Curling — #vibeSubOverlay.
+         mode-hockey/.mode-curling in style.css), overriding their old fixed
+         per-slot a/e brand colors, since under a given vibe both P&P and
+         Remote should read as "the same game", not two different games. -->
+    <div id="vibeSubOverlay" class="hidden">
+      <div class="mode-drawer" id="vibeDrawer">
+        <div class="half a" id="modeLocal">
+          <!-- Vibe logo, not a separate external header anymore (see
+               conversation) — main.js's showVibeDrawer clones the active
+               vibe's own tile icon in here, pinned to this tile's own top
+               (position:absolute, see style.css) rather than sitting in the
+               tile's normal vertically-centered content flow. -->
+          <span class="tile-vibe-logo" id="modeLocalVibeLogo" aria-hidden="true"></span>
+          <svg class="mode-icon" viewBox="0 0 64 48" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="21" cy="10" r="6"/>
+            <path d="M13 26v-1a8 8 0 0 1 16 0v1"/>
+            <circle cx="43" cy="10" r="6"/>
+            <path d="M35 26v-1a8 8 0 0 1 16 0v1"/>
+            <path d="M18 28h28l10 16H8z"/>
+            <circle cx="46" cy="34" r="1.9" fill="currentColor" stroke="none"/>
+          </svg>
+          <div class="tag">PASS & PLAY</div>
+          <div class="sub">Play 1v1 on the same device</div>
+        </div>
+        <div class="half e" id="modeMatch">
+          <!-- Back button lives here now, not floating above both tiles (see
+               conversation) — one button for the whole screen, just visually
+               anchored to this tile's own top-right corner (position:
+               absolute within #modeMatch, see style.css). main.js's click
+               handler stops propagation so it doesn't also trigger
+               #modeMatch's own "go to Remote Match" click. -->
+          <button class="config-back" id="vibeBackBtn" type="button" aria-label="Back">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+          </button>
+          <span class="tile-vibe-logo" id="modeMatchVibeLogo" aria-hidden="true"></span>
+          <svg class="mode-icon" viewBox="0 0 64 40" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="4" y="14" width="22" height="13" rx="4"/>
+            <circle cx="20" cy="20.5" r="1.9" fill="currentColor" stroke="none"/>
+            <rect x="38" y="14" width="22" height="13" rx="4"/>
+            <circle cx="44" cy="20.5" r="1.9" fill="currentColor" stroke="none"/>
+            <path d="M22 10Q32 -1 42 10" stroke-dasharray="0.1 7.64"/>
+          </svg>
+          <div class="tag">REMOTE MATCH</div>
+          <div class="sub">Play 1v1 on separate devices</div>
         </div>
       </div>
     </div>
@@ -429,7 +520,6 @@
       </button>
       <div class="config-header">
         <span class="config-mode-icon" id="ccModeIcon"></span>
-        <span class="config-mode-title" id="ccModeTitle"></span>
       </div>
       <div class="config-presets">
         <button class="config-preset-btn" id="classicBtn" type="button">
@@ -446,7 +536,6 @@
       </button>
       <div class="config-header">
         <span class="config-mode-icon" id="csModeIcon"></span>
-        <span class="config-mode-title" id="csModeTitle"></span>
       </div>
       <div class="config-rows">
         <div class="config-row">
@@ -489,18 +578,39 @@
     <!-- Remote Match's own 3 sub-screens (choice, generated code, code to
          fill in — see main.js's showNetPanel) — same visual language as the
          two screens above (tile-colored panel, centered icon+title header,
-         exit-styled back arrow), always the Remote Match tint since this
-         whole overlay is Remote-Match-only. Its Back always returns straight
-         to mode-select (see conversation), unlike the two screens above. -->
-    <div id="matchNetworkOverlay" class="config-panel mode-remote hidden">
+         exit-styled back arrow). Tint is no longer fixed gold: it now
+         follows the active vibe (mode-hockey/mode-curling, applied in
+         showNetPanel) since Remote Match lives under either vibe now, not
+         just its own thing (see conversation). Its Back returns to the vibe
+         sub-drawer (#vibeSubOverlay), one level up, not straight to
+         mode-select. -->
+    <div id="matchNetworkOverlay" class="config-panel hidden">
       <button class="config-back" id="matchNetworkBackBtn" type="button" aria-label="Back">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
       </button>
       <div class="config-header">
         <span class="config-mode-icon" id="matchNetworkModeIcon"></span>
-        <span class="config-mode-title">REMOTE MATCH</span>
       </div>
       <div id="matchNetworkContent" class="config-lobby-content"></div>
+    </div>
+    <!-- Curling's "not plugged in yet" placeholder (see conversation) — its
+         own small .config-panel rather than reusing #overlay/showLobby:
+         #overlay lives inside #game-card, which desktop's menuHost move
+         (main.js) deliberately keeps BEHIND #menuStage (see #menuStage's own
+         comment in style.css) while the whole point of this screen is to
+         show up on top of #modeOverlay's still-visible backdrop, same as
+         every other pre-match menu panel — a .config-panel already gets
+         moved to #menuStage alongside them, so it doesn't fight that
+         stacking. Reached from both P&P and Remote's curling paths (see
+         main.js's showComingSoonScreen), so its header is filled in via the
+         same fillModeHeader-style logic, not fixed text like Remote Match's
+         panel above. -->
+    <div id="comingSoonOverlay" class="config-panel hidden">
+      <div class="config-header">
+        <span class="config-mode-icon" id="csoIcon"></span>
+      </div>
+      <p class="sub">Coming soon — this vibe isn't plugged in yet.</p>
+      <button class="bigbtn" id="csoOkBtn">OK</button>
     </div>
     <div id="startOverlay" class="team-select hidden">
       <div class="half a" id="halfA">

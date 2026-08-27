@@ -134,7 +134,7 @@ export function preloadCoreAssets(mobile = false) {
 }
 
 export function startGame(opts = {}) {
-  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, matchConfig: rawMatchConfig = null } = opts;
+  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, matchConfig: rawMatchConfig = null, vibe = 'hockey' } = opts;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
   // default preset; Custom is the same shape with different values. Every
   // caller not yet wired to the Classic/Custom flow (vs AI, replay) simply
@@ -155,8 +155,11 @@ export function startGame(opts = {}) {
   // tile picker) already use — reused here so the in-match +1 goal panel's
   // box (showGoalPanel below) is colored like the mode it's actually being
   // played in, instead of the plain dark scrim. Identicon/score/address
-  // content is untouched — only the box behind them changes.
-  const matchModeTint = isReplay ? 'replay' : aiTeam ? 'solo' : net ? 'remote' : 'passplay';
+  // content is untouched — only the box behind them changes. P&P and Remote
+  // no longer get their own separate tint (passplay/remote) — both now tint
+  // by `vibe` (hockey/curling, see main.js's activeVibe), since Remote Match
+  // lives under either vibe rather than being its own thing.
+  const matchModeTint = isReplay ? 'replay' : aiTeam ? 'solo' : (vibe === 'curling' ? 'curling' : 'hockey');
   let replayCursor = { pointIdx: 0, mancheIdx: 0 };
   let replayPlaying = false;
   // Set by onGoal() the instant a point (not the whole replay) finishes,
@@ -2034,6 +2037,14 @@ export function startGame(opts = {}) {
   const chatBtn = document.getElementById('tbtn-chat');
   const chatBtnCap = document.getElementById('tbtn-chat-cap');
   const chatBtnSlash = document.getElementById('tbtn-chat-slash');
+  // #mobileController's own state icon (see index.html's comment on
+  // #tbtn-sound and .mc-icon-overlay in style.css) — a green fill over the
+  // existing baked outline once chat IS muted (starts hidden in the markup:
+  // resting/default state is off); desktop keeps the slash, mobile hides it
+  // and uses this instead, both driven off the same chatMuted state. No
+  // "off" icon needed — the baked art's own resting look (plain outline, no
+  // fill) already reads as off.
+  const chatBtnOnIcon = document.getElementById('tbtn-chat-on-icon');
   let chatMuted = false;
   let chatLastSentMuted = false; // what the opponent currently believes, as far as we've told them
   function pressChatBtn() {
@@ -2042,16 +2053,25 @@ export function startGame(opts = {}) {
     chatBtnCap.classList.add('pressed');
     audio.play('button');
   }
-  if (net) {
-    chatOppForm.classList.add('chat-window-form-hidden');
-    chatBtn.addEventListener('click', () => {
-      pressChatBtn();
-      chatMuted = !chatMuted;
-      chatBtnSlash.classList.toggle('show', chatMuted);
+  // The button itself (icon swap) always responds, even without a chat
+  // channel to actually mute (local pass-and-play/solo vs AI) — was gated
+  // entirely behind `if (net)` before, which made it look dead/unresponsive
+  // outside net play. The net-specific effects (message, compose sync)
+  // still only make sense with an actual opponent, so those stay gated
+  // inside.
+  chatBtn.addEventListener('click', () => {
+    pressChatBtn();
+    chatMuted = !chatMuted;
+    chatBtnSlash.classList.toggle('show', chatMuted);
+    chatBtnOnIcon.classList.toggle('hidden', !chatMuted);
+    if (net) {
       showChatMessage(myTeam, chatMuted ? 'Chat OFF' : '');
       chatOwnInput.value = '';
       syncChatCompose();
-    }, { signal });
+    }
+  }, { signal });
+  if (net) {
+    chatOppForm.classList.add('chat-window-form-hidden');
     chatOwnEmojiBtn.addEventListener('click', () => {
       chatOwnEmojiPicker.classList.toggle('hidden');
     }, { signal });
@@ -3896,6 +3916,9 @@ export function startGame(opts = {}) {
   const sweepBtn = document.getElementById('tbtn-sweep');
   const sweepBtnCap = document.getElementById('tbtn-sweep-cap');
   const sweepBtnCross = document.getElementById('tbtn-sweep-cross');
+  // #mobileController's own "locked for this point" look (see
+  // .mc-gray-overlay in style.css) — same `used` flag as the cross above.
+  const sweepBtnGray = document.getElementById('tbtn-sweep-gray');
   // Factored out so the "ice" HUD rock (see ROCK_ZONES/onPointerDown below)
   // can trigger the exact same logic as the old toolbar button.
   function triggerSweep() {
@@ -3928,6 +3951,16 @@ export function startGame(opts = {}) {
     // that once a real aim phase picks a specific team again.
     const used = team ? sw.used : (sweep.A.used || sweep.B.used);
     sweepBtnCross.classList.toggle('show', used);
+    // Normal by default, grays the instant it's armed (one click, same feel
+    // as energy's toggle) and then simply stays gray once actually played —
+    // `active` alone already covers that (triggerSweep's own `used` guard
+    // means it can never flip back to false after commit), `used` is only
+    // ORed in for the same reason the cross needs it above: to keep reading
+    // correctly through the stretch where aimingTeam() is null. No separate
+    // cross needed on top on mobile (see #mobileController .tbtn-used-cross
+    // in style.css) — the gray alone is the whole story there.
+    const armed = team ? (sw && sw.active) : (sweep.A.active || sweep.B.active);
+    sweepBtnGray.classList.toggle('hidden', !(armed || used));
   }
 
   // Splits the entity into two clipped halves along the line through its own
@@ -5493,6 +5526,7 @@ export function startGame(opts = {}) {
     // this into it, "Play Again" reuses this instance's real chatMuted value
     // instead of resetting it, and would otherwise fall out of sync with it).
     chatBtnSlash.classList.remove('show');
+    chatBtnOnIcon.classList.add('hidden');
     // Visual ready-state left on #startOverlay's tiles (see halfA/halfB
     // above) would otherwise show as already-ready the next time a local
     // match is picked from mode-select.
