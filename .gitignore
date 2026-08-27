@@ -159,6 +159,7 @@ vite.config.ts.timestamp-*
 # Local scratch labs (never pushed) — see CLAUDE.md for the lab-to-main workflow
 /design-lab/
 /physics-lab/
+/curling-lab/
 /audio-lab/
 
 # Raw/candidate AI-generation output (scripts/flux_*.py, bake_stones.py etc.)

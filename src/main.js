@@ -187,7 +187,7 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
   // Mobile keeps its existing behavior untouched (still #game-card children)
   // — #menuStage isn't part of mobile's layout yet.
   const menuHost = IS_MOBILE ? gameCard : document.getElementById('menuStage');
-  ['modeOverlay', 'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'replayUploadOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'replayUploadOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -291,7 +291,14 @@ TOOLBAR_STUB_BUTTONS.forEach((id) => {
 const POWER_CAP_SRC = { on: `${ASSET_BASE}ui/btn-power-cap.png`, off: `${ASSET_BASE}ui/btn-power-cap-off.png` };
 const powerBtn = document.getElementById('tbtn-power');
 const powerCap = document.getElementById('tbtn-power-cap');
-function syncPowerButton() { powerCap.src = isBasicLaser() ? POWER_CAP_SRC.off : POWER_CAP_SRC.on; }
+// #mobileController's own on/off look (see .mc-gray-overlay in style.css) —
+// same isBasicLaser() state as the cap-src swap below: gray while off.
+const powerBtnGray = document.getElementById('tbtn-power-gray');
+function syncPowerButton() {
+  const off = isBasicLaser();
+  powerCap.src = off ? POWER_CAP_SRC.off : POWER_CAP_SRC.on;
+  powerBtnGray.classList.toggle('hidden', !off);
+}
 syncPowerButton();
 // Factored out so the "laser" HUD rock (see startGame's onRockPower option,
 // wired to game.js's own canvas click hit-testing) can trigger the exact
@@ -312,13 +319,30 @@ powerBtn.addEventListener('click', triggerPower);
 const soundBtn = document.getElementById('tbtn-sound');
 const soundCap = document.getElementById('tbtn-sound-cap');
 const soundSlash = document.getElementById('tbtn-sound-slash');
-function syncSoundButton() { soundSlash.classList.toggle('show', audio.isMuted()); }
+// #mobileController's own state icons (see index.html's comment on
+// #tbtn-sound and .mc-icon-overlay/.mc-icon-backdrop in style.css) —
+// desktop keeps the slash, mobile hides it and swaps these two real vector
+// icons instead, both driven off the same isMuted() state.
+const soundOnIcon = document.getElementById('tbtn-sound-on-icon');
+const soundOffIcon = document.getElementById('tbtn-sound-off-icon');
+function syncSoundButton() {
+  const muted = audio.isMuted();
+  soundSlash.classList.toggle('show', muted);
+  soundOnIcon.classList.toggle('hidden', muted);
+  soundOffIcon.classList.toggle('hidden', !muted);
+}
 syncSoundButton();
 // Factored out so the "sound" HUD rock (see startGame's onRockSound option)
 // can trigger the exact same logic as the old toolbar button.
 function triggerSound() {
-  playToolbarClick(soundCap);
+  // Order matters: audio.play() (inside playToolbarClick) checks the
+  // *current* muted flag and no-ops silently if it's already true (see
+  // audio.js) — flipping the mute state first, then playing the click,
+  // means muting itself stays silent (you're turning sound off, hearing a
+  // click would contradict that) while unmuting still gets its own
+  // confirmation click (audio is back on by the time it plays).
   audio.setMuted(!audio.isMuted());
+  playToolbarClick(soundCap);
   syncSoundButton();
 }
 soundBtn.addEventListener('click', triggerSound);
@@ -518,7 +542,54 @@ const connectBtn = document.getElementById('connectBtn');
 const connectBtnLabel = document.getElementById('connectBtnLabel');
 const connectBtnStatus = document.getElementById('connectBtnStatus');
 const connectAvatar = document.getElementById('connectAvatar');
+const connectText = document.querySelector('.connect-text');
 const sidebar = document.getElementById('sidebar');
+// Spins .connect-text 500ms round-trip (rotateX, style.css's perspective on
+// .nq-connect-btn gives it real depth) when the menu <-> in-match state
+// actually flips — see conversation. Content is swapped by `applyChanges`
+// exactly at the edge-on 90deg midpoint (invisible either way), then the
+// column rotates back in already showing the new state, so there's never a
+// frame of upside-down/mirrored text. `flipToken` guards against a second
+// flip landing mid-transition (e.g. a very fast handoff) firing its
+// `applyChanges` out of order or twice.
+// Two mobile-only bug fixes baked in here, both found via an iOS Safari
+// report (whole pill — avatar included — flashing fully transparent on the
+// very first tap during a live match, every time, gone again on the next
+// unrelated tap):
+// 1. style.css's `perspective` now lives on a `.flip-perspective` class
+//    (added/removed right around this function's own run, see below)
+//    instead of being permanently set on .nq-connect-btn — a static 3D
+//    context sitting there for the whole match turned out to be the actual
+//    trigger, not anything about the animation itself: this only ever runs
+//    once, at match start/end, so a tap seconds later mid-match was never
+//    "mid-flip" to begin with, yet still vanished, because perspective was
+//    still statically present. Scoping it to the ~500ms this function
+//    actually runs means a normal in-match tap now hits a plain 2D pill
+//    with no 3D context for iOS to drop.
+// 2. Driven by setTimeout matching style.css's .25s half-duration, not a
+//    `transitionend` listener, which is known to be unreliable for 3D
+//    transforms on some mobile WebKit builds.
+let flipToken = 0;
+function flipConnectText(applyChanges) {
+  const token = ++flipToken;
+  connectBtn.classList.add('flip-perspective');
+  connectText.style.transform = 'rotateX(90deg)';
+  setTimeout(() => {
+    if (token !== flipToken) return;
+    applyChanges();
+    connectText.style.transition = 'none';
+    connectText.style.transform = 'rotateX(-90deg)';
+    void connectText.offsetHeight;
+    connectText.style.transition = '';
+    requestAnimationFrame(() => {
+      if (token !== flipToken) return;
+      connectText.style.transform = 'rotateX(0deg)';
+      setTimeout(() => {
+        if (token === flipToken) connectBtn.classList.remove('flip-perspective');
+      }, 260);
+    });
+  }, 250);
+}
 // Mobile-only nav accordion (see style.css's .mobile-layout .nav-section) —
 // desktop's .nav-label click never does anything visible there (.open has no
 // desktop CSS effect), so this listener is just inert weight on desktop, not
@@ -527,9 +598,33 @@ const sidebar = document.getElementById('sidebar');
 // first, so at most one is ever expanded — plain CSS siblings-only selectors
 // (~, +) can't reach "every other section" from one label, hence doing the
 // accordion exclusivity here instead.
+// Scroll thumb for an open .nav-section-items that overflows its own
+// max-height (see style.css's .mobile-layout .nav-scroll-pill) — a real
+// element rather than native scrollbar styling, since iOS Safari doesn't
+// support ::-webkit-scrollbar at all. Recomputed on scroll/resize and once
+// the open/close max-height transition actually finishes — reading
+// scrollHeight/clientHeight mid-transition would give a wrong, still-
+// animating size.
+function updateNavScrollPill(section) {
+  const items = section.querySelector('.nav-section-items');
+  const pill = section.querySelector('.nav-scroll-pill');
+  if (!items || !pill) return;
+  const overflow = items.scrollHeight - items.clientHeight;
+  if (!section.classList.contains('open') || overflow <= 1) {
+    pill.classList.remove('visible');
+    return;
+  }
+  const trackHeight = items.clientHeight;
+  const thumbHeight = Math.max(24, trackHeight * (items.clientHeight / items.scrollHeight));
+  const thumbTop = items.offsetTop + (items.scrollTop / overflow) * (trackHeight - thumbHeight);
+  pill.style.height = `${thumbHeight}px`;
+  pill.style.top = `${thumbTop}px`;
+  pill.classList.add('visible');
+}
 const navSections = [...document.querySelectorAll('.nav-section')];
 navSections.forEach((section) => {
   const label = section.querySelector('.nav-label');
+  const items = section.querySelector('.nav-section-items');
   label.addEventListener('click', () => {
     const wasOpen = section.classList.contains('open');
     navSections.forEach((s) => {
@@ -540,8 +635,12 @@ navSections.forEach((section) => {
       section.classList.add('open');
       label.setAttribute('aria-expanded', 'true');
     }
+    navSections.forEach(updateNavScrollPill);
   });
+  items.addEventListener('scroll', () => updateNavScrollPill(section));
+  items.addEventListener('transitionend', (e) => { if (e.propertyName === 'max-height') updateNavScrollPill(section); });
 });
+window.addEventListener('resize', () => navSections.forEach(updateNavScrollPill));
 // address -> "abc…xyz" (first/last 3 chars), the sidebar pill's compact
 // format for the status line (both platforms now — mobile used to keep its
 // own plain `${slice(0,9)}…`/"Connected" pairing here, predating the
@@ -559,25 +658,67 @@ function shortenAddressCompact(address) {
 // avoid "Guest" reading as already-chosen while the gate was still open —
 // reversed since the pill is now expected to always be visible, gate open
 // or not.
-function syncIdentityPill() {
+// During a live match (activeStopGame set) the pill is pure display, never a
+// trigger (see its own click handler below, already gated on this same
+// flag) — so it never shows an actionable "Claim a handle"/"Connect wallet"
+// line then either, just whatever identity is already resolved: the handle
+// (+ address below it) if one's claimed, otherwise a single line — just the
+// address, or just "Guest" — hiding the other line outright (see style.css's
+// #connectBtnLabel.hidden/.connect-status.hidden) rather than merely
+// emptying it, so .connect-text shrinks to it and it centers against the
+// avatar for free via .nq-connect-btn's own align-items:center.
+function applyIdentityPillState() {
+  const inMatch = !!activeStopGame;
   connectBtn.classList.toggle('connected', !!hubAddress);
   connectBtnLabel.classList.remove('claim-cta');
+  connectBtnLabel.classList.remove('hidden');
   connectBtnStatus.classList.remove('mono');
+  connectBtnStatus.classList.remove('hidden');
   connectAvatar.classList.toggle('has-identicon', !!hubAddress);
   connectAvatar.style.backgroundImage = '';
   if (!hubAddress) {
     connectBtnLabel.textContent = 'Guest';
-    connectBtnStatus.textContent = 'Connect wallet';
+    if (inMatch) {
+      connectBtnStatus.textContent = '';
+      connectBtnStatus.classList.add('hidden');
+    } else {
+      connectBtnStatus.textContent = 'Connect wallet';
+    }
     return;
   }
   getIdenticonPngDataUrl(hubAddress).then((url) => {
     if (hubAddress) connectAvatar.style.backgroundImage = `url(${url})`;
   });
   const handle = getHandle(hubAddress);
-  connectBtnLabel.textContent = handle || 'Claim a handle';
-  connectBtnLabel.classList.toggle('claim-cta', !handle);
   connectBtnStatus.textContent = shortenAddressCompact(hubAddress);
   connectBtnStatus.classList.add('mono');
+  if (handle) {
+    connectBtnLabel.textContent = handle;
+  } else if (inMatch) {
+    connectBtnLabel.textContent = '';
+    connectBtnLabel.classList.add('hidden');
+  } else {
+    connectBtnLabel.textContent = 'Claim a handle';
+    connectBtnLabel.classList.add('claim-cta');
+  }
+}
+// pillInMatch tracks the menu/in-match side of the pill's *last applied*
+// state, separately from every other reason syncIdentityPill() gets called
+// (claiming a handle, connecting/disconnecting, switching mode) — only an
+// actual menu <-> match flip should trigger flipConnectText; everything
+// else applies immediately, same as before this animation existed. null on
+// the very first call means "nothing applied yet", so that first paint is
+// instant too, not a flip out of nowhere on load.
+let pillInMatch = null;
+function syncIdentityPill() {
+  const inMatch = !!activeStopGame;
+  const changedMode = pillInMatch !== null && pillInMatch !== inMatch;
+  pillInMatch = inMatch;
+  if (changedMode) {
+    flipConnectText(applyIdentityPillState);
+  } else {
+    applyIdentityPillState();
+  }
 }
 syncIdentityPill();
 connectBtn.addEventListener('click', () => {
@@ -639,27 +780,105 @@ const modeOverlay = document.getElementById('modeOverlay');
 // arena backdrop (#modeOverlayBg + .mode-select-scrim) shows through their
 // own translucent panel, same as the mode tiles do; only the tiles
 // themselves need hiding underneath.
-const modeDrawer = modeOverlay.querySelector('.mode-drawer');
 // Reveals the tile grid — the staggered pop-in (see style.css's
 // .mode-drawer:not(.hidden) .half) is driven entirely by CSS off .hidden
 // itself, so it replays every time this is called: home screen handoff,
 // Classic/Custom's back arrow, returnToModeSelect, the connect gate, etc.
 function showModeDrawer() {
+  vibeSubOverlay.classList.add('hidden');
   modeDrawer.classList.remove('hidden');
   modeOverlay.classList.remove('hidden');
 }
-const modeLocal = document.getElementById('modeLocal');
-const modeMatch = document.getElementById('modeMatch');
+const modeDrawer = document.getElementById('modeDrawer');
+const modeHockey = document.getElementById('modeHockey');
+const modeCurling = document.getElementById('modeCurling');
 const modeSolo = document.getElementById('modeSolo');
 const modeReplay = document.getElementById('modeReplay');
 const startOverlay = document.getElementById('startOverlay');
 const overlay = document.getElementById('overlay');
 const ovContent = document.getElementById('ovContent');
 
-const OVERLAY_TINT_CLASSES = ['mode-passplay', 'mode-solo', 'mode-replay', 'mode-remote'];
+// ---- Vibe pick (Hockey/Curling, see conversation) — one level above P&P/
+// Remote now: #modeHockey/#modeCurling (the top row of #modeDrawer) open
+// #vibeSubOverlay's own 2-tile drawer (#modeLocal/#modeMatch, untouched)
+// instead of going straight into Classic/Custom. `activeVibe` drives every
+// downstream tint (Classic/Custom, Custom Settings, Remote Match's 3
+// screens, the exit-confirm dialog, the in-match +1 goal panel in game.js)
+// — always set before any of those screens is reachable, since they all
+// live behind #vibeSubOverlay now.
+let activeVibe = null;
+const vibeSubOverlay = document.getElementById('vibeSubOverlay');
+const vibeBackBtn = document.getElementById('vibeBackBtn');
+const modeLocal = document.getElementById('modeLocal');
+const modeMatch = document.getElementById('modeMatch');
+// Cloned into each of #modeLocal/#modeMatch's own top (.tile-vibe-logo, see
+// index.html) rather than a separate external header (see conversation) —
+// aria-hidden in the markup since each tile's own tag ("PASS & PLAY"/
+// "REMOTE MATCH") already gives screen readers a real name; this is a
+// purely decorative reinforcement, redundant to announce on both tiles.
+const modeLocalVibeLogo = document.getElementById('modeLocalVibeLogo');
+const modeMatchVibeLogo = document.getElementById('modeMatchVibeLogo');
+const VIBE_LABELS = { hockey: 'NimiCurl', curling: 'Pure Curling' };
+const VIBE_TILES = { hockey: modeHockey, curling: modeCurling };
+function vibeTintClass() { return activeVibe === 'curling' ? 'mode-curling' : 'mode-hockey'; }
+function showVibeDrawer(vibe) {
+  activeVibe = vibe;
+  const vibeIcon = VIBE_TILES[vibe].querySelector('.mode-icon');
+  modeLocalVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
+  modeMatchVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
+  vibeSubOverlay.classList.remove('mode-hockey', 'mode-curling');
+  vibeSubOverlay.classList.add(vibeTintClass());
+  modeDrawer.classList.add('hidden');
+  vibeSubOverlay.classList.remove('hidden');
+  modeOverlay.classList.remove('hidden');
+}
+modeHockey.addEventListener('click', () => { audio.play('button'); showVibeDrawer('hockey'); });
+modeCurling.addEventListener('click', () => { audio.play('button'); showVibeDrawer('curling'); });
+// Lives inside #modeMatch now (see index.html's own comment there) — without
+// stopPropagation this click would also bubble up into modeMatch's own
+// listener below and immediately jump into Remote Match right after going
+// back.
+vibeBackBtn.addEventListener('click', (e) => { e.stopPropagation(); audio.play('button'); showModeDrawer(); });
+
+// ---- Curling: tiles/menus are live (see conversation), the actual match
+// engine isn't plugged in yet — every path that would otherwise call
+// startGame()/hostMatch() lands here instead. Its own small .config-panel
+// (see index.html's #comingSoonOverlay comment) rather than showLobby/
+// #overlay, which desktop's menuHost move keeps behind #menuStage — this
+// needs to sit on top of #modeOverlay's still-visible backdrop like every
+// other pre-match menu panel.
+const comingSoonOverlay = document.getElementById('comingSoonOverlay');
+const csoIcon = document.getElementById('csoIcon');
+const csoOkBtn = document.getElementById('csoOkBtn');
+function showComingSoonScreen() {
+  // Defensive: reached from more than one screen (Classic/Custom's own
+  // launch callback, which already hides itself first — but also straight
+  // off Match réseau's "Rejoindre", which hasn't hidden matchNetworkOverlay
+  // yet) — hiding both here regardless of which path called in keeps
+  // returnToModeSelect() below from leaving a stale panel behind it.
+  classicCustomOverlay.classList.add('hidden');
+  hideNetPanel();
+  csoIcon.replaceChildren(VIBE_TILES[activeVibe].querySelector('.mode-icon').cloneNode(true));
+  csoIcon.setAttribute('aria-label', VIBE_LABELS[activeVibe]);
+  comingSoonOverlay.classList.remove('mode-hockey', 'mode-curling');
+  comingSoonOverlay.classList.add(vibeTintClass());
+  comingSoonOverlay.classList.remove('hidden');
+}
+csoOkBtn.addEventListener('click', () => {
+  audio.play('button');
+  comingSoonOverlay.classList.add('hidden');
+  returnToModeSelect();
+});
+
+const OVERLAY_TINT_CLASSES = ['mode-hockey', 'mode-curling', 'mode-solo', 'mode-replay'];
+// mode: 'passplay'/'remote' (tint follows activeVibe — hockey/curling), or
+// 'solo'/'replay' (fixed tint, untouched by the vibe system).
 function showLobby(html, mode = null) {
   overlay.classList.remove(...OVERLAY_TINT_CLASSES);
-  if (mode) overlay.classList.add(`mode-${mode}`);
+  let cls = null;
+  if (mode === 'passplay' || mode === 'remote') cls = vibeTintClass();
+  else if (mode === 'solo' || mode === 'replay') cls = `mode-${mode}`;
+  if (cls) overlay.classList.add(cls);
   overlay.classList.add('overlay-boxed');
   overlay.classList.remove('hidden');
   ovContent.innerHTML = html;
@@ -719,6 +938,7 @@ function showToolbar() {
 function hideMatchChrome() {
   activeStopGame = null;
   activeMatchMode = null;
+  syncIdentityPill();
   toolbarTop.classList.add('hidden');
   toolbarBottom.classList.add('hidden');
   mobileController.classList.add('hidden');
@@ -742,21 +962,20 @@ function returnToModeSelect() {
 const classicCustomOverlay = document.getElementById('classicCustomOverlay');
 const ccBackBtn = document.getElementById('ccBackBtn');
 const ccModeIcon = document.getElementById('ccModeIcon');
-const ccModeTitle = document.getElementById('ccModeTitle');
 const classicBtn = document.getElementById('classicBtn');
 const customBtn = document.getElementById('customBtn');
 const customSettingsOverlay = document.getElementById('customSettingsOverlay');
 const csModeIcon = document.getElementById('csModeIcon');
-const csModeTitle = document.getElementById('csModeTitle');
 const csBackBtn = document.getElementById('csBackBtn');
 const csResetBtn = document.getElementById('csResetBtn');
 const csSaveBtn = document.getElementById('csSaveBtn');
 const segControls = [...customSettingsOverlay.querySelectorAll('.seg-control')];
 // Remote Match's own 3 sub-screens (choice, generated code, code to fill in)
 // — same tile-colored/centered-header/exit-arrow language as the two
-// screens above, always the Remote Match tint (fixed in the markup, unlike
-// classicCustomOverlay/customSettingsOverlay which switch tint per mode)
-// since this whole overlay is Remote-Match-only.
+// screens above. Tint now follows the active vibe (set in showNetPanel,
+// same mode-hockey/mode-curling classes as classicCustomOverlay/
+// customSettingsOverlay below) rather than being fixed gold in the markup —
+// Remote Match lives under either vibe now, not just its own thing.
 const matchNetworkOverlay = document.getElementById('matchNetworkOverlay');
 const matchNetworkContent = document.getElementById('matchNetworkContent');
 const matchNetworkBackBtn = document.getElementById('matchNetworkBackBtn');
@@ -769,19 +988,22 @@ const MODE_TILES = { passplay: modeLocal, remote: modeMatch, replay: modeReplay 
 function modeIconSvg(mode) {
   return MODE_TILES[mode].querySelector('.mode-icon').cloneNode(true);
 }
-// Also tints the panel itself with the same background as the mode-select
-// tile this screen follows (see .half.a/.half.e in style.css) — both screens
-// are shared between Pass & Play and Remote Match rather than duplicated per
-// mode, so the tint is applied here rather than baked into the markup.
-function fillModeHeader(panelEl, iconEl, titleEl, mode) {
+// Also tints the panel itself with the active vibe's color (see
+// vibeTintClass above) — both screens are shared between Pass & Play and
+// Remote Match, and between Hockey and Curling, rather than duplicated per
+// mode/vibe, so the tint is applied here rather than baked into the markup.
+// No visible title text anymore (icon only, see conversation) — MODE_LABELS
+// still feeds the icon's aria-label so screen readers keep a name.
+function fillModeHeader(panelEl, iconEl, mode) {
   iconEl.replaceChildren(modeIconSvg(mode));
-  titleEl.textContent = MODE_LABELS[mode];
-  panelEl.classList.remove('mode-passplay', 'mode-remote');
-  panelEl.classList.add(mode === 'passplay' ? 'mode-passplay' : 'mode-remote');
+  iconEl.setAttribute('aria-label', MODE_LABELS[mode]);
+  panelEl.classList.remove('mode-hockey', 'mode-curling');
+  panelEl.classList.add(vibeTintClass());
 }
 
 // Set once — this panel's icon never changes (always Remote Match).
 matchNetworkModeIcon.replaceChildren(modeIconSvg('remote'));
+matchNetworkModeIcon.setAttribute('aria-label', MODE_LABELS.remote);
 
 // Tracks a room this client created and is still alone in (generated code
 // shown, nobody joined yet) — see matchNetworkBackBtn below: leaving one of
@@ -797,14 +1019,18 @@ function showNetPanel(html) {
   hideLobby();
   classicCustomOverlay.classList.add('hidden');
   customSettingsOverlay.classList.add('hidden');
+  matchNetworkOverlay.classList.remove('mode-hockey', 'mode-curling');
+  matchNetworkOverlay.classList.add(vibeTintClass());
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
+  vibeSubOverlay.classList.add('hidden');
   matchNetworkOverlay.classList.remove('hidden');
 }
 function hideNetPanel() { matchNetworkOverlay.classList.add('hidden'); }
 
-// Always straight back to mode-select (see conversation) — none of these 3
-// screens has an earlier step of its own the way Classic/Custom's Back does.
+// Back to the vibe sub-drawer (one level up, see conversation) — none of
+// these 3 screens has an earlier step of its own the way Classic/Custom's
+// Back does.
 matchNetworkBackBtn.addEventListener('click', () => {
   audio.play('button');
   if (hostedRoomNet) {
@@ -818,7 +1044,7 @@ matchNetworkBackBtn.addEventListener('click', () => {
     hostedRoomNet = null;
   }
   hideNetPanel();
-  returnToModeSelect();
+  showVibeDrawer(activeVibe);
 });
 
 // Called once a mode/config choice is actually ready to launch — resumes
@@ -836,11 +1062,12 @@ let onConfigBack = null;
 function showClassicCustomScreen(mode, launch, goBack) {
   onConfigReady = launch;
   onConfigBack = goBack;
-  fillModeHeader(classicCustomOverlay, ccModeIcon, ccModeTitle, mode);
+  fillModeHeader(classicCustomOverlay, ccModeIcon, mode);
   hideLobby();
   hideNetPanel();
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
+  vibeSubOverlay.classList.add('hidden');
   customSettingsOverlay.classList.add('hidden');
   classicCustomOverlay.classList.remove('hidden');
   classicBtn.onclick = () => {
@@ -880,12 +1107,13 @@ function renderCustomSettingsDraft() {
 function showCustomSettingsScreen(mode, initialConfig) {
   customSettingsMode = mode;
   customSettingsDraft = { ...initialConfig };
-  fillModeHeader(customSettingsOverlay, csModeIcon, csModeTitle, mode);
+  fillModeHeader(customSettingsOverlay, csModeIcon, mode);
   renderCustomSettingsDraft();
   hideLobby();
   hideNetPanel();
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
+  vibeSubOverlay.classList.add('hidden');
   classicCustomOverlay.classList.add('hidden');
   customSettingsOverlay.classList.remove('hidden');
 }
@@ -951,6 +1179,7 @@ function showConnectGate() {
   customSettingsOverlay.classList.add('hidden');
   replayUploadOverlay.classList.add('hidden');
   modeDrawer.classList.add('hidden');
+  vibeSubOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   connectGateOverlay.classList.remove('hidden');
 }
@@ -1002,15 +1231,20 @@ cgGuestBtn.addEventListener('click', () => {
 modeLocal.addEventListener('click', () => {
   audio.play('button');
   showClassicCustomScreen('passplay', (config) => {
+    // Curling isn't plugged into the game engine yet (see conversation) —
+    // the tile/menu tree is fully built out, but the actual match never
+    // starts for this vibe until it is.
+    if (activeVibe === 'curling') { showComingSoonScreen(); return; }
     modeOverlay.classList.add('hidden');
     startOverlay.classList.remove('hidden');
     showToolbar();
     activeMatchMode = 'passplay';
     activeStopGame = startGame({
-      ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config,
+      ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config, vibe: activeVibe,
       onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('passplay', config); },
     });
-  }, returnToModeSelect);
+    syncIdentityPill();
+  }, () => showVibeDrawer(activeVibe));
 });
 
 modeMatch.addEventListener('click', () => {
@@ -1027,6 +1261,7 @@ modeSolo.addEventListener('click', () => {
   showToolbar();
   activeMatchMode = 'solo';
   activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE });
+  syncIdentityPill();
 });
 
 // ---- Replay mode (see CLAUDE.md replay section) — upload a saved ticket
@@ -1058,8 +1293,8 @@ modeReplay.addEventListener('click', () => {
 // as the identity pill, since this is reachable from outside mode-select too.
 const navReplay = document.getElementById('navReplay');
 navReplay.addEventListener('click', () => { if (!activeStopGame) modeReplay.click(); });
-// League/How to/About/Partnership (index.html's #navLeague/#navHowTo/
-// #navAbout/#navPartnership) have no destination yet — visual sidebar shell
+// League/How to/About/Partnership/Nimiq (index.html's #navLeague/#navHowTo/
+// #navAbout/#navPartnership/#navNimiq) have no destination yet — visual sidebar shell
 // only for this pass, intentionally left unwired.
 replayUploadBackBtn.addEventListener('click', () => {
   audio.play('button');
@@ -1094,6 +1329,7 @@ async function handleReplayFile(file) {
     beginAmbience();
     activeMatchMode = 'replay';
     activeStopGame = startGame({ ...rockHandlers, replayPoints: points, mobile: IS_MOBILE });
+    syncIdentityPill();
   } catch (err) {
     hideLoadingOverlay();
     replayUploadStatus.textContent = "Couldn't read this file.";
@@ -1111,9 +1347,9 @@ function defaultLanAddress() {
 function showLanJoinScreen(errorMsg) {
   showLobby(`
     <h2>Duel LAN</h2>
-    <p>Adresse du serveur (déjà pré-remplie si tu as lancé <code>npm run duel</code>) :</p>
+    <p>Server address (already pre-filled if you ran <code>npm run duel</code>):</p>
     <input id="lanAddr" type="text" value="${defaultLanAddress()}" autocomplete="off" />
-    <button class="bigbtn" id="lanJoinBtn">Rejoindre</button>
+    <button class="bigbtn" id="lanJoinBtn">Join</button>
     ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
   `);
   const addrInput = document.getElementById('lanAddr');
@@ -1143,15 +1379,15 @@ async function joinLan(raw, joinBtn) {
 // player back to — each mode's own entry screen, so an error there offers
 // the right retry (LAN address vs. match code) rather than a generic dead end.
 function showWaitingScreen(net, onLost, matchConfig) {
-  const teamLabel = net.myTeam === 'A' ? 'ÉQUIPE BLEUE' : 'ÉQUIPE JAUNE';
+  const teamLabel = net.myTeam === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
   showLobby(`
     <span class="team-pill ${cls}">${teamLabel}</span>
-    <h2>En attente de l'adversaire…</h2>
-    <p>Partage le lien avec l'autre joueur si ce n'est pas déjà fait.</p>
+    <h2>Waiting for opponent…</h2>
+    <p>Share the link with the other player if you haven't already.</p>
   `);
   net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, onLost, matchConfig));
-  net.onDisconnect(() => onLost("L'autre joueur s'est déconnecté."));
+  net.onDisconnect(() => onLost('The other player disconnected.'));
 }
 
 // One more explicit tap between "opponent joined" and startGame(), same
@@ -1174,9 +1410,9 @@ function showWaitingScreen(net, onLost, matchConfig) {
 function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
   showLobby(`
     <span class="team-pill ${cls}">${teamLabel}</span>
-    <h2>Adversaire connecté !</h2>
-    <p>Touche pour démarrer la partie.</p>
-    <button class="bigbtn" id="lanReadyBtn">Prêt</button>
+    <h2>Opponent connected!</h2>
+    <p>Tap to start the match.</p>
+    <button class="bigbtn" id="lanReadyBtn">Ready</button>
   `);
   document.getElementById('lanReadyBtn').onclick = () => {
     audio.unlock();
@@ -1184,7 +1420,7 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
     net.sendReady();
     showLobby(`
       <span class="team-pill ${cls}">${teamLabel}</span>
-      <h2>En attente de l'autre joueur…</h2>
+      <h2>Waiting for the other player…</h2>
     `);
   };
   net.onBothReady(() => {
@@ -1192,15 +1428,16 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
     showToolbar();
     activeMatchMode = 'remote';
     activeStopGame = startGame({
-      ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), identiconLabel: identityLabelOverride(net.myTeam), mobile: IS_MOBILE, matchConfig,
+      ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), identiconLabel: identityLabelOverride(net.myTeam), mobile: IS_MOBILE, matchConfig, vibe: activeVibe,
       // Remote Match only in practice (Duel LAN's magic link never goes
       // through Classic/Custom, see conversation) — either player is free to
       // reconfigure a fresh room after the match ends, creator/joiner roles
       // don't carry over past a match's end.
       onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('remote', matchConfig || DEFAULT_MATCH_CONFIG); },
     });
+    syncIdentityPill();
   });
-  net.onDisconnect(() => onLost("L'autre joueur s'est déconnecté."));
+  net.onDisconnect(() => onLost('The other player disconnected.'));
 }
 
 // ---- Match Réseau (see CLAUDE.md "Network match") — same lobby flow as Duel
@@ -1224,24 +1461,37 @@ function generateMatchCode() {
 
 function showMatchChoiceScreen(errorMsg) {
   hostedRoomNet = null;
+  // No heading here (icon-only header above already names the screen, see
+  // conversation) — straight to the two pills.
   showNetPanel(`
-    <h2>Match réseau</h2>
     <div style="display:flex; gap:12px;">
-      <button class="bigbtn" id="matchHostBtn">Créer</button>
-      <button class="bigbtn" id="matchJoinBtn">Rejoindre</button>
+      <button class="bigbtn" id="matchHostBtn">Create</button>
+      <button class="bigbtn" id="matchJoinBtn">Join</button>
     </div>
     ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
   `);
-  // "Créer" is the room creator — routes through Classic/Custom first (see
+  // "Create" is the room creator — routes through Classic/Custom first (see
   // conversation, point 13: the creator defines the rules, the joiner below
   // never sees this screen at all and just receives whatever the creator
   // saved). Persists/reads Remote's own Custom preset, independent from
-  // Pass & Play's (src/matchConfig.js).
+  // Pass & Play's (src/matchConfig.js). Curling isn't plugged into the
+  // engine yet (see conversation) — Create still walks through Classic/
+  // Custom (full arborescence, per explicit request) but lands on the
+  // placeholder instead of actually opening a room; Join has no
+  // Classic/Custom step to walk through in the first place, so it goes
+  // straight to the placeholder.
   document.getElementById('matchHostBtn').onclick = () => {
     audio.play('button');
-    showClassicCustomScreen('remote', (config) => hostMatch(config), () => showMatchChoiceScreen());
+    showClassicCustomScreen('remote', (config) => {
+      if (activeVibe === 'curling') { showComingSoonScreen(); return; }
+      hostMatch(config);
+    }, () => showMatchChoiceScreen());
   };
-  document.getElementById('matchJoinBtn').onclick = () => { audio.play('button'); showMatchJoinScreen(); };
+  document.getElementById('matchJoinBtn').onclick = () => {
+    audio.play('button');
+    if (activeVibe === 'curling') { showComingSoonScreen(); return; }
+    showMatchJoinScreen();
+  };
 }
 
 async function hostMatch(matchConfig) {
@@ -1264,32 +1514,32 @@ async function hostMatch(matchConfig) {
 // Same shape as showWaitingScreen above, but also displays the code (the
 // host is the one waiting to share it — the joiner already typed it in to
 // get here, see joinMatch below) and sends a disconnected opponent back to
-// the choice screen (a fresh "Créer" gets a fresh code — the old one, tied
+// the choice screen (a fresh "Create" gets a fresh code — the old one, tied
 // to this now-empty room, isn't reused).
 function showMatchHostWaitingScreen(net, code, matchConfig) {
-  const teamLabel = net.myTeam === 'A' ? 'ÉQUIPE BLEUE' : 'ÉQUIPE JAUNE';
+  const teamLabel = net.myTeam === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
   // Alone with a generated code, nobody's joined yet — see
   // matchNetworkBackBtn's own comment for what this gates.
   hostedRoomNet = net;
   showNetPanel(`
     <span class="team-pill ${cls}">${teamLabel}</span>
-    <h2>En attente de l'adversaire…</h2>
+    <h2>Waiting for opponent…</h2>
     <div class="match-code">${code}</div>
   `);
   net.onOpponentJoined(() => {
     hostedRoomNet = null;
     showReadyScreen(net, teamLabel, cls, (msg) => showMatchChoiceScreen(msg), matchConfig);
   });
-  net.onDisconnect(() => { hostedRoomNet = null; showMatchChoiceScreen("L'autre joueur s'est déconnecté."); });
+  net.onDisconnect(() => { hostedRoomNet = null; showMatchChoiceScreen('The other player disconnected.'); });
 }
 
 function showMatchJoinScreen(errorMsg) {
   hostedRoomNet = null;
   showNetPanel(`
-    <h2>Rejoindre un match</h2>
+    <h2>Join a match</h2>
     <input id="matchCodeInput" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="XXXX" />
-    <button class="bigbtn" id="matchJoinSubmitBtn">Rejoindre</button>
+    <button class="bigbtn" id="matchJoinSubmitBtn">Join</button>
     ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
   `);
   const input = document.getElementById('matchCodeInput');
@@ -1361,6 +1611,7 @@ if (replayFromLink) {
   beginAmbience();
   activeMatchMode = 'replay';
   activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], mobile: IS_MOBILE });
+  syncIdentityPill();
 } else if (new URLSearchParams(location.search).has('duel')) {
   homeOverlay.classList.add('hidden');
   joinLan(defaultLanAddress(), null);
