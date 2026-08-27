@@ -134,7 +134,7 @@ export function preloadCoreAssets(mobile = false) {
 }
 
 export function startGame(opts = {}) {
-  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, matchConfig: rawMatchConfig = null } = opts;
+  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, matchConfig: rawMatchConfig = null } = opts;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
   // default preset; Custom is the same shape with different values. Every
   // caller not yet wired to the Classic/Custom flow (vs AI, replay) simply
@@ -151,6 +151,12 @@ export function startGame(opts = {}) {
   // detection are all the same code as a live match.
   const isReplay = Array.isArray(replayPoints) && replayPoints.length > 0;
   const replayAllPoints = isReplay ? replayPoints : [];
+  // Same 4 mode tints main.js's showLobby() dialogs (and #modeOverlay's own
+  // tile picker) already use — reused here so the in-match +1 goal panel's
+  // box (showGoalPanel below) is colored like the mode it's actually being
+  // played in, instead of the plain dark scrim. Identicon/score/address
+  // content is untouched — only the box behind them changes.
+  const matchModeTint = isReplay ? 'replay' : aiTeam ? 'solo' : net ? 'remote' : 'passplay';
   let replayCursor = { pointIdx: 0, mancheIdx: 0 };
   let replayPlaying = false;
   // Set by onGoal() the instant a point (not the whole replay) finishes,
@@ -161,6 +167,15 @@ export function startGame(opts = {}) {
   let replayPointAdvancePending = false;
   const AI_CONFIG = { ...DEFAULT_AI_CONFIG, ...aiConfig };
   const IDENTICON_ADDRESS = { ...DEFAULT_IDENTICON_ADDRESS, ...identiconAddress };
+  // Handle/"Guest" override for whichever team maps to this device's own
+  // connected identity (see main.js's identityLabelOverride, mirrors
+  // identiconOverride above) — absent entirely for the opponent/AI team, or
+  // for a connected-but-handle-less address, so the +1 goal panel falls back
+  // to formatAddressShort(IDENTICON_ADDRESS[team]) below in both those cases.
+  const IDENTICON_LABEL = { ...identiconLabel };
+  function formatAddressShort(address) {
+    return address.length <= 8 ? address : `${address.slice(0, 3)}…${address.slice(-3)}`;
+  }
   const canvas = document.getElementById('stage');
   // Guards against startGame() ever running twice on the same canvas (e.g. a
   // stray reconnect/reload race) — canvas.width/height below are reflected
@@ -2408,7 +2423,16 @@ export function startGame(opts = {}) {
     if (e.rotVel !== undefined) {
       const tx = -ny, ty = nx;
       const vt = e.vx * tx + e.vy * ty;
-      e.rotVel -= vt * 0.05; // was 0.04 (0.063 before the sign fix) — spin-up on contact felt too strong
+      // grip is friction-limited (Coulomb-style), not just "however tangential
+      // the incoming velocity happens to be" — without this, a fast, even
+      // slightly glancing hit spun stones far more than a real curling stone
+      // ever would, since vt alone scales with shot power, not contact force.
+      // Capping it to a multiple of the actual impact strength leaves small/
+      // near-head-on hits untouched (vt rarely reaches the cap there) while
+      // reining in the big oblique ones.
+      const SPIN_GRIP = 1.4;
+      const vtCapped = Math.sign(vt) * Math.min(Math.abs(vt), strength * SPIN_GRIP);
+      e.rotVel -= vtCapped * 0.05; // was 0.04 (0.063 before the sign fix) — spin-up on contact felt too strong
     }
     if (e.squish === undefined) return; // ball: no contact deformation
     // capped well below the old 0.78 — a subtler, softer bump per feedback
@@ -3131,9 +3155,15 @@ export function startGame(opts = {}) {
   // ---------- Result panel (goal / match win) ----------
   // Same shared #overlay component as the exit-confirm dialog and every other
   // dialog in this file — a big identicon (raw, not the on-board hex bubble,
-  // so it reads clearly at this size) with the team's address underneath, a
-  // colored badge next to it ("+1" mid-match, "GAGNÉ"/"PERDU" on the deciding
-  // goal), and the updated score in each team's own color below that.
+  // so it reads clearly at this size) with the team's handle/"Guest"/shortened
+  // address underneath (IDENTICON_LABEL takes priority — see its own comment
+  // above — else formatAddressShort's "abc…xyz", same convention as the
+  // sidebar identity pill's shortenAddressCompact in main.js), a colored badge
+  // next to the identicon ("+1" mid-match, "GAGNÉ"/"PERDU" on the deciding
+  // goal — this one alone keeps the teamA/teamB accent color), and the
+  // updated score below that. Address/score text color isn't set here at
+  // all — see the CSS comment on .goal-address for why (inherits the mode
+  // tint's own ambient ink color instead of a team color).
   const RESULT_IDENTICON_SIZE = 512; // its own cache entry, distinct from the stone bake's no-background variant (see getIdenticonCanvasStoneBust)
   function resultPanelHtml(team, badgeCls, badgeLabel, extraHtml) {
     return `
@@ -3141,7 +3171,7 @@ export function startGame(opts = {}) {
         <img class="goal-identicon" id="goalIdenticonImg" alt="">
         <span class="goal-badge ${badgeCls}">${badgeLabel}</span>
       </div>
-      <div class="goal-address">${IDENTICON_ADDRESS[team]}</div>
+      <div class="goal-address">${IDENTICON_LABEL[team] || formatAddressShort(IDENTICON_ADDRESS[team])}</div>
       <div class="goal-score">
         <span class="goal-score-a">${scoreA}</span><span class="goal-score-sep">–</span><span class="goal-score-b">${scoreB}</span>
       </div>
@@ -3166,6 +3196,12 @@ export function startGame(opts = {}) {
     // player dismisses it below, back into the next round.
     audio.stopAmbience();
     audio.play('pointOk', { volume: 0.45 }); // -7dB, clip is hot at full level
+    // Mode-tinted box (see matchModeTint above) — toggled directly here
+    // rather than in showOverlay() itself, since victory/disconnect/replay-
+    // loading overlays elsewhere in this file still want the plain dark scrim.
+    // goal-box-70 shrinks just the box to 70% of the full-bleed size (see
+    // style.css) — identicon/badge/address/score inside are untouched.
+    overlay.classList.add(`mode-${matchModeTint}`, 'goal-box-70');
     showOverlay(resultPanelHtml(scoringTeam, cls, '+1'));
     fillResultIdenticon(scoringTeam);
     // Click-anywhere dismiss (no buttons here) — closing early doesn't rush
@@ -3173,6 +3209,7 @@ export function startGame(opts = {}) {
     // if that hasn't finished yet.
     overlay.addEventListener('click', () => {
       hideOverlay();
+      overlay.classList.remove(`mode-${matchModeTint}`, 'goal-box-70');
       audio.playAmbience();
       goalPanelDismissed = true;
       maybeAdvanceRound();
@@ -3302,7 +3339,7 @@ export function startGame(opts = {}) {
       audio.play('button');
       const pointsToReplay = recorder.getPoints();
       stopGame();
-      startGame({ onRockSound, onRockExit, onRockPower, onExit, matchConfig, mobile, identiconAddress: IDENTICON_ADDRESS, replayPoints: pointsToReplay });
+      startGame({ onRockSound, onRockExit, onRockPower, onExit, matchConfig, mobile, identiconAddress: IDENTICON_ADDRESS, identiconLabel: IDENTICON_LABEL, replayPoints: pointsToReplay });
     };
     document.getElementById('goalMenuBtn').onclick = () => { audio.play('button'); stopGame(); onExit?.(); };
     document.getElementById('goalShareBtn').onclick = async () => {
