@@ -205,25 +205,33 @@ html, body {
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  /* Centered rather than right-flush (see conversation) — padding here is
+     symmetric (18px both sides) so this lands the logo's own horizontal
+     center on the column's center, matching the full-width identity pill's
+     center at the bottom instead of chasing its right edge. */
+  justify-content: center;
   padding: 14px 18px;
 }
+/* Plain NIMICURL wordmark only (see conversation — a "powered by Nimiq"
+   badge/combined lockup was tried under here and dropped again). The +20%
+   enlarge tried after that was reverted too — it threw off horizontal
+   alignment with the identity pill at the column's bottom. */
 #bg-logo {
   display: block;
   width: auto;
   max-width: 219px;
   height: auto;
   cursor: pointer;
+  margin-top: -5px; /* nudge up, see conversation — both platforms, mobile has no position override of its own to fight */
 }
 
-/* margin-top:auto (not on the identity pill below anymore) eats the leftover
-   space ABOVE the nav, so nav ends up grouped with the pill near the bottom
-   of the column instead of clustered under the brand tile — per explicit
-   request, the empty whitespace now reads as "below the brand", not
-   "above the pill". */
+/* Nav sits right under the brand now (desktop and mobile alike — mobile
+   already worked this way, see .mobile-layout .sidebar-nav below); the
+   identity pill's own margin-top:auto (.nq-connect-btn) is what now eats the
+   leftover space and pins itself to the column's bottom edge instead. */
 .sidebar-nav {
   flex: none;
-  margin-top: auto;
+  margin-top: -5px; /* nudge up a bit further, see conversation — safe margin on both platforms */
   display: flex;
   flex-direction: column;
   /* Loose between groups, tight within one (see .nav-section's own gap
@@ -285,15 +293,16 @@ html, body {
 .nav-item.active { background: var(--nb-16); color: var(--nb-100); font-weight: 700; }
 
 /* Identity pill — a real card, not a small CTA (that was this element's old
-   job as a corner "Connecter" button): bigger, sits at the very bottom of
-   #sidebar's flex column, directly below .sidebar-nav (see its own
-   margin-top:auto above — this element stays put, no auto margin of its own).
-   White surface regardless of connect state now — the identicon avatar +
-   status line carry that distinction instead of a background color swap
-   (kept a step further below, scoped to mobile only, where that swap is
-   still the established look). */
+   job as a corner "Connecter" button): bigger, pinned to the very bottom of
+   #sidebar's flex column via its own margin-top:auto (see conversation — nav
+   now sits right under the brand instead, this is what eats the leftover
+   space between them). White surface regardless of connect state now — the
+   identicon avatar + status line carry that distinction instead of a
+   background color swap (kept a step further below, scoped to mobile only,
+   where that swap is still the established look). */
 .nq-connect-btn {
   flex: none;
+  margin-top: auto;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -392,7 +401,7 @@ html, body {
 .mobile-layout #sidebar.in-match #connectBtn { pointer-events: auto; }
 .mobile-layout .sidebar-brand { padding: 10px 12px; }
 .mobile-layout #bg-logo { max-width: 160px; }
-/* Both section titles (Compete/Info, icon included) show at once on mobile —
+/* Both section titles (More/Info, icon included) show at once on mobile —
    no collapsed single "Menu" line — each is its own accordion trigger (see
    .mobile-layout .nav-label below); only its own .nav-section-items
    collapses/expands, main.js is what enforces "only one section open at a
@@ -407,7 +416,7 @@ html, body {
    properties both declared, real support varies but neither has a
    fallback-fails-loud case). */
 .mobile-layout .sidebar-nav {
-  margin-top: 0;
+  margin-top: -5px;
   flex: 1 1 auto;
   min-height: 0;
   gap: 10px;
@@ -444,9 +453,9 @@ html, body {
 /* Identity pill: inherits the desktop white-card look as-is (avatar + real
    handle/address, see main.js's syncIdentityPill() — no more mobile-only
    branch stripping that down to a bare address) rather than restoring the
-   old bottom-right CTA pill this replaces. margin-top:auto is what actually
-   pins it to the column's bottom edge, see .sidebar-nav's own comment above. */
-.mobile-layout #connectBtn { margin-top: auto; }
+   old bottom-right CTA pill this replaces. Its bottom-pinning margin-top:auto
+   is the base .nq-connect-btn rule now (see conversation), same on both
+   platforms — no mobile-specific override needed here anymore. */
 
 /* Unified mobile controller — the validated white "remote control" mockup
    (design/ui/ChatGPT Image 19 août 2026, 22_39_44.png), baked as real art
@@ -645,7 +654,20 @@ html, body {
    a separate DOM button — the entire overlay is the tap target. */
 #homeOverlay {
   position: fixed;
-  inset: 0;
+  /* top/left/width/height spelled out to the same units #modeOverlayBg uses
+     (see that rule), not the shorthand `inset: 0` this used to be — inset:0
+     on a fixed element stretches to the browser's *large* viewport (~100vh),
+     while #modeOverlayBg explicitly sizes to the *dynamic* one (100dvh, so
+     it tracks Safari's collapsing toolbar live). On any device where those
+     two disagree (in-page while the toolbar is still expanded, mainly
+     mobile Safari) the two boxes had very slightly different aspect ratios,
+     which background-size:cover reads as two different crops of the same
+     image — a subtle horizontal misalignment right at the handoff, on top
+     of (not fixed by) the translate/clip-path sync below, since a
+     mismatched cover-crop isn't something transform math can correct for.
+     Matching the unit here removes that discrepancy at the source instead
+     of chasing its symptom. */
+  top: 0; left: 0; width: 100vw; height: 100dvh;
   z-index: 40;
   background-size: cover;
   background-position: center;
@@ -662,28 +684,61 @@ html, body {
   transition: transform 480ms cubic-bezier(.22,.68,0,1), clip-path 480ms cubic-bezier(.22,.68,0,1), opacity 160ms ease-in 480ms;
 }
 #homeOverlay.hidden { display: none; }
-/* Slides left by HALF of --right-margin (10vw), not the full column width —
+/* Slides left by HALF of the reserved column, not the full width —
    counterintuitive, but it's what keeps the arena art itself visually
    still. home-screen.webp and mode-select-bg.webp are the same base render
    (mode-select-bg just has the logo/PLAY layers stripped), but they're not
-   *positioned* the same way: #homeOverlay is a 100vw box centered on the
-   full viewport (arena lands at 50vw), while #modeOverlayBg is a 100vw box
-   shifted left:-10vw inside the 80vw menu zone (arena lands at 40vw, see
-   that rule's own comment). Translate alone only fixes the CENTER, though —
-   #homeOverlay's own right edge is a real box boundary (transform doesn't
-   resize it), so right after a plain -10vw slide it still sits at 90vw,
-   10vw past #modeOverlayBg's own clipped edge at 80vw. Left alone, that
-   read as two steps: the image visibly slides at full width, then the
-   *next* layer's already-narrower crop replaces it — a size jump, not a
-   continuous motion. clip-path shaves that same 10vw off the element's own
+   *positioned* the same way: #homeOverlay is always a 100vw box centered on
+   the full viewport (arena lands at the true 50vw center), while
+   #modeOverlayBg is a 100vw box deliberately shifted to recenter its arena
+   within whatever's left after the reserved column (see that rule's own
+   comment, and its own desktop/.mobile-layout split — same split repeated
+   here for the same reason). Translate alone only fixes the CENTER, though
+   — #homeOverlay's own right edge is a real box boundary (transform doesn't
+   resize it), so right after a plain half-column slide it still sits half
+   a column past #modeOverlayBg's own clipped edge. Left alone, that read as
+   two steps: the image visibly slides at full width, then the *next*
+   layer's already-narrower crop replaces it — a size jump, not a continuous
+   motion. clip-path shaves that same half-column off the element's own
    right edge in step with the translate (both use the same transition
    timing above), so the visible content finishes the move at the correct
    WIDTH as well as the correct position — one continuous "slide-and-crop",
-   not slide-then-swap. Transform/clip-path are both skipped on mobile
-   (.mobile-layout's own --right-margin collapses to ~0 there, see :root's
-   comment — nothing meaningful to slide into), so mobile gets just the
-   fade. */
+   not slide-then-swap.
+   Desktop's reserved column is --right-margin (20vw, a real empty margin
+   next to #menuStage) — half of that is 10vw. Mobile has no such margin
+   (.mobile-layout's own --right-margin collapses to ~0/negative, #game-card
+   fills the viewport instead), so the reserved column there is a DIFFERENT
+   variable with a different ratio to the viewport: --controller-reserved-w
+   (the sidebar's own mobile width, ~27% of a typical landscape phone vs.
+   desktop's flat 20% — a real px+vw clamp() mix, not a plain vw fraction),
+   the same variable .mobile-layout #modeOverlayBg uses for this same
+   recentering trick, and .mobile-layout #sidebar itself uses for its width.
+
+   That alone isn't quite enough on mobile, though — measured via
+   getBoundingClientRect(), not guessed: .mobile-layout #game-card is
+   centered with `left:50%; transform:translateX(-50%)`, but its CSS width
+   (still the desktop rule, `calc(100vw - var(--right-margin))`) algebraically
+   works out to `--card-w + --card-left-gap` once mobile's own --right-margin
+   formula is substituted in — 16px wider than the viewport in the common
+   case, so centering it overflows 8px off BOTH edges. #modeOverlayBg is
+   nested inside #game-card and inherits that -8px origin for free; #homeOverlay
+   is `position:fixed`, anchored straight to the true viewport, so it does NOT
+   — confirmed by comparing both layers' actual rendered arena-center: 8px
+   apart with only the --controller-reserved-w/2 term above. Folding
+   --right-margin (mobile's small/negative value, not desktop's 20vw) into
+   the same formula corrects for exactly that gap: */
 body:not(.mobile-layout) #homeOverlay.leaving { transform: translateX(-10vw); clip-path: inset(0 10vw 0 0); }
+.mobile-layout #homeOverlay.leaving {
+  transform: translateX(calc((var(--right-margin) - var(--controller-reserved-w)) / 2));
+  /* Not the same magnitude as the translate above (that symmetry only held
+     before the #game-card offset was accounted for) — this instead targets
+     wherever --controller-reserved-w's own right edge (#sidebar's fixed
+     `right:0; width:var(--controller-reserved-w)`, unaffected by any of
+     #game-card's centering) actually starts, so the crop finishes flush
+     against the sidebar's real left edge, not an arbitrary distance off
+     it. Re-derive both together if either formula above ever changes. */
+  clip-path: inset(0 calc((var(--right-margin) + var(--controller-reserved-w)) / 2) 0 0);
+}
 #homeOverlay.leaving { opacity: 0; pointer-events: none; }
 
 #game-card {
@@ -1297,6 +1352,16 @@ button:disabled { opacity: 0.35; cursor: default; }
    full-brightness ink instead. Gold/green tints already get proper dark ink
    above, so they're excluded here. */
 #overlay:not(.mode-remote):not(.mode-replay) p { color: var(--ink); }
+/* Shrinks just the +1 goal panel's own box to 70% of the full-bleed size
+   (see showGoalPanel's goal-box-70 toggle in game.js) — content inside
+   (identicon/badge/address/score) keeps its normal size untouched, just
+   centered within less tinted area, so more of the board/stones show
+   around it instead of the wash reaching every edge. */
+#overlay.goal-box-70 {
+  inset: auto; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 70%; height: 70%;
+}
+.mobile-layout #overlay.goal-box-70 { left: calc((100% - var(--controller-reserved-w)) / 2); }
 /* Same fit-content pill shell as .config-panel (Classic/Custom, Custom
    Settings) — applied only for main.js's showLobby() dialogs (exit/back-to-
    menu confirm, LAN lobby screens), not game.js's own showOverlay() (goal/
@@ -1405,17 +1470,24 @@ button:disabled { opacity: 0.35; cursor: default; }
    sitting beside it and pulling the identicon off-center. */
 .goal-identicon-wrap { position: relative; display: inline-block; }
 .goal-identicon { display: block; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.06); }
+/* letter-spacing here (and on .goal-score below) matches #modeOverlay's own
+   .half .tag — the mode-select tile label typography — so this panel's box
+   text reads as the same family as the tint now applied to it. */
 .goal-badge {
-  position: absolute; top: -8px; right: -18px; font-weight: 800; font-size: 26px;
+  position: absolute; top: -8px; right: -18px; font-weight: 800; font-size: 26px; letter-spacing: 0.5px;
   background: var(--scrim-85); padding: 2px 10px; border-radius: 999px;
 }
 .goal-badge.a { color: var(--teamA); }
 .goal-badge.b { color: var(--teamB); }
-.goal-address { font-size: 12px; color: var(--ink-dim); word-break: break-all; max-width: 320px; }
-.goal-score { font-size: 22px; font-weight: 800; }
-.goal-score-a { color: var(--teamA); }
-.goal-score-b { color: var(--teamB); }
-.goal-score-sep { color: var(--ink-dim); padding: 0 8px; }
+/* Address/score deliberately don't set their own color — they inherit
+   #overlay's ambient text color, which each mode-X class above already
+   flips correctly per Nimiq's own panel convention (white ink on the blue/
+   navy passplay/solo tints, dark --bg-deep ink on the gold/green remote/
+   replay tints) — same colors #modeOverlay's own mode-select tiles use for
+   their labels, not the teamA/teamB accent colors. */
+.goal-address { font-size: 12px; word-break: break-all; max-width: 320px; }
+.goal-score { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
+.goal-score-sep { padding: 0 8px; }
 .goal-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
 
 /* Match-win ticket (see src/ticket.js/showVictory) — a single portrait PNG

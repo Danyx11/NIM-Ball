@@ -493,6 +493,21 @@ let hubAddress = getIdentity()?.address || null;
 function identiconOverride(team) {
   return hubAddress ? { [team]: hubAddress } : {};
 }
+// Same priority as the sidebar identity pill below (syncIdentityPill): a
+// claimed handle beats everything, "Guest" if that's this device's decided
+// identity, otherwise no override at all — game.js falls back to a shortened
+// address on its own in that last case (see its formatAddressShort). Only
+// ever populated for `team`, i.e. whichever side this device's own identity
+// controls (see identiconOverride's own comment above) — the opponent/AI
+// side never gets a label override here.
+function identityLabelOverride(team) {
+  if (hubAddress) {
+    const handle = getHandle(hubAddress);
+    return handle ? { [team]: handle } : {};
+  }
+  if (getIdentity()?.type === 'guest') return { [team]: 'Guest' };
+  return {};
+}
 // The corner pill is now a pure display of the resolved identity (address,
 // or "Guest") — no longer the connect trigger itself, that's #connectGateOverlay's
 // job. Clicking it reopens the gate to switch (disconnect), same "tap your
@@ -536,14 +551,15 @@ navSections.forEach((section) => {
 function shortenAddressCompact(address) {
   return address.length <= 8 ? address : `${address.slice(0, 3)}…${address.slice(-3)}`;
 }
-// Hidden entirely until the player has actually been through the connect
-// gate at least once (still hubAddress===null AND no persisted 'guest' flag
-// right after a disconnect too) — showing "Guest" here while the gate is
-// still open asking the player to decide would read as already decided.
+// Shows immediately once the sidebar itself does (both platforms, right
+// after the home-screen animation — see conversation), not gated on the
+// player having been through the connect gate yet: undecided reads the same
+// as Guest here (hubAddress null, no persisted identity) rather than hiding
+// the pill outright, per explicit request. Used to hide until decided, to
+// avoid "Guest" reading as already-chosen while the gate was still open —
+// reversed since the pill is now expected to always be visible, gate open
+// or not.
 function syncIdentityPill() {
-  const decided = !!hubAddress || getIdentity()?.type === 'guest';
-  connectBtn.classList.toggle('hidden', !decided);
-  if (!decided) return;
   connectBtn.classList.toggle('connected', !!hubAddress);
   connectBtnLabel.classList.remove('claim-cta');
   connectBtnStatus.classList.remove('mono');
@@ -991,7 +1007,7 @@ modeLocal.addEventListener('click', () => {
     showToolbar();
     activeMatchMode = 'passplay';
     activeStopGame = startGame({
-      ...rockHandlers, identiconAddress: identiconOverride('A'), mobile: IS_MOBILE, matchConfig: config,
+      ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config,
       onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('passplay', config); },
     });
   }, returnToModeSelect);
@@ -1010,7 +1026,7 @@ modeSolo.addEventListener('click', () => {
   modeOverlay.classList.add('hidden');
   showToolbar();
   activeMatchMode = 'solo';
-  activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), mobile: IS_MOBILE });
+  activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE });
 });
 
 // ---- Replay mode (see CLAUDE.md replay section) — upload a saved ticket
@@ -1176,7 +1192,7 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
     showToolbar();
     activeMatchMode = 'remote';
     activeStopGame = startGame({
-      ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), mobile: IS_MOBILE, matchConfig,
+      ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), identiconLabel: identityLabelOverride(net.myTeam), mobile: IS_MOBILE, matchConfig,
       // Remote Match only in practice (Duel LAN's magic link never goes
       // through Classic/Custom, see conversation) — either player is free to
       // reconfigure a fresh room after the match ends, creator/joiner roles
