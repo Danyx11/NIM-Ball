@@ -1046,11 +1046,11 @@ export function startGame(opts = {}) {
 
   let scoreA = 0, scoreB = 0;
   let round = 1;
-  // Curling only: a point is 3 full aimA/aimB/reveal cycles (not "however
+  // Curling only: a point is 2 full aimA/aimB/reveal cycles (not "however
   // many until a goal/wipeout", like classic) — bumped in beginStraighten()
   // each time a manche settles without a goalResult, reset to 0 in
   // beginRoundReset() (a new point starting). See resolveCurlingPoint below.
-  const CURLING_CYCLES_PER_POINT = 3;
+  const CURLING_CYCLES_PER_POINT = 2;
   let curlingCycle = 0;
   // Match-ticket stats (see src/ticket.js) — not gameplay state, just tallies
   // for the shareable end-of-match ticket. Reset alongside score/round on Rejouer.
@@ -3142,7 +3142,7 @@ export function startGame(opts = {}) {
   // team happens to have zero surviving stones by this point (see the
   // physicsStep 'wipeoutA'/'wipeoutB' early-exit above, which still applies
   // and reuses this same onGoal path if a team is fully wiped out before
-  // all 3 manches even finish).
+  // all CURLING_CYCLES_PER_POINT manches even finish).
   function resolveCurlingPoint() {
     let bestTeam = null, bestStone = null, bestDist = Infinity;
     for (const team of ['A', 'B']) {

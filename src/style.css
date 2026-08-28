@@ -1609,6 +1609,14 @@ button:disabled { opacity: 0.35; cursor: default; }
    above already fixed for the button's background) — dark ink instead,
    matching every other piece of text on this panel under .mode-curling. */
 #matchNetworkOverlay.mode-curling .bigbtn { color: var(--bg-deep); }
+/* "Join with a code" is always green (fixed tint, not vibe-conditional —
+   see .config-panel.mode-joincode above), so its Join button just gets the
+   dark-ink text unconditionally, no .mode-curling-style variant needed. */
+#joinCodeOverlay .bigbtn {
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: var(--bg-deep);
+  transition: background .15s ease, border-color .15s ease;
+}
+#joinCodeOverlay .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
 /* Remote Match's 3 sub-screens (see main.js's showNetPanel) rebuild
    #matchNetworkContent's innerHTML from scratch on every screen change, so a
    fresh entrance for its button(s) needs no JS bookkeeping — new DOM nodes
@@ -1894,7 +1902,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 #modeHockey .mode-icon { height: 30.6px; }
 #modeCurling .mode-icon { height: 50.4px; }
 #modeSolo .mode-icon-tall { height: 49px; }
-#modeReplay .mode-icon-tall { height: 42.84px; }
+#modeJoinCode .mode-icon-tall { height: 42.84px; }
 /* Logos aligned by vertical center across both grid rows (see conversation)
    — fully reversible, purely additive: each icon gets equal top/bottom
    margin compensation up to Curling's own 50.4px (the tallest of the 4
@@ -1908,7 +1916,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 #modeOverlay .mode-drawer .sub { min-height: 30px; }
 #modeHockey .mode-icon { margin-top: 9.9px; margin-bottom: 9.9px; }
 #modeSolo .mode-icon-tall { margin-top: 0.7px; margin-bottom: 0.7px; }
-#modeReplay .mode-icon-tall { margin-top: 3.78px; margin-bottom: 3.78px; }
+#modeJoinCode .mode-icon-tall { margin-top: 3.78px; margin-bottom: 3.78px; }
 /* Mobile: all 4 mode-tile logos -30% (see conversation) — same ×0.7 applied
    to each of the 4 desktop heights above, and the centering margins
    recomputed against the new tallest one (Curling's 35.28px replaces
@@ -1917,7 +1925,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 .mobile-layout #modeHockey .mode-icon { height: 21.42px; margin-top: 6.93px; margin-bottom: 6.93px; }
 .mobile-layout #modeCurling .mode-icon { height: 35.28px; }
 .mobile-layout #modeSolo .mode-icon-tall { height: 34.3px; margin-top: 0.49px; margin-bottom: 0.49px; }
-.mobile-layout #modeReplay .mode-icon-tall { height: 29.99px; margin-top: 2.65px; margin-bottom: 2.65px; }
+.mobile-layout #modeJoinCode .mode-icon-tall { height: 29.99px; margin-top: 2.65px; margin-bottom: 2.65px; }
 
 /* Elevation layer 2/3 (card/menu box -> tiles): scoped to #modeOverlay only,
    same reasoning as the palette rule below it — .half is shared with
@@ -2041,6 +2049,11 @@ button:disabled { opacity: 0.35; cursor: default; }
    fillModeHeader — Nimiq Light Blue again, same value as .mode-hockey,
    since it reads as "wallet/identity" rather than a specific game mode. */
 .config-panel.mode-connect { background: rgba(5, 130, 202, 0.55); }
+/* "Join with a code" (#joinCodeOverlay, see conversation) isn't tied to a
+   vibe either (it's a direct mode-grid shortcut, no picker in between) —
+   own fixed tint instead, the same Nimiq Green as its own tile
+   (#modeOverlay .half.d above). */
+.config-panel.mode-joincode { background: rgba(33, 188, 165, 0.55); }
 /* Small entrance every time ANY of these menu panels opens (Classic/Custom,
    Custom Settings, Remote Match's 3 sub-screens, the connect gate) — one
    shared rule/keyframe rather than one per screen, since they're all the
@@ -2083,6 +2096,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 .config-panel.mode-curling .config-mode-title,
 .config-panel.mode-curling .config-mode-icon svg,
 .config-panel.mode-curling .config-lobby-content h2,
+.config-panel.mode-curling .config-create-label,
 .config-panel.mode-curling .config-back { color: var(--bg-deep); }
 /* Same dark-ink swap for Classic/Custom's own two preset buttons (also
    literal color:#fff, same reasoning as above) — Create/Join get their own
@@ -2091,6 +2105,14 @@ button:disabled { opacity: 0.35; cursor: default; }
    already got the gold-vs-blue treatment). */
 .config-panel.mode-curling .config-preset-name { color: var(--bg-deep); }
 .config-panel.mode-curling .config-preset-sub { color: rgba(11,31,42,0.75); }
+/* Same dark-ink swap for "Join with a code" — green is just as light as
+   gold, same contrast problem. Its own .bigbtn (Join) gets the same
+   translucent-white-with-dark-text fix Create/Join already got on
+   #matchNetworkOverlay, see further down. */
+.config-panel.mode-joincode { color: var(--bg-deep); --ink-dim: rgba(11,31,42,0.7); }
+.config-panel.mode-joincode .config-mode-icon svg,
+.config-panel.mode-joincode .config-lobby-content h2,
+.config-panel.mode-joincode .config-back { color: var(--bg-deep); }
 /* Symmetric side padding reserves the exit button's own footprint
    (top-right, see .config-back below) on both sides, so centering the
    title+icon within this narrower box keeps it visually centered in the
@@ -2106,6 +2128,15 @@ button:disabled { opacity: 0.35; cursor: default; }
    per explicit request, without dropping into a lighter register the kit
    doesn't actually use either. */
 .config-mode-title { font-weight: 700; font-size: 19px; letter-spacing: 0.3px; color: #fff; }
+/* "CREATE A MATCH" (Remote Match only, see conversation) — sits between the
+   icon and the Classic/Custom pills, replacing the context the old
+   Create/Join choice screen used to establish before Remote skipped
+   straight past it into here. Same weight/size as .config-mode-title (the
+   old external header text this panel never had) rather than the bigger
+   26px h2 used for actual screen titles elsewhere (Join a match, Waiting
+   for opponent…) — this is a supporting label, not this screen's title. */
+.config-create-label { margin: 0 0 20px; font-weight: 700; font-size: 19px; letter-spacing: 0.3px; color: #fff; text-align: center; }
+.config-create-label.hidden { display: none; }
 .config-back {
   position: absolute; top: 24px; right: 28px; width: 40px; height: 40px;
   border-radius: 50%; background: rgba(255,255,255,0.12); color: #fff;

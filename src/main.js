@@ -187,7 +187,7 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
   // Mobile keeps its existing behavior untouched (still #game-card children)
   // — #menuStage isn't part of mobile's layout yet.
   const menuHost = IS_MOBILE ? gameCard : document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'replayUploadOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -793,7 +793,7 @@ const modeDrawer = document.getElementById('modeDrawer');
 const modeHockey = document.getElementById('modeHockey');
 const modeCurling = document.getElementById('modeCurling');
 const modeSolo = document.getElementById('modeSolo');
-const modeReplay = document.getElementById('modeReplay');
+const modeJoinCode = document.getElementById('modeJoinCode');
 const startOverlay = document.getElementById('startOverlay');
 const overlay = document.getElementById('overlay');
 const ovContent = document.getElementById('ovContent');
@@ -874,6 +874,27 @@ const OVERLAY_TINT_CLASSES = ['mode-hockey', 'mode-curling', 'mode-solo', 'mode-
 // mode: 'passplay'/'remote' (tint follows activeVibe — hockey/curling), or
 // 'solo'/'replay' (fixed tint, untouched by the vibe system).
 function showLobby(html, mode = null) {
+  // Defensive, same reasoning as showComingSoonScreen's own hideNetPanel()
+  // call: Match Réseau's host-waiting screen (showMatchHostWaitingScreen)
+  // lives on the separate #matchNetworkOverlay panel (showNetPanel), not
+  // this one — every path from there into the shared LAN/Remote lobby
+  // (showWaitingScreen/showReadyScreen below) swaps in this overlay on TOP
+  // of it without ever tearing the net panel down first, which left it
+  // visually stuck in front (see conversation: the Ready button was
+  // rendering correctly underneath, just fully obscured — nobody could ever
+  // actually start a Match Réseau game).
+  hideNetPanel();
+  // showNetPanel (every Match Réseau screen above) deliberately keeps
+  // #modeOverlay itself visible throughout, for its own arena-illustration
+  // backdrop (see its own comment) — but #modeOverlay (z-index 3) sits above
+  // #game-card (z-index 1), which is what #overlay/this lobby actually lives
+  // in, so that backdrop was left fully covering the waiting/ready screen
+  // too, same invisible-Ready-button bug as above. #modeOverlay is a no-op
+  // to hide here for Duel LAN (never shown in the first place — the `?duel`
+  // link skips mode-select entirely), and showNetPanel() unhides it again on
+  // the way back out (disconnect -> showCreateMatchScreen), so this doesn't
+  // strand Remote Match's own "back" path either.
+  modeOverlay.classList.add('hidden');
   overlay.classList.remove(...OVERLAY_TINT_CLASSES);
   let cls = null;
   if (mode === 'passplay' || mode === 'remote') cls = vibeTintClass();
@@ -962,6 +983,8 @@ function returnToModeSelect() {
 const classicCustomOverlay = document.getElementById('classicCustomOverlay');
 const ccBackBtn = document.getElementById('ccBackBtn');
 const ccModeIcon = document.getElementById('ccModeIcon');
+const ccCreateLabel = document.getElementById('ccCreateLabel');
+const ccError = document.getElementById('ccError');
 const classicBtn = document.getElementById('classicBtn');
 const customBtn = document.getElementById('customBtn');
 const customSettingsOverlay = document.getElementById('customSettingsOverlay');
@@ -981,10 +1004,13 @@ const matchNetworkContent = document.getElementById('matchNetworkContent');
 const matchNetworkBackBtn = document.getElementById('matchNetworkBackBtn');
 const matchNetworkModeIcon = document.getElementById('matchNetworkModeIcon');
 
-const MODE_LABELS = { passplay: 'PASS & PLAY', remote: 'REMOTE MATCH', replay: 'REPLAY' };
+const MODE_LABELS = { passplay: 'PASS & PLAY', remote: 'REMOTE MATCH', joincode: 'JOIN WITH A CODE' };
 // Reuses #modeOverlay's own tile icons (cloned, never a new asset) — see
-// explicit request not to introduce a new logo for these screens.
-const MODE_TILES = { passplay: modeLocal, remote: modeMatch, replay: modeReplay };
+// explicit request not to introduce a new logo for these screens. Replay
+// dropped (see conversation) — its own header is static markup now, not
+// cloned, since #modeReplay doesn't exist anymore (repurposed into
+// #modeJoinCode, a different icon).
+const MODE_TILES = { passplay: modeLocal, remote: modeMatch, joincode: modeJoinCode };
 function modeIconSvg(mode) {
   return MODE_TILES[mode].querySelector('.mode-icon').cloneNode(true);
 }
@@ -1028,9 +1054,10 @@ function showNetPanel(html) {
 }
 function hideNetPanel() { matchNetworkOverlay.classList.add('hidden'); }
 
-// Back to the vibe sub-drawer (one level up, see conversation) — none of
-// these 3 screens has an earlier step of its own the way Classic/Custom's
-// Back does.
+// Back to the vibe sub-drawer (one level up, see conversation) — only ever
+// reachable from showMatchHostWaitingScreen now (the Create/Join choice and
+// in-flow Join screens this used to also cover are gone), which has no
+// earlier step of its own the way Classic/Custom's Back does.
 matchNetworkBackBtn.addEventListener('click', () => {
   audio.play('button');
   if (hostedRoomNet) {
@@ -1049,20 +1076,29 @@ matchNetworkBackBtn.addEventListener('click', () => {
 
 // Called once a mode/config choice is actually ready to launch — resumes
 // that mode's own existing entry flow exactly as before this feature
-// (Pass & Play's #startOverlay ready-tap, Remote Match's Créer/Rejoindre
-// choice), just now carrying a matchConfig through it.
+// (Pass & Play's #startOverlay ready-tap, Remote Match's hostMatch()), just
+// now carrying a matchConfig through it.
 let onConfigReady = null;
 // Where this screen's own Back arrow goes — Pass & Play reaches Classic/
-// Custom straight from #modeOverlay, so Back lands there; Remote Match
-// reaches it from the Créer/Rejoindre choice screen (see showMatchChoiceScreen
-// below), one step later, so Back should land there instead, not skip past
-// it straight to mode-select.
+// Custom straight from #modeOverlay, so Back lands there; Remote Match now
+// does too (see conversation — the old Create/Join choice screen in
+// between is gone), so both just go straight back to the vibe sub-drawer.
 let onConfigBack = null;
 
-function showClassicCustomScreen(mode, launch, goBack) {
+// errorMsg: Remote Match only (see hostMatch's own catch below and
+// showMatchHostWaitingScreen's onDisconnect/onLost) — this screen doubles
+// as the connection-failure retry point now that there's no separate
+// Create/Join screen to show it on.
+function showClassicCustomScreen(mode, launch, goBack, errorMsg) {
   onConfigReady = launch;
   onConfigBack = goBack;
   fillModeHeader(classicCustomOverlay, ccModeIcon, mode);
+  // "CREATE A MATCH" only for Remote (see conversation) — P&P has no
+  // create/join distinction, straight into Classic/Custom is self-
+  // explanatory there.
+  ccCreateLabel.classList.toggle('hidden', mode !== 'remote');
+  ccError.classList.toggle('hidden', !errorMsg);
+  ccError.textContent = errorMsg || '';
   hideLobby();
   hideNetPanel();
   modeOverlay.classList.remove('hidden');
@@ -1079,6 +1115,14 @@ function showClassicCustomScreen(mode, launch, goBack) {
     audio.play('button');
     showCustomSettingsScreen(mode, getCustomConfig(mode));
   };
+}
+// Remote Match's own entry point (see conversation): straight into Classic/
+// Custom now, no Create/Join choice in between — this screen IS "create"
+// for Remote (Join lives entirely on the separate #modeJoinCode tile).
+// Reused as the retry target on a connection failure too (hostMatch's catch,
+// showMatchHostWaitingScreen's onDisconnect/onLost below).
+function showCreateMatchScreen(errorMsg) {
+  showClassicCustomScreen('remote', (config) => hostMatch(config), () => showVibeDrawer(activeVibe), errorMsg);
 }
 
 ccBackBtn.addEventListener('click', () => {
@@ -1231,9 +1275,6 @@ cgGuestBtn.addEventListener('click', () => {
 modeLocal.addEventListener('click', () => {
   audio.play('button');
   showClassicCustomScreen('passplay', (config) => {
-    // Curling is now plugged in for Pass & Play (see conversation) — Remote
-    // Match's own two gates (matchHostBtn/matchJoinBtn below) still show the
-    // placeholder, that path isn't wired up yet.
     modeOverlay.classList.add('hidden');
     startOverlay.classList.remove('hidden');
     showToolbar();
@@ -1249,7 +1290,7 @@ modeLocal.addEventListener('click', () => {
 modeMatch.addEventListener('click', () => {
   audio.play('button');
   modeOverlay.classList.add('hidden');
-  showMatchChoiceScreen();
+  showCreateMatchScreen();
 });
 
 // Solo vs IA: only one human, controlling team A — no ready-tap lobby needed
@@ -1269,29 +1310,74 @@ modeSolo.addEventListener('click', () => {
 // known fixed layout rather than doing general multi-QR detection), and
 // assemble them into a playable replay. No arcade #toolbar here — replay
 // gets its own custom playback bar, wired inside game.js's startGame().
+// No longer a mode-grid tile (see conversation — that slot is
+// #modeJoinCode now): reachable only from the sidebar's own Replay entry
+// below, so its header is static markup in index.html rather than cloned
+// from a tile that doesn't exist anymore.
 const replayUploadOverlay = document.getElementById('replayUploadOverlay');
 const replayUploadBox = document.getElementById('replayUploadBox');
 const replayFileInput = document.getElementById('replayFileInput');
 const replayChooseFileBtn = document.getElementById('replayChooseFileBtn');
 const replayUploadBackBtn = document.getElementById('replayUploadBackBtn');
 const replayUploadStatus = document.getElementById('replayUploadStatus');
-const replayModeIcon = document.getElementById('replayModeIcon');
-const replayModeTitle = document.getElementById('replayModeTitle');
 
-modeReplay.addEventListener('click', () => {
+function showReplayUpload() {
   audio.play('button');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
-  replayModeIcon.replaceChildren(modeIconSvg('replay'));
-  replayModeTitle.textContent = MODE_LABELS.replay;
+  vibeSubOverlay.classList.add('hidden');
   replayUploadStatus.textContent = '';
   replayUploadOverlay.classList.remove('hidden');
-});
-// Sidebar's own Replay entry (see index.html) reuses the exact tile above
-// rather than duplicating its upload-flow logic — same activeStopGame guard
-// as the identity pill, since this is reachable from outside mode-select too.
+}
+// Sidebar's own Replay entry (see index.html) — same activeStopGame guard as
+// the identity pill, since this is reachable from outside mode-select too.
 const navReplay = document.getElementById('navReplay');
-navReplay.addEventListener('click', () => { if (!activeStopGame) modeReplay.click(); });
+navReplay.addEventListener('click', () => { if (!activeStopGame) showReplayUpload(); });
+
+// ---- "Join with a code" (see conversation) — was the Replay tile's slot,
+// now a direct shortcut into joining an already-created private match by
+// its 4-character code, skipping the vibe/P&P-Remote picker entirely. Own
+// fixed Nimiq-Green tint (index.html's #joinCodeOverlay, style.css's
+// .mode-joincode) rather than the vibe-driven tint every other config-panel
+// here uses, since this screen exists outside that picker. Reuses
+// joinMatch() below (same connect logic Remote Match's own Join screen
+// uses), just with its own entry/retry screen.
+const joinCodeOverlay = document.getElementById('joinCodeOverlay');
+const joinCodeBackBtn = document.getElementById('joinCodeBackBtn');
+const joinCodeModeIcon = document.getElementById('joinCodeModeIcon');
+const joinCodeContent = document.getElementById('joinCodeContent');
+// Set once — this panel's icon never changes.
+joinCodeModeIcon.replaceChildren(modeIconSvg('joincode'));
+joinCodeModeIcon.setAttribute('aria-label', MODE_LABELS.joincode);
+
+function showJoinCodeScreen(errorMsg) {
+  hostedRoomNet = null;
+  classicCustomOverlay.classList.add('hidden');
+  customSettingsOverlay.classList.add('hidden');
+  hideNetPanel();
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  vibeSubOverlay.classList.add('hidden');
+  joinCodeContent.innerHTML = `
+    <h2>Join with a code</h2>
+    <input id="joinCodeInput" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="XXXX" />
+    <button class="bigbtn" id="joinCodeSubmitBtn">Join</button>
+    ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
+  `;
+  const input = document.getElementById('joinCodeInput');
+  const joinBtn = document.getElementById('joinCodeSubmitBtn');
+  input.addEventListener('input', () => {
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+  });
+  joinBtn.onclick = () => { audio.play('button'); joinMatch(input.value, joinBtn, showJoinCodeScreen); };
+  joinCodeOverlay.classList.remove('hidden');
+}
+modeJoinCode.addEventListener('click', () => { audio.play('button'); showJoinCodeScreen(); });
+joinCodeBackBtn.addEventListener('click', () => {
+  audio.play('button');
+  joinCodeOverlay.classList.add('hidden');
+  returnToModeSelect();
+});
 // League/How to/About/Partnership/Nimiq (index.html's #navLeague/#navHowTo/
 // #navAbout/#navPartnership/#navNimiq) have no destination yet — visual sidebar shell
 // only for this pass, intentionally left unwired.
@@ -1371,8 +1457,8 @@ async function joinLan(raw, joinBtn) {
   }
 }
 
-// Shared by Duel LAN and Match Réseau (see showMatchJoinScreen/hostMatch
-// below) — both connect the exact same way from here on (same net.js
+// Shared by Duel LAN and Match Réseau (see joinMatch/hostMatch below) —
+// both connect the exact same way from here on (same net.js
 // interface, see CLAUDE.md "Network match"), only how `net` was obtained
 // differs. `onLost(msg)` decides where "opponent disconnected" sends the
 // player back to — each mode's own entry screen, so an error there offers
@@ -1426,6 +1512,10 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
     hideLobby();
     showToolbar();
     activeMatchMode = 'remote';
+    // activeVibe is already correct for both roles by this point: the
+    // creator's own local pick, or (Remote Match joiner only) overridden to
+    // the creator's actual vibe as soon as the room was joined — see
+    // joinMatch's net.vibe handling above.
     activeStopGame = startGame({
       ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), identiconLabel: identityLabelOverride(net.myTeam), mobile: IS_MOBILE, matchConfig, vibe: activeVibe,
       // Remote Match only in practice (Duel LAN's magic link never goes
@@ -1441,10 +1531,14 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
 
 // ---- Match Réseau (see CLAUDE.md "Network match") — same lobby flow as Duel
 // LAN above (showWaitingScreen/showReadyScreen, same net.js interface), just
-// reached via a 4-character room code instead of typing a LAN address:
-// whoever taps "Créer" generates the code and is team A (first to connect to
-// that PartyKit room, see party/arbiter.js), whoever taps "Rejoindre" and
-// types it in is team B.
+// reached via a 4-character room code instead of typing a LAN address.
+// hostMatch() below generates the code and is team A (first to connect to
+// that PartyKit room, see party/arbiter.js); "Join with a code" (its own
+// #modeJoinCode tile, see conversation) is the only way in as team B now —
+// there's no in-Remote-Match Create/Join choice anymore, this whole screen
+// pair used to live behind one (showMatchChoiceScreen/showMatchJoinScreen,
+// both removed) that's since been replaced by showCreateMatchScreen going
+// straight to Classic/Custom.
 //
 // Alphabet excludes visually ambiguous characters (0/O, 1/I) since the code
 // is read off one screen and typed on another, often by voice or a glance
@@ -1458,41 +1552,6 @@ function generateMatchCode() {
   return code;
 }
 
-function showMatchChoiceScreen(errorMsg) {
-  hostedRoomNet = null;
-  // No heading here (icon-only header above already names the screen, see
-  // conversation) — straight to the two pills.
-  showNetPanel(`
-    <div style="display:flex; gap:12px;">
-      <button class="bigbtn" id="matchHostBtn">Create</button>
-      <button class="bigbtn" id="matchJoinBtn">Join</button>
-    </div>
-    ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
-  `);
-  // "Create" is the room creator — routes through Classic/Custom first (see
-  // conversation, point 13: the creator defines the rules, the joiner below
-  // never sees this screen at all and just receives whatever the creator
-  // saved). Persists/reads Remote's own Custom preset, independent from
-  // Pass & Play's (src/matchConfig.js). Curling isn't plugged into the
-  // engine yet (see conversation) — Create still walks through Classic/
-  // Custom (full arborescence, per explicit request) but lands on the
-  // placeholder instead of actually opening a room; Join has no
-  // Classic/Custom step to walk through in the first place, so it goes
-  // straight to the placeholder.
-  document.getElementById('matchHostBtn').onclick = () => {
-    audio.play('button');
-    showClassicCustomScreen('remote', (config) => {
-      if (activeVibe === 'curling') { showComingSoonScreen(); return; }
-      hostMatch(config);
-    }, () => showMatchChoiceScreen());
-  };
-  document.getElementById('matchJoinBtn').onclick = () => {
-    audio.play('button');
-    if (activeVibe === 'curling') { showComingSoonScreen(); return; }
-    showMatchJoinScreen();
-  };
-}
-
 async function hostMatch(matchConfig) {
   const code = generateMatchCode();
   showLoadingOverlay();
@@ -1500,21 +1559,24 @@ async function hostMatch(matchConfig) {
     const net = await connectMatch(code);
     // Stored server-side against this room (see party/arbiter.js) before
     // sharing the code with anyone — the joiner receives it back in its own
-    // 'joined' message (net.js) once it connects, never sends its own.
-    net.sendMatchConfig(matchConfig);
+    // 'joined' message (net.js) once it connects, never sends its own. Vibe
+    // rides along the same message/room field for the same reason (see
+    // joinMatch's own net.vibe handling) — "Join with a code" has no vibe
+    // tile of its own, but the actual match must still run whichever vibe
+    // the creator chose.
+    net.sendMatchConfig(matchConfig, activeVibe);
     hideLoadingOverlay();
     showMatchHostWaitingScreen(net, code, matchConfig);
   } catch (err) {
     hideLoadingOverlay();
-    showMatchChoiceScreen(err.message);
+    showCreateMatchScreen(err.message);
   }
 }
 
 // Same shape as showWaitingScreen above, but also displays the code (the
-// host is the one waiting to share it — the joiner already typed it in to
-// get here, see joinMatch below) and sends a disconnected opponent back to
-// the choice screen (a fresh "Create" gets a fresh code — the old one, tied
-// to this now-empty room, isn't reused).
+// host is the one waiting to share it) and sends a disconnected opponent
+// back to Classic/Custom (a fresh Classic/Custom pick gets a fresh code —
+// the old one, tied to this now-empty room, isn't reused).
 function showMatchHostWaitingScreen(net, code, matchConfig) {
   const teamLabel = net.myTeam === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
@@ -1528,41 +1590,41 @@ function showMatchHostWaitingScreen(net, code, matchConfig) {
   `);
   net.onOpponentJoined(() => {
     hostedRoomNet = null;
-    showReadyScreen(net, teamLabel, cls, (msg) => showMatchChoiceScreen(msg), matchConfig);
+    showReadyScreen(net, teamLabel, cls, (msg) => showCreateMatchScreen(msg), matchConfig);
   });
-  net.onDisconnect(() => { hostedRoomNet = null; showMatchChoiceScreen('The other player disconnected.'); });
+  net.onDisconnect(() => { hostedRoomNet = null; showCreateMatchScreen('The other player disconnected.'); });
 }
 
-function showMatchJoinScreen(errorMsg) {
-  hostedRoomNet = null;
-  showNetPanel(`
-    <h2>Join a match</h2>
-    <input id="matchCodeInput" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="XXXX" />
-    <button class="bigbtn" id="matchJoinSubmitBtn">Join</button>
-    ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
-  `);
-  const input = document.getElementById('matchCodeInput');
-  const joinBtn = document.getElementById('matchJoinSubmitBtn');
-  input.addEventListener('input', () => {
-    input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-  });
-  joinBtn.onclick = () => { audio.play('button'); joinMatch(input.value, joinBtn); };
-}
-
-async function joinMatch(code, joinBtn) {
+// retryScreen: where an error (bad code, connect failure) or a later
+// disconnect sends the player back to re-enter a code — "Join with a code"
+// (see conversation) is the only caller left now that Remote Match's own
+// in-flow Join screen is gone, so it always passes its own
+// showJoinCodeScreen to retry in place.
+async function joinMatch(code, joinBtn, retryScreen) {
   if (code.length !== 4) return;
   if (joinBtn) joinBtn.disabled = true;
   showLoadingOverlay();
   try {
     const net = await connectMatch(code);
     hideLoadingOverlay();
+    // Adopt the creator's actual vibe (see hostMatch's sendMatchConfig /
+    // party/arbiter.js) instead of trusting whatever tile this client
+    // happened to be on before typing the code in — that pick only got them
+    // to the "enter code" screen, it was never a promise the match itself
+    // would run that vibe. Reassigning activeVibe here (not just threading
+    // net.vibe into this one startGame() call) keeps every other vibe-aware
+    // bit of UI between here and kickoff (tint classes, Change Settings)
+    // consistent too. No-op for Duel LAN, which never sends a vibe (net.vibe
+    // stays null there, see net.js) and for "Join with a code", which has no
+    // vibe tile of its own to have picked in the first place.
+    if (net.vibe) activeVibe = net.vibe;
     // The creator's matchConfig, as stored server-side and handed back in
     // this connection's own 'joined' message (see net.js/party/arbiter.js)
     // — this client never chooses/sends its own (point 13 of the brief).
-    showWaitingScreen(net, (msg) => showMatchJoinScreen(msg), net.matchConfig);
+    showWaitingScreen(net, (msg) => retryScreen(msg), net.matchConfig);
   } catch (err) {
     hideLoadingOverlay();
-    showMatchJoinScreen(err.message);
+    retryScreen(err.message);
   }
 }
 
