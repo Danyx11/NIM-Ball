@@ -1958,6 +1958,14 @@ export function startGame(opts = {}) {
   // current displayed state, persisting until either a newer message or a
   // mute toggle replaces it — no history, nothing recorded/replayed, just
   // "what's on screen right now". Only ever wired up when net is set.
+  //
+  // CHAT_ENABLED: the feature itself is fully built (this whole block), but
+  // its two windows were laid out for the old edge-to-edge board and have
+  // never been reworked for the v1.2 floating-board layout — they show up
+  // stuck to the bottom of the viewport, disconnected from the new chrome.
+  // Kept off (no window shown, no input wired) until that visual pass
+  // happens rather than deleting any of the underlying logic.
+  const CHAT_ENABLED = false;
   const chatBar = document.getElementById('chatBar');
   const chatTextA = document.getElementById('chatTextA');
   const chatTextB = document.getElementById('chatTextB');
@@ -2090,13 +2098,13 @@ export function startGame(opts = {}) {
     chatMuted = !chatMuted;
     chatBtnSlash.classList.toggle('show', chatMuted);
     chatBtnOnIcon.classList.toggle('hidden', !chatMuted);
-    if (net) {
+    if (net && CHAT_ENABLED) {
       showChatMessage(myTeam, chatMuted ? 'Chat OFF' : '');
       chatOwnInput.value = '';
       syncChatCompose();
     }
   }, { signal });
-  if (net) {
+  if (net && CHAT_ENABLED) {
     chatOppForm.classList.add('chat-window-form-hidden');
     chatOwnEmojiBtn.addEventListener('click', () => {
       chatOwnEmojiPicker.classList.toggle('hidden');
@@ -2129,10 +2137,11 @@ export function startGame(opts = {}) {
     }, { signal });
   } else {
     // Outside a LAN match there's no chat to mute — same click-SFX-only stub
-    // the whole toolbar used to have for this button (see main.js).
+    // the whole toolbar used to have for this button (see main.js). Also
+    // covers a live net match while CHAT_ENABLED is false (see above).
     chatBtn.addEventListener('click', () => {
       pressChatBtn();
-      console.log('[toolbar] chat pressed — no LAN match in progress');
+      console.log('[toolbar] chat pressed — no chat available');
     }, { signal });
   }
   // Sends the local mute toggle's current state to the opponent as soon as
@@ -2140,7 +2149,7 @@ export function startGame(opts = {}) {
   // before the "Chat OFF" ever went out just silently cancels. Unlike a real
   // chat send, this never touches the cooldown above — it has none of its own.
   function maybeAutoSyncMute() {
-    if (!net || chatMuted === chatLastSentMuted) return;
+    if (!net || !CHAT_ENABLED || chatMuted === chatLastSentMuted) return;
     net.sendChatMute(chatMuted);
     chatLastSentMuted = chatMuted;
   }
@@ -2299,27 +2308,29 @@ export function startGame(opts = {}) {
     startOverlay.classList.add('hidden');
     controlsEnabled = true;
     beginMatchIntro();
-    chatBar.classList.remove('hidden');
-    // While self-muted, the opponent's updates are simply dropped — they
-    // keep chatting into a void without knowing it (see the design note on
-    // tbtn-chat above). Our own echoed sends (team === myTeam) still apply
-    // normally, since that's how our own message actually gets displayed
-    // (see the optimistic showChatMessage call at send time too).
-    net.onChat(({ team, text }) => {
-      if (chatMuted && team !== myTeam) return;
-      // Only the opponent's messages get the "IN" cue — our own echo of the
-      // send we just made (already cued with "OUT" above) shouldn't chime
-      // twice.
-      if (team !== myTeam) audio.play('chatIn', { volume: 0.251 }); // -12dB
-      showChatMessage(team, text);
-    });
-    // Separate channel from onChat above (see net.sendChatMute) — same
-    // self-mute filter, since it's still "ignore everything from the other
-    // side while I'm off".
-    net.onChatMute(({ team, muted }) => {
-      if (chatMuted && team !== myTeam) return;
-      showChatMessage(team, muted ? 'Chat OFF' : '');
-    });
+    if (CHAT_ENABLED) {
+      chatBar.classList.remove('hidden');
+      // While self-muted, the opponent's updates are simply dropped — they
+      // keep chatting into a void without knowing it (see the design note on
+      // tbtn-chat above). Our own echoed sends (team === myTeam) still apply
+      // normally, since that's how our own message actually gets displayed
+      // (see the optimistic showChatMessage call at send time too).
+      net.onChat(({ team, text }) => {
+        if (chatMuted && team !== myTeam) return;
+        // Only the opponent's messages get the "IN" cue — our own echo of the
+        // send we just made (already cued with "OUT" above) shouldn't chime
+        // twice.
+        if (team !== myTeam) audio.play('chatIn', { volume: 0.251 }); // -12dB
+        showChatMessage(team, text);
+      });
+      // Separate channel from onChat above (see net.sendChatMute) — same
+      // self-mute filter, since it's still "ignore everything from the other
+      // side while I'm off".
+      net.onChatMute(({ team, muted }) => {
+        if (chatMuted && team !== myTeam) return;
+        showChatMessage(team, muted ? 'Chat OFF' : '');
+      });
+    }
     net.onLaunch(({ shotsA, shotsB, sweepA, sweepB, mancheIndex }) => {
       hideOverlay();
       phase = 'pending';
