@@ -1231,10 +1231,9 @@ cgGuestBtn.addEventListener('click', () => {
 modeLocal.addEventListener('click', () => {
   audio.play('button');
   showClassicCustomScreen('passplay', (config) => {
-    // Curling isn't plugged into the game engine yet (see conversation) —
-    // the tile/menu tree is fully built out, but the actual match never
-    // starts for this vibe until it is.
-    if (activeVibe === 'curling') { showComingSoonScreen(); return; }
+    // Curling is now plugged in for Pass & Play (see conversation) — Remote
+    // Match's own two gates (matchHostBtn/matchJoinBtn below) still show the
+    // placeholder, that path isn't wired up yet.
     modeOverlay.classList.add('hidden');
     startOverlay.classList.remove('hidden');
     showToolbar();

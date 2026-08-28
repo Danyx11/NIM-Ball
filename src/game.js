@@ -63,6 +63,15 @@ const ARENA_FRAME_MOBILE_SRC = `${ASSET_BASE}arena/frame-mobile.webp`;
 // pre-crop pairing as the summer frame above.
 const ARENA_FRAME_WINTER_SRC = `${ASSET_BASE}arena/frame-winter.webp`;
 const ARENA_FRAME_WINTER_MOBILE_SRC = `${ASSET_BASE}arena/frame-winter-mobile.webp`;
+// Curling vibe (see conversation / vibe param below): same desktop/mobile x
+// summer/winter set as above, baked by scripts/bake_curling_arena.py — the
+// target + its timer ring in place of the hexagon (hexagon/halfway-line
+// erased; the goal-crease arcs and bars are kept as-is, a real hazard even
+// though this mode never scores through them).
+const ARENA_FRAME_CURLING_SRC = `${ASSET_BASE}arena/frame-curling.webp`;
+const ARENA_FRAME_CURLING_MOBILE_SRC = `${ASSET_BASE}arena/frame-curling-mobile.webp`;
+const ARENA_FRAME_CURLING_WINTER_SRC = `${ASSET_BASE}arena/frame-curling-winter.webp`;
+const ARENA_FRAME_CURLING_WINTER_MOBILE_SRC = `${ASSET_BASE}arena/frame-curling-winter-mobile.webp`;
 const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
 // HUD rock glow — each of the 5 rocks baked into the arena art has a
 // hand-painted "flou"/soft halo + "light"/sharp core pair (Arena V2
@@ -151,15 +160,6 @@ export function startGame(opts = {}) {
   // detection are all the same code as a live match.
   const isReplay = Array.isArray(replayPoints) && replayPoints.length > 0;
   const replayAllPoints = isReplay ? replayPoints : [];
-  // Same 4 mode tints main.js's showLobby() dialogs (and #modeOverlay's own
-  // tile picker) already use — reused here so the in-match +1 goal panel's
-  // box (showGoalPanel below) is colored like the mode it's actually being
-  // played in, instead of the plain dark scrim. Identicon/score/address
-  // content is untouched — only the box behind them changes. P&P and Remote
-  // no longer get their own separate tint (passplay/remote) — both now tint
-  // by `vibe` (hockey/curling, see main.js's activeVibe), since Remote Match
-  // lives under either vibe rather than being its own thing.
-  const matchModeTint = isReplay ? 'replay' : aiTeam ? 'solo' : (vibe === 'curling' ? 'curling' : 'hockey');
   let replayCursor = { pointIdx: 0, mancheIdx: 0 };
   let replayPlaying = false;
   // Set by onGoal() the instant a point (not the whole replay) finishes,
@@ -491,9 +491,13 @@ export function startGame(opts = {}) {
   // arena art (see its comment above and MOBILE_CROP below) — same pixels,
   // ~57% less to download/decode for the sub-rect mobile ever shows.
   const arenaFrameImage = new Image();
-  arenaFrameImage.src = matchConfig.skin === 'winter'
-    ? (mobile ? ARENA_FRAME_WINTER_MOBILE_SRC : ARENA_FRAME_WINTER_SRC)
-    : (mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC);
+  arenaFrameImage.src = vibe === 'curling'
+    ? (matchConfig.skin === 'winter'
+      ? (mobile ? ARENA_FRAME_CURLING_WINTER_MOBILE_SRC : ARENA_FRAME_CURLING_WINTER_SRC)
+      : (mobile ? ARENA_FRAME_CURLING_MOBILE_SRC : ARENA_FRAME_CURLING_SRC))
+    : matchConfig.skin === 'winter'
+      ? (mobile ? ARENA_FRAME_WINTER_MOBILE_SRC : ARENA_FRAME_WINTER_SRC)
+      : (mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC);
 
   // Ball sprite, baked at 2x its on-screen diameter: the ball rotates every
   // frame so it never sits on a 1:1 pixel grid anyway, and downsampling a 2x
@@ -543,10 +547,14 @@ export function startGame(opts = {}) {
   // meant to be stamped as-is, not composited. Only 0-2 ever actually get
   // drawn live (WIN_SCORE=3 ends the match), 3 is here too since it was
   // baked anyway.
+  // Curling: separate set baked at a different position (outside the
+  // circular timer ring instead of flanking the hexagon, see
+  // scripts/bake_curling_arena.py) — same folder, "curling-" prefixed files.
   const scoreDigitImages = { A: {}, B: {} };
   for (const team of ['A', 'B']) {
     for (const d of ['0', '1', '2', '3']) {
-      const img = new Image(); img.src = `${ASSET_BASE}score-digits/${team}-${d}.png`;
+      const img = new Image();
+      img.src = vibe === 'curling' ? `${ASSET_BASE}score-digits/curling-${team}-${d}.png` : `${ASSET_BASE}score-digits/${team}-${d}.png`;
       scoreDigitImages[team][d] = img;
     }
   }
@@ -708,8 +716,12 @@ export function startGame(opts = {}) {
   // aim) and, once it finishes sliding from that final impact, plays the same
   // shrink-into-the-void animation as a goal loss (see the g.dead check in
   // physicsStep) — it keeps colliding/sliding normally right up until then.
-  const STONE_MAX_HITS = 8;
-  const STONE_HITS_PER_LED = 2; // hits needed to knock out each of the 4 LEDs/quadrants
+  // Curling: 4 HP instead of 8, 1 hit per LED instead of 2 (per explicit
+  // request) — the critical "last life" blink already triggers purely off
+  // `hits === STONE_MAX_HITS - 1`, so this alone is enough to get it right
+  // for curling too, no separate threshold to track.
+  const STONE_MAX_HITS = vibe === 'curling' ? 4 : 8;
+  const STONE_HITS_PER_LED = vibe === 'curling' ? 1 : 2; // hits needed to knock out each of the 4 LEDs/quadrants
   // debounce so a single prolonged/grazing contact (spanning several physics
   // frames) only ever counts as one hit — see registerStoneHit in resolveCollision
   const HIT_COOLDOWN_FRAMES = 20;
@@ -717,6 +729,14 @@ export function startGame(opts = {}) {
   const DEAD_LIGHTEN = 0.35;                   // lerp toward white after desaturating — see desaturateSprite
 
   const PW = FX1 - FX0, PH = FY1 - FY0;
+  // Curling: target dead center of the ice (CENTER_X/CY, where the hexagon
+  // sits) + its own timer ring — geometry must match
+  // scripts/bake_curling_arena.py's own TARGET_DIAM_FRAC/RING_MARGIN_PX
+  // exactly, the ring is baked directly into the arena art at these numbers.
+  const CURLING_TARGET_DIAM = 0.432 * PW;
+  const CURLING_TARGET_R = CURLING_TARGET_DIAM / 2;
+  const CIRCLE_TIMER_MARGIN = 26;
+  const CIRCLE_TIMER_R = CURLING_TARGET_R + CIRCLE_TIMER_MARGIN;
   // Always the same 3 hand-measured rack slots regardless of matchConfig —
   // never recomputed/re-spaced for fewer stones (see conversation: slot 1 is
   // the center spot, 0/2 are the two outer ones). ACTIVE_STONE_SLOTS below
@@ -1026,6 +1046,12 @@ export function startGame(opts = {}) {
 
   let scoreA = 0, scoreB = 0;
   let round = 1;
+  // Curling only: a point is 3 full aimA/aimB/reveal cycles (not "however
+  // many until a goal/wipeout", like classic) — bumped in beginStraighten()
+  // each time a manche settles without a goalResult, reset to 0 in
+  // beginRoundReset() (a new point starting). See resolveCurlingPoint below.
+  const CURLING_CYCLES_PER_POINT = 3;
+  let curlingCycle = 0;
   // Match-ticket stats (see src/ticket.js) — not gameplay state, just tallies
   // for the shareable end-of-match ticket. Reset alongside score/round on Rejouer.
   let matchStartTime = performance.now();
@@ -2678,7 +2704,11 @@ export function startGame(opts = {}) {
   // no args (state defaults to `entities`, silent defaults to false), fully
   // unchanged from before.
   function physicsStep(state = entities, silent = false) {
-    const list = [...state.A, ...state.B, state.ball];
+    // Curling has no ball — excluding it here (not just skipping its draw)
+    // keeps it out of the move/wall/bar/collision loops AND the SAFE_X0..Y1
+    // backstop clamp below entirely, so its untouched {CENTER_X,CY} position
+    // from resetPositions() never matters again for the rest of the match.
+    const list = vibe === 'curling' ? [...state.A, ...state.B] : [...state.A, ...state.B, state.ball];
     const boostZones = [sweep.A, sweep.B].filter(s => s.committed);
     let goalResult = null;
     for (const e of list) {
@@ -2742,9 +2772,24 @@ export function startGame(opts = {}) {
       // below (see NOTCH_X0/X1's own comment), so it's reached first in
       // practice — the notch wall never gets a chance to block entry to the
       // bar it's guarding.
+      // Curling has no goal to score and no per-request "dies against the
+      // bar" hazard either (see conversation — reverted from an earlier
+      // ask): a stone touching the bar there just bounces off it exactly
+      // like any other wall, same reflectOffBar() call the ball's own
+      // no-death bounce already uses, deliberately with no dead flag, no
+      // stonesDestroyed tally, and no stoneBarFlash — only the plain
+      // wall-hit squish/SFX reflectOffBar already plays either way.
       let barHit = false;
-      if (collideBar(e, BAR_LEFT)) { barHit = true; if (e === state.ball) { reflectOffBar(e, BAR_LEFT, silent); goalResult = 'goalB'; if (!silent) barGlowSide = 'left'; } else killStoneOnBar(e, BAR_LEFT, silent); }
-      if (collideBar(e, BAR_RIGHT)) { barHit = true; if (e === state.ball) { reflectOffBar(e, BAR_RIGHT, silent); goalResult = 'goalA'; if (!silent) barGlowSide = 'right'; } else killStoneOnBar(e, BAR_RIGHT, silent); }
+      if (collideBar(e, BAR_LEFT)) {
+        barHit = true;
+        if (e === state.ball || vibe === 'curling') { reflectOffBar(e, BAR_LEFT, silent); if (e === state.ball) { goalResult = 'goalB'; if (!silent) barGlowSide = 'left'; } }
+        else killStoneOnBar(e, BAR_LEFT, silent);
+      }
+      if (collideBar(e, BAR_RIGHT)) {
+        barHit = true;
+        if (e === state.ball || vibe === 'curling') { reflectOffBar(e, BAR_RIGHT, silent); if (e === state.ball) { goalResult = 'goalA'; if (!silent) barGlowSide = 'right'; } }
+        else killStoneOnBar(e, BAR_RIGHT, silent);
+      }
       if (barHit) continue;
 
       // Corner boxes gate BOTH the flat-wall checks below AND the corner
@@ -3022,6 +3067,16 @@ export function startGame(opts = {}) {
       diffMancheResults('headless vs real (no-goal settle)', devHeadlessExpected, quantizeMancheResult(entities, null));
       devHeadlessExpected = null;
     }
+    // Curling: a point is a fixed CURLING_CYCLES_PER_POINT manches, not
+    // "however many until a goal" — once the last one settles without
+    // (early) wipeout, resolve who's closest instead of continuing to the
+    // next manche. See CURLING_CYCLES_PER_POINT/curlingCycle above.
+    if (vibe === 'curling') {
+      curlingCycle++;
+      if (curlingCycle >= CURLING_CYCLES_PER_POINT) { resolveCurlingPoint(); return; }
+      tryAdvanceAfterManche(beginAimPhase);
+      return;
+    }
     // This function only ever runs when a manche settles *without* scoring
     // (see runSimTick) — i.e. "continue to the next manche of the same
     // point", the manche-level counterpart to onGoal's replayPointAdvancePending
@@ -3067,6 +3122,61 @@ export function startGame(opts = {}) {
     }
   }
 
+  // How long the losing stones sit grey/desaturated (deadMix, see drawStone)
+  // before the point panel shows — set directly here rather than a plain
+  // .dead flag, since .dead is what physicsStep's deadPending block treats as
+  // "knocked out, shrink into the void once settled" (see registerStoneHit) —
+  // these stones didn't die, they just lost the point, so they stay fully
+  // visible on the ice, just recolored. beginRoundReset()/updateRoundReset()
+  // already fade any nonzero deadMix back to 0 while sliding stones back to
+  // their kickoff spot (see g._reviveFrom there), so no separate revive logic
+  // is needed here — the very next round reset undoes this for free.
+  const CURLING_REVEAL_MS = 2000;
+  // Curling-only scoring: after CURLING_CYCLES_PER_POINT manches (see
+  // beginStraighten above), whichever alive (!dead, !out) stone sits closest
+  // to the target's own center (CENTER_X/CY — same spot the hexagon used to
+  // occupy) wins the point for its team. Reuses onGoal()/resolveGoal()
+  // verbatim below (the +1 panel, WIN_SCORE check, beginRoundReset) exactly
+  // like a real goal would — the "isWipeout" flag is always false here, a
+  // curling point never has the classic wipeout SFX/framing even if one
+  // team happens to have zero surviving stones by this point (see the
+  // physicsStep 'wipeoutA'/'wipeoutB' early-exit above, which still applies
+  // and reuses this same onGoal path if a team is fully wiped out before
+  // all 3 manches even finish).
+  function resolveCurlingPoint() {
+    let bestTeam = null, bestStone = null, bestDist = Infinity;
+    for (const team of ['A', 'B']) {
+      for (const g of entities[team]) {
+        if (g.dead || g.out) continue;
+        const d = Math.hypot(g.x - CENTER_X, g.y - CY);
+        if (d < bestDist) { bestDist = d; bestTeam = team; bestStone = g; }
+      }
+    }
+    if (bestTeam) {
+      // Every other still-alive stone (both teams, including the winning
+      // team's own other two) reads as "lost this point" — grey out now so
+      // it's visible under the reveal pause, not just implied by the panel.
+      for (const g of [...entities.A, ...entities.B]) {
+        if (g !== bestStone && !g.dead && !g.out) g.deadMix = 1;
+      }
+      // phase must flip to 'goal' in the same tick onGoal() is called (see
+      // the identical pairing in runSimTick's 'sim' branch above) — leaving
+      // it at 'sim' let runSimTick keep seeing an already-settled board every
+      // frame and call beginStraighten() again and again, each time
+      // re-entering here and replaying the goal SFX on top of itself with
+      // nothing ever advancing (the bug this comment is fixing).
+      phase = 'goal';
+      onGoal(bestTeam, false, CURLING_REVEAL_MS);
+      return;
+    }
+    // Every stone from both teams destroyed in the same manche this loses to
+    // the physicsStep wipeout check are impossible (that returns earlier and
+    // never reaches beginStraighten at all) — this is only reachable if
+    // stonesPerTeam were ever 0, kept as a defensive fallback rather than an
+    // assert so a future config change can't softlock the match here.
+    tryAdvanceAfterManche(beginAimPhase);
+  }
+
   // ---------- Round / goal flow ----------
   // Held after a goal before the board resets, so the ball's still visible
   // sitting in the net (and the goal/wipeout SFX has room to finish) instead
@@ -3095,10 +3205,12 @@ export function startGame(opts = {}) {
   // This is a one-shot timestamp + side, self-clears once FLASH_MS elapses.
   const STONE_FLASH_MS = 260;
   let stoneBarFlash = null; // { side: 'left'|'right', t0: number } | null
-  function onGoal(scoringTeam, isWipeout) {
+  function onGoal(scoringTeam, isWipeout, pauseMs = GOAL_PAUSE_MS) {
     if (isWipeout) audio.play('wipeout');
     else audio.play('goal', { volume: 0.447 }); // -7dB
-    // Same GOAL_PAUSE_MS pause whether the round continues or the match just
+    // Same GOAL_PAUSE_MS pause (or, for curling, resolveCurlingPoint's own
+    // shorter CURLING_REVEAL_MS — pauseMs) whether the round continues or the
+    // match just
     // ended — even a winning goal/wipeout is instantly resolved as a state
     // flip, but the shot's impact is still playing out (ball still sliding
     // into the net, other stones bouncing/squishing) and phase stays 'goal'
@@ -3110,7 +3222,7 @@ export function startGame(opts = {}) {
     // board a full GOAL_PAUSE_MS before the result panel shows it.
     goalPending = { scoringTeam, isWipeout };
     goalPauseElapsed = false;
-    trackedTimeout(() => { goalPauseElapsed = true; }, GOAL_PAUSE_MS);
+    trackedTimeout(() => { goalPauseElapsed = true; }, pauseMs);
   }
   // Runs once GOAL_PAUSE_MS has elapsed AND no dead stone from this manche is
   // still mid-disappear — polled from runSimTick's 'goal' phase branch below
@@ -3216,12 +3328,19 @@ export function startGame(opts = {}) {
     // player dismisses it below, back into the next round.
     audio.stopAmbience();
     audio.play('pointOk', { volume: 0.45 }); // -7dB, clip is hot at full level
-    // Mode-tinted box (see matchModeTint above) — toggled directly here
-    // rather than in showOverlay() itself, since victory/disconnect/replay-
-    // loading overlays elsewhere in this file still want the plain dark scrim.
-    // goal-box-70 shrinks just the box to 70% of the full-bleed size (see
-    // style.css) — identicon/badge/address/score inside are untouched.
-    overlay.classList.add(`mode-${matchModeTint}`, 'goal-box-70');
+    // Tinted by whichever team just scored (blue for A, gold for B — see
+    // style.css's #overlay.team-a-scored/.team-b-scored), not by mode/vibe:
+    // this panel is the one place in a live match where "who scored" matters
+    // more than "which game we're playing" (see conversation — deliberately
+    // decoupled from the vibe/mode-select tint system everything else uses,
+    // including this same #overlay element's own exit-confirm dialog in
+    // main.js's showLobby()). Toggled directly here rather than in
+    // showOverlay() itself, since victory/disconnect/replay-loading overlays
+    // elsewhere in this file still want the plain dark scrim. goal-box-70
+    // shrinks just the box to 70% of the full-bleed size (see style.css) —
+    // identicon/badge/address/score inside are untouched.
+    const teamTintClass = scoringTeam === 'A' ? 'team-a-scored' : 'team-b-scored';
+    overlay.classList.add(teamTintClass, 'goal-box-70');
     showOverlay(resultPanelHtml(scoringTeam, cls, '+1'));
     fillResultIdenticon(scoringTeam);
     // Click-anywhere dismiss (no buttons here) — closing early doesn't rush
@@ -3229,7 +3348,7 @@ export function startGame(opts = {}) {
     // if that hasn't finished yet.
     overlay.addEventListener('click', () => {
       hideOverlay();
-      overlay.classList.remove(`mode-${matchModeTint}`, 'goal-box-70');
+      overlay.classList.remove(teamTintClass, 'goal-box-70');
       audio.playAmbience();
       goalPanelDismissed = true;
       maybeAdvanceRound();
@@ -3456,6 +3575,7 @@ export function startGame(opts = {}) {
     // maybeAdvanceRound()/showGoalPanel(), fired alongside this same call.
     roundResetAnimDone = false;
     goalPanelDismissed = false;
+    curlingCycle = 0; // new point starting — see CURLING_CYCLES_PER_POINT above
     // A real round boundary (goal/wipeout) — each team's single sweep
     // placement for the round to come is available again.
     sweep.A.used = false; sweep.B.used = false; sweep.A.rockClicked = false; sweep.B.rockClicked = false;
@@ -3779,7 +3899,12 @@ export function startGame(opts = {}) {
   // them means re-running it.
   const UNDERICE_SCORE_CY = 1158;             // midpoint between the hex's bottom edge (~1049) and FY1 (1274), nudged up ~4px per feedback
   const UNDERICE_SCORE_H = 200;                // rendered glyph height; native source glyphs are 109px tall
-  const UNDERICE_SCORE_CX_A = CENTER_X - 130, UNDERICE_SCORE_CX_B = CENTER_X + 130;
+  // Curling: the hexagon's old flanking spot (CENTER_X∓130) is buried under
+  // the target now — pinned outside the circular timer ring + 60px instead
+  // (see CIRCLE_TIMER_R below, and scripts/bake_curling_arena.py's own
+  // matching SCORE_CX, which is what's actually baked into these PNGs).
+  const UNDERICE_SCORE_CX_A = vibe === 'curling' ? CENTER_X - CIRCLE_TIMER_R - 60 : CENTER_X - 130;
+  const UNDERICE_SCORE_CX_B = vibe === 'curling' ? CENTER_X + CIRCLE_TIMER_R + 60 : CENTER_X + 130;
   function drawUnderIceScore() {
     drawUnderIceDigit('A', scoreA, UNDERICE_SCORE_CX_A);
     drawUnderIceDigit('B', scoreB, UNDERICE_SCORE_CX_B);
@@ -3794,7 +3919,7 @@ export function startGame(opts = {}) {
   function drawScoreHud() {
     drawUnderIceScore();
     if (phase === 'lanWait') drawWaitingLabel();
-    drawHexTimer();
+    if (vibe === 'curling') drawCircleTimer(); else drawHexTimer();
   }
 
   // LAN mode, local shot already sent: "waiting" burned under the ice between
@@ -3878,6 +4003,37 @@ export function startGame(opts = {}) {
     if (clampedT > HEX_TIMER_RED_FRACTION && hexTimerRingRedImage.complete && hexTimerRingRedImage.naturalWidth) {
       const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 1000 * HEX_TIMER_RED_PULSE_RATE);
       drawHexTimerWedge(hexTimerRingRedImage, half, HEX_TIMER_RED_FRACTION, clampedT, pulse);
+    }
+  }
+  // Curling only: same clock-wipe pie-sweep principle as drawHexTimer above,
+  // just a plain stroked arc traced on the ring baked around the target
+  // instead of clipping a baked hex-shaped image — a circle doesn't need
+  // pre-baked art to animate a wipe over, ctx.arc() draws the wedge directly.
+  const CIRCLE_TIMER_WIDTH = 10;
+  function drawCircleTimerArc(f0, f1, color, alphaMul) {
+    if (f1 <= f0) return;
+    const a0 = -Math.PI / 2 + Math.PI * 2 * f0, a1 = -Math.PI / 2 + Math.PI * 2 * f1;
+    ctx.save();
+    ctx.globalAlpha = alphaMul;
+    ctx.lineWidth = CIRCLE_TIMER_WIDTH;
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(CENTER_X, CY, CIRCLE_TIMER_R, a0, a1);
+    ctx.stroke();
+    ctx.restore();
+  }
+  function drawCircleTimer() {
+    const t = turnTimerProgress();
+    if (t === null || t <= 0) return;
+    const clampedT = Math.min(t, 1);
+    const team = aimingTeam();
+    const rgb = HALO_RGB[team || 'A'];
+    drawCircleTimerArc(0, Math.min(clampedT, HEX_TIMER_RED_FRACTION), `rgba(${rgb},0.9)`, 1);
+    if (clampedT > HEX_TIMER_RED_FRACTION) {
+      const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 1000 * HEX_TIMER_RED_PULSE_RATE);
+      drawCircleTimerArc(HEX_TIMER_RED_FRACTION, clampedT, 'rgba(235,60,60,0.95)', pulse);
     }
   }
 
@@ -5156,7 +5312,7 @@ export function startGame(opts = {}) {
     const blockers = entities[opponentTeam].filter(g => !g.out && !g.falling);
     const bodies = entities[team].filter(g => !g.out && !g.falling)
       .map(g => makeGhostBody(g, 'stone', STONE_R, STONE_MASS));
-    bodies.push(makeGhostBody(entities.ball, 'ball', BALL_R, BALL_MASS));
+    if (vibe !== 'curling') bodies.push(makeGhostBody(entities.ball, 'ball', BALL_R, BALL_MASS));
 
     // Only the aiming team's own not-yet-committed patch can ever apply here
     // (this cascade only ever renders for the currently-aiming team's own
@@ -5367,7 +5523,7 @@ export function startGame(opts = {}) {
     drawSweepOverlay();
     entities.A.forEach(g => { if (!g.out) drawStone(g); });
     entities.B.forEach(g => { if (!g.out) drawStone(g); });
-    if (!entities.ball.out) drawBall(entities.ball);
+    if (vibe !== 'curling' && !entities.ball.out) drawBall(entities.ball);
     // atmosphere.draw(ctx); // neutralized for perf, see note at createAtmosphere()
     syncSweepButton();
     drawHandoffMask();

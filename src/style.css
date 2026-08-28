@@ -1486,7 +1486,18 @@ button:disabled { opacity: 0.35; cursor: default; }
    default dim --ink-dim paragraph color (both blue-ish, similar luminance) —
    full-brightness ink instead. Gold/green tints already get proper dark ink
    above, so they're excluded here. */
-#overlay:not(.mode-curling):not(.mode-replay) p { color: var(--ink); }
+#overlay:not(.mode-curling):not(.mode-replay):not(.team-b-scored) p { color: var(--ink); }
+/* team-a-scored/team-b-scored: the +1 goal panel only (game.js's
+   showGoalPanel) — deliberately separate from the mode/vibe tints above.
+   Once a match is actually running, this one panel cares who just scored,
+   not which mode/vibe is being played (see conversation): Team A's own
+   --teamA blue, Team B's own --teamB gold, every mode/vibe alike (Hockey,
+   Curling, Solo, Replay). Same 0.55 wash + dark-ink-on-light convention as
+   the mode-* tints above — .goal-address/.goal-score inherit this via
+   `color` (no color of their own), same as .mode-curling/.mode-replay's
+   text already does. */
+#overlay.team-a-scored { background: rgba(63, 169, 245, 0.55); }
+#overlay.team-b-scored { background: rgba(255, 201, 77, 0.55); color: var(--bg-deep); --ink-dim: rgba(11, 31, 42, 0.7); }
 /* Shrinks just the +1 goal panel's own box to 70% of the full-bleed size
    (see showGoalPanel's goal-box-70 toggle in game.js) — content inside
    (identicon/badge/address/score) keeps its normal size untouched, just
