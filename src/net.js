@@ -72,8 +72,16 @@ function connectSocket(url) {
       // server-side (party/arbiter.js) so a joiner receives it back in its
       // own 'joined' message below instead of choosing its own.
       matchConfig: null,
-      sendMatchConfig(config) {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matchConfig', config }));
+      // Match Réseau only, same as matchConfig just above (see its own
+      // comment) — the creator's chosen vibe (hockey/curling), sent
+      // alongside the rules config so a joiner can't end up simulating a
+      // different vibe than the room it just connected to (see main.js's
+      // showMatchChoiceScreen/joinMatch, which force their local activeVibe
+      // to match this instead of trusting whatever tile the joiner happened
+      // to pick before typing the code in).
+      vibe: null,
+      sendMatchConfig(config, vibe) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matchConfig', config, vibe }));
       },
       // Creator only, sent right before close() when leaving the "share this
       // code" screen with nobody having joined yet (see main.js's
@@ -144,6 +152,7 @@ function connectSocket(url) {
       if (msg.type === 'joined') {
         net.myTeam = msg.team;
         net.matchConfig = msg.matchConfig || null;
+        net.vibe = msg.vibe || null;
         settled = true;
         resolve(net);
       } else if (msg.type === 'full') {

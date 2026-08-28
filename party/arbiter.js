@@ -65,6 +65,14 @@ export class Arbiter extends Server {
     // other relayed payload here — matchConfig shape/defaults live in
     // src/matchConfig.js, not duplicated here.
     this.matchConfig = null;
+    // Room creator's chosen vibe (hockey/curling — see src/net.js's
+    // sendMatchConfig / main.js hostMatch), relayed the exact same way as
+    // matchConfig just above and for the same reason: game.js's physics
+    // (ball or no ball, stone HP, scoring) branches on vibe, so a joiner
+    // that picked a different vibe tile locally before typing in the code
+    // would simulate a different game entirely — same opaque blob treatment
+    // as matchConfig, set once by team A and handed to team B on join.
+    this.vibe = null;
     // Set by the creator explicitly leaving the "share this code" screen
     // before anyone joined (see main.js's matchNetworkBackBtn / net.js's
     // cancelRoom) — the code itself is just this room's name, so there's no
@@ -137,7 +145,7 @@ export class Arbiter extends Server {
     // at this point — it already knows its own choice locally, see main.js)
     // and team B (joiner) gets whatever A already stored, assuming the
     // normal flow (Custom Settings -> SAVE -> only then share the code).
-    this.send(connection, { type: 'joined', team, matchConfig: this.matchConfig });
+    this.send(connection, { type: 'joined', team, matchConfig: this.matchConfig, vibe: this.vibe });
     const opponent = this.players[otherTeam(team)];
     if (opponent) {
       this.send(opponent, { type: 'opponentJoined' });
@@ -161,6 +169,7 @@ export class Arbiter extends Server {
       // beyond that, same trust model as every other client-sent field this
       // arbiter already relays as-is (shots, chat text, etc).
       this.matchConfig = msg.config;
+      this.vibe = msg.vibe || null;
     } else if (msg.type === 'shots') {
       this.shots[team] = msg.stones;
       this.sweeps[team] = msg.sweep || null;
