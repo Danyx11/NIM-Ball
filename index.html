@@ -215,7 +215,7 @@
           <circle cx="140" cy="50" r="2.4" fill="currentColor"/>
         </svg>
       </div>
-      <p>Tourne ton téléphone en mode paysage</p>
+      <p>Rotate your phone to landscape</p>
     </div>
   </div>
   <!-- "Fullscreen recommended" intro gate, mobile-only, parked behind
@@ -232,10 +232,10 @@
        chrome on that browser. -->
   <div id="fsRecommendOverlay" class="gate-overlay hidden" style="display:none">
     <div class="gate-box">
-      <button id="fsRecommendIcon" class="gate-icon" type="button" aria-label="Passer en plein écran">
+      <button id="fsRecommendIcon" class="gate-icon" type="button" aria-label="Go fullscreen">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9V4h5v2H6v3H4zm0 6h2v3h3v2H4v-5zm16-6h-2V6h-3V4h5v5zm0 6v5h-5v-2h3v-3h2z"/></svg>
       </button>
-      <p id="fsRecommendText">Plein écran recommandé</p>
+      <p id="fsRecommendText">Fullscreen recommended</p>
     </div>
   </div>
   <!-- Title/splash screen, the very first thing every non-magic-link entry
@@ -246,7 +246,7 @@
        other public/ asset. Dismissing it reveals whatever #modeOverlay's own
        gating chain (rotate/fullscreen gates, see revealMenu() in main.js)
        decides comes next. -->
-  <div id="homeOverlay" role="button" tabindex="0" aria-label="Jouer"></div>
+  <div id="homeOverlay" role="button" tabindex="0" aria-label="Play"></div>
   <div id="game-card">
   <div id="scene">
   <img id="bg-nature" alt="">
@@ -266,7 +266,7 @@
            regardless of actual state) plus a fresh vector glyph swapped
            for on/off, since both states needed to be real vector icons,
            not one borrowed from the baked art. -->
-      <button class="tbtn" id="tbtn-sound" type="button" aria-label="Son">
+      <button class="tbtn" id="tbtn-sound" type="button" aria-label="Sound">
         <img class="tbtn-base" id="tbtn-sound-img" alt=""><img class="tbtn-cap" id="tbtn-sound-cap" alt="">
         <div class="tbtn-muted-slash" id="tbtn-sound-slash"></div>
         <div class="mc-icon-backdrop mc-sound-anchor"></div>
@@ -279,13 +279,13 @@
           <div class="tbtn-muted-slash" id="tbtn-chat-slash"></div>
           <svg class="mc-icon-overlay mc-chat-anchor hidden" id="tbtn-chat-on-icon" viewBox="0 0 24 24" aria-hidden="true"><polygon fill="#c2e8f2" points="22.00,10.13 22.02,11.20 22.01,12.30 21.57,13.30 20.82,14.14 20.42,15.10 19.60,15.78 18.78,16.40 17.98,16.98 17.23,17.58 16.38,18.04 15.50,18.40 14.52,18.43 13.58,18.43 12.73,18.81 11.82,18.86 10.91,18.81 9.97,18.83 9.12,18.43 8.27,18.10 7.25,18.04 1.66,22.60 3.85,15.92 3.07,15.18 2.59,14.24 2.22,13.25 1.79,12.26 1.46,11.22 1.40,10.13 1.46,9.04 1.79,8.00 2.22,7.01 2.59,6.02 3.42,5.28 3.85,4.34 4.85,3.86 5.44,3.04 6.40,2.68 7.25,2.22 8.27,2.15 9.12,1.83 10.05,1.83 10.91,1.45 11.82,1.40 12.73,1.45 13.58,1.83 14.52,1.83 15.50,1.86 16.38,2.22 17.23,2.68 18.20,3.04 18.78,3.86 19.60,4.48 20.42,5.16 21.19,5.96 21.57,6.96 22.01,7.96 22.02,9.06"/></svg>
         </button>
-        <button class="tbtn" id="tbtn-exit" type="button" aria-label="Quitter">
+        <button class="tbtn" id="tbtn-exit" type="button" aria-label="Exit">
           <img class="tbtn-base" id="tbtn-exit-img" alt=""><img class="tbtn-cap" id="tbtn-exit-cap" alt="">
         </button>
       </div>
     </div>
     <div id="toolbar-bottom" class="hidden">
-      <button class="tbtn" id="tbtn-sweep" type="button" aria-label="Balai">
+      <button class="tbtn" id="tbtn-sweep" type="button" aria-label="Sweep">
         <img class="tbtn-base" id="tbtn-sweep-img" alt=""><img class="tbtn-cap" id="tbtn-sweep-cap" alt="">
         <div class="tbtn-used-cross" id="tbtn-sweep-cross"></div>
         <div class="mc-gray-overlay hidden" id="tbtn-sweep-gray"></div>
@@ -309,15 +309,15 @@
       <div id="replayBottomBar">
         <div id="replaySegments"></div>
         <div id="replayTransport">
-          <button id="replaySoundBtn" type="button" aria-label="Son"></button>
-          <button id="replayPrevBtn" type="button" aria-label="Manche précédente">
+          <button id="replaySoundBtn" type="button" aria-label="Sound"></button>
+          <button id="replayPrevBtn" type="button" aria-label="Previous manche">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="2.4" height="14" fill="currentColor"/><polygon points="19,5 19,19 8,12" fill="currentColor"/></svg>
           </button>
-          <button id="replayPlayBtn" type="button" aria-label="Lecture"></button>
-          <button id="replayNextBtn" type="button" aria-label="Manche suivante">
+          <button id="replayPlayBtn" type="button" aria-label="Play"></button>
+          <button id="replayNextBtn" type="button" aria-label="Next manche">
             <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5,5 5,19 16,12" fill="currentColor"/><rect x="16.6" y="5" width="2.4" height="14" fill="currentColor"/></svg>
           </button>
-          <button id="replayExitBtn" type="button" aria-label="Quitter le replay">
+          <button id="replayExitBtn" type="button" aria-label="Exit replay">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
           </button>
         </div>
@@ -663,13 +663,13 @@
     <div id="startOverlay" class="team-select hidden">
       <div class="half a" id="halfA">
         <div class="check" id="checkA">○</div>
-        <div class="tag">ÉQUIPE BLEUE</div>
-        <div class="sub">Touche ici quand tu es prêt</div>
+        <div class="tag">BLUE TEAM</div>
+        <div class="sub">Tap here when you're ready</div>
       </div>
       <div class="half b" id="halfB">
         <div class="check" id="checkB">○</div>
-        <div class="tag">ÉQUIPE JAUNE</div>
-        <div class="sub">Touche ici quand tu es prêt</div>
+        <div class="tag">YELLOW TEAM</div>
+        <div class="sub">Tap here when you're ready</div>
       </div>
     </div>
   </div>
@@ -701,7 +701,7 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
             </button>
           </div>
-          <button class="chat-window-send" id="chatSendBtnA" type="submit" aria-label="Envoyer" disabled>➤</button>
+          <button class="chat-window-send" id="chatSendBtnA" type="submit" aria-label="Send" disabled>➤</button>
         </div>
         <div class="chat-emoji-picker hidden" id="chatEmojiPickerA"></div>
       </form>
@@ -720,7 +720,7 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
             </button>
           </div>
-          <button class="chat-window-send" id="chatSendBtnB" type="submit" aria-label="Envoyer" disabled>➤</button>
+          <button class="chat-window-send" id="chatSendBtnB" type="submit" aria-label="Send" disabled>➤</button>
         </div>
         <div class="chat-emoji-picker hidden" id="chatEmojiPickerB"></div>
       </form>
