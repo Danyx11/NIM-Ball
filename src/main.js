@@ -156,23 +156,15 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
   if (IS_MOBILE) {
     stageWrap.classList.add('stage-wrap-detached');
     gameCard.prepend(stageWrap);
-    // #chatBar (the LAN chat windows) is #stage-wrap's own flex sibling
-    // inside #app on desktop, stacking directly below the board in that
-    // flex column — but #app is still nested inside #scene, which keeps its
-    // own mobile zoom transform (scale(1.627) etc., see .mobile-layout
-    // #scene) even after #stage-wrap itself is pulled out of it above. Left
-    // in place, #chatBar was the only remaining child of that still-
-    // transformed #app, so it inherited the same crop math meant only for
-    // the board — confirmed via getBoundingClientRect landing entirely
-    // above the viewport (top ~-190px), not just misplaced. Detached here,
-    // mobile-only (desktop's own #chatBar positioning already works, it
-    // never lost its stage-wrap sibling), with its own absolute
-    // bottom-anchored position picking up in style.css's
-    // `.mobile-layout #chatBar` rule instead of the flex layout it can no
-    // longer participate in as a #game-card child.
-    gameCard.appendChild(document.getElementById('chatBar'));
   }
-  ['overlay', 'replayBar', 'syncToast'].forEach((id) => {
+  // #chatMask (the LAN chat overlay, source-HTML sibling of #stage-wrap
+  // same as the old #chatBar) gets the exact same unconditional #game-card
+  // reparenting as #overlay/#replayBar/#syncToast below — its own CSS rule
+  // is position:absolute;inset:0 against that final parent, same box as the
+  // canvas, so no separate mobile-only detach dance is needed here the way
+  // the old two-window #chatBar required (that one was a flex sibling below
+  // the board, not an inset:0 overlay on top of it).
+  ['overlay', 'replayBar', 'syncToast', 'chatMask'].forEach((id) => {
     gameCard.appendChild(document.getElementById(id));
   });
   // The pre-game menu screens (mode-select + Classic/Custom + Settings +
@@ -187,7 +179,7 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
   // Mobile keeps its existing behavior untouched (still #game-card children)
   // — #menuStage isn't part of mobile's layout yet.
   const menuHost = IS_MOBILE ? gameCard : document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -1384,9 +1376,102 @@ joinCodeBackBtn.addEventListener('click', () => {
   joinCodeOverlay.classList.add('hidden');
   returnToModeSelect();
 });
-// League/How to/About/Partnership/Nimiq (index.html's #navLeague/#navHowTo/
-// #navAbout/#navPartnership/#navNimiq) have no destination yet — visual sidebar shell
-// only for this pass, intentionally left unwired.
+// About (index.html's #navAbout/#aboutOverlay) — static info screen, same
+// show/hide dance as Replay's own sidebar entry above (guarded the same way
+// against opening mid-match).
+const aboutOverlay = document.getElementById('aboutOverlay');
+const aboutBackBtn = document.getElementById('aboutBackBtn');
+function showAboutScreen() {
+  audio.play('button');
+  constructionOverlay.classList.add('hidden');
+  nimiqOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  vibeSubOverlay.classList.add('hidden');
+  aboutOverlay.classList.remove('hidden');
+}
+function hideAboutScreen() {
+  audio.play('button');
+  aboutOverlay.classList.add('hidden');
+  returnToModeSelect();
+}
+const navAbout = document.getElementById('navAbout');
+// Re-clicking "About" while its panel is already open closes it back to the
+// mode-select drawer instead of just re-opening the same screen (same
+// on/off toggle a user expects from a nav item that's already active).
+navAbout.addEventListener('click', () => {
+  if (activeStopGame) return;
+  if (aboutOverlay.classList.contains('hidden')) showAboutScreen();
+  else hideAboutScreen();
+});
+aboutBackBtn.addEventListener('click', hideAboutScreen);
+// League/Partnership (index.html's #navLeague/#navPartnership) — neither has
+// a real destination yet, so both share one "Under construction" panel
+// (#constructionOverlay) rather than duplicating it, with the same
+// toggle-on-reclick principle as #aboutOverlay above; a JS-set title tells
+// the two apart. Tracks which of the two is currently showing so re-clicking
+// the OTHER one while this panel is open switches topic instead of closing.
+const constructionOverlay = document.getElementById('constructionOverlay');
+const constructionBackBtn = document.getElementById('constructionBackBtn');
+const constructionTitle = document.getElementById('constructionTitle');
+let activeConstructionLabel = null;
+function showConstructionScreen(label) {
+  audio.play('button');
+  aboutOverlay.classList.add('hidden');
+  nimiqOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  vibeSubOverlay.classList.add('hidden');
+  constructionTitle.textContent = label;
+  constructionOverlay.classList.remove('hidden');
+  activeConstructionLabel = label;
+}
+function hideConstructionScreen() {
+  audio.play('button');
+  constructionOverlay.classList.add('hidden');
+  activeConstructionLabel = null;
+  returnToModeSelect();
+}
+constructionBackBtn.addEventListener('click', hideConstructionScreen);
+function wireConstructionNav(id, label) {
+  document.getElementById(id).addEventListener('click', () => {
+    if (activeStopGame) return;
+    if (constructionOverlay.classList.contains('hidden') || activeConstructionLabel !== label) {
+      showConstructionScreen(label);
+    } else {
+      hideConstructionScreen();
+    }
+  });
+}
+wireConstructionNav('navLeague', 'League');
+wireConstructionNav('navPartnership', 'Partnership');
+// Nimiq (index.html's #navNimiq/#nimiqOverlay) — dedicated panel, same
+// toggle-on-reclick principle as #aboutOverlay above.
+const nimiqOverlay = document.getElementById('nimiqOverlay');
+const nimiqBackBtn = document.getElementById('nimiqBackBtn');
+function showNimiqScreen() {
+  audio.play('button');
+  aboutOverlay.classList.add('hidden');
+  constructionOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  vibeSubOverlay.classList.add('hidden');
+  nimiqOverlay.classList.remove('hidden');
+}
+function hideNimiqScreen() {
+  audio.play('button');
+  nimiqOverlay.classList.add('hidden');
+  returnToModeSelect();
+}
+const navNimiq = document.getElementById('navNimiq');
+navNimiq.addEventListener('click', () => {
+  if (activeStopGame) return;
+  if (nimiqOverlay.classList.contains('hidden')) showNimiqScreen();
+  else hideNimiqScreen();
+});
+nimiqBackBtn.addEventListener('click', hideNimiqScreen);
+// How to (index.html's #navHowTo) has no destination yet — visual sidebar
+// shell only for this pass, intentionally left unwired.
 replayUploadBackBtn.addEventListener('click', () => {
   audio.play('button');
   replayUploadOverlay.classList.add('hidden');

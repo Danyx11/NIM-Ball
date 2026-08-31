@@ -85,6 +85,10 @@ const ROCK_GLOW = {
   play: { x: 1610, y: 384, w: 142, h: 150, lx: 1658, ly: 432, lw: 46, lh: 54 },
   sound: { x: 790, y: 762, w: 100, h: 92, lx: 814, ly: 786, lw: 52, lh: 44 },
   exit: { x: 870, y: 372, w: 126, h: 122, lx: 898, ly: 400, lw: 70, lh: 66 },
+  // 6th rock, below the ice (chat bubble icon) — see scripts/bake_chat_rock.py
+  // for provenance ("Arena V2 chat BAL work.xcf", cross-checked x2 against
+  // this same file's own copies of the play/sound rocks above).
+  chat: { x: 1420, y: 1402, w: 86, h: 78, lx: 1436, ly: 1416, lw: 54, lh: 50 },
 };
 
 // Replay bar icons (see CLAUDE.md replay section) — plain inline SVG rather
@@ -115,6 +119,7 @@ export function preloadCoreAssets(mobile = false) {
     mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC,
     BALL_SRC,
     ...Object.keys(ROCK_GLOW).flatMap((id) => [`${ASSET_BASE}rocks/${id}-flou.webp`, `${ASSET_BASE}rocks/${id}-light.webp`]),
+    `${ASSET_BASE}rocks/chat-badge.webp`,
     ...['A', 'B'].flatMap((team) => ['0', '1', '2', '3'].map((d) => `${ASSET_BASE}score-digits/${team}-${d}.png`)),
     `${ASSET_BASE}hex-timer/ring-full.png`,
     `${ASSET_BASE}hex-timer/ring-full-red.png`,
@@ -534,6 +539,10 @@ export function startGame(opts = {}) {
     const light = new Image(); light.src = `${ASSET_BASE}rocks/${id}-light.webp`;
     rockGlowImages[id] = { flou, light };
   }
+  // Unread-message badge (see scripts/bake_chat_rock.py) — drawn on top of
+  // the chat rock's corner by drawChatBadge below, desktop only.
+  const chatBadgeImage = new Image();
+  chatBadgeImage.src = `${ASSET_BASE}rocks/chat-badge.webp`;
 
   // Under-ice score digits (see drawUnderIceScore below) — pre-baked per
   // team+digit by scripts/bake_score_digits.py, which merges the hand-
@@ -587,9 +596,9 @@ export function startGame(opts = {}) {
   // - sound: no flash, pure state sync (see drawRockGlow) to audio.isMuted()
   // - ice: sweep[team].rockClicked (see triggerSweep) — lit by default each
   //   round, dark after the first click, until the round resets
-  // - exit/play/laser: always lit at baseline, with a brief dip-then-recover
-  //   flicker on click (flashAt = timestamp, consumed in drawRockGlow)
-  const rockFlash = { exit: -Infinity, play: -Infinity };
+  // - exit/play/laser/chat: always lit at baseline, with a brief dip-then-
+  //   recover flicker on click (flashAt = timestamp, consumed in drawRockGlow)
+  const rockFlash = { exit: -Infinity, play: -Infinity, chat: -Infinity };
   const ROCK_FLASH_MS = 260; // within the 200-300ms asked for
   function flashRock(id) { rockFlash[id] = performance.now(); }
 
@@ -657,6 +666,7 @@ export function startGame(opts = {}) {
     play: { x0: 1610, y0: 384, x1: 1752, y1: 534 },
     sound: { x0: 790, y0: 762, x1: 890, y1: 854 },
     exit: { x0: 870, y0: 372, x1: 996, y1: 494 },
+    chat: { x0: 1420, y0: 1402, x1: 1506, y1: 1480 },
   };
   function rockZoneAt(pos) {
     for (const id in ROCK_ZONES) {
@@ -1008,6 +1018,21 @@ export function startGame(opts = {}) {
     ctx.restore();
     if (shineT !== null) drawHandoffShine(shineT);
     drawHandoffLabel(maskAlpha);
+  }
+  // Chat mask background: the same full-rink ice-mask texture/shape as the
+  // Pass & Play handoff above, toggled by toggleChatMask instead of the
+  // handoff state machine — plain instant show/hide, no in/out fade (the
+  // handoff's fade exists to sell "the other player can't peek", which
+  // doesn't apply here; a follow-up can add one for polish). The DOM chat
+  // thread/compose bar (#chatMask, reparented over this same canvas box by
+  // main.js) paint on top of this for the actual text.
+  function drawChatMaskBg() {
+    if (!chatMaskOpen) return;
+    if (!handoffMaskImage.complete || !handoffMaskImage.naturalWidth) return;
+    ctx.save();
+    ctx.clip(HANDOFF_MASK_PATH);
+    ctx.drawImage(handoffMaskImage, NOTCH_X0, FY0, NOTCH_X1 - NOTCH_X0, FY1 - FY0);
+    ctx.restore();
   }
   // Kicks off the 'in' stage; completeHandoff() (see onValidate/beginAimPhase)
   // applies whatever real phase transition was deferred once 'out' finishes.
@@ -1662,9 +1687,15 @@ export function startGame(opts = {}) {
         else if (rockId === 'sound' && onRockSound) onRockSound();
         else if (rockId === 'exit' && onRockExit) { onRockExit(); flashRock('exit'); }
         else if (rockId === 'laser' && onRockPower) onRockPower();
+        else if (rockId === 'chat' && net) { toggleChatMask(); flashRock('chat'); }
         return;
       }
     }
+    // Chat mask swallows all other board input while up (same spirit as the
+    // handoff mask above) — the rock-zone check above still lets a tap on
+    // the chat rock itself close it, since that runs unconditionally before
+    // this gate.
+    if (chatMaskOpen) return;
     if (!isAimingPhase(phase)) return;
     evt.preventDefault();
     const g = findStoneAt(pos);
@@ -1969,51 +2000,33 @@ export function startGame(opts = {}) {
   }
 
   // ---- Duel LAN chat (see server/arbiter.js's per-team cooldown + CLAUDE.md
-  // "chat" notes). Two windows, one per team, each showing that team's
-  // current displayed state, persisting until either a newer message or a
-  // mute toggle replaces it — no history, nothing recorded/replayed, just
-  // "what's on screen right now". Only ever wired up when net is set.
+  // "chat" notes). One scrolling thread, both teams' bubbles appended in
+  // order as they arrive — history persists for the rest of the match,
+  // nothing recorded/replayed. Only ever wired up when net is set.
   //
-  // CHAT_ENABLED: the feature itself is fully built (this whole block), but
-  // its two windows were laid out for the old edge-to-edge board and have
-  // never been reworked for the v1.2 floating-board layout — they show up
-  // stuck to the bottom of the viewport, disconnected from the new chrome.
-  // Kept off (no window shown, no input wired) until that visual pass
-  // happens rather than deleting any of the underlying logic.
-  const CHAT_ENABLED = false;
-  const chatBar = document.getElementById('chatBar');
-  const chatTextA = document.getElementById('chatTextA');
-  const chatTextB = document.getElementById('chatTextB');
-  const chatFormA = document.getElementById('chatFormA');
-  const chatFormB = document.getElementById('chatFormB');
-  const chatInputA = document.getElementById('chatInputA');
-  const chatInputB = document.getElementById('chatInputB');
-  const chatSendBtnA = document.getElementById('chatSendBtnA');
-  const chatSendBtnB = document.getElementById('chatSendBtnB');
-  const chatEmojiBtnA = document.getElementById('chatEmojiBtnA');
-  const chatEmojiBtnB = document.getElementById('chatEmojiBtnB');
-  const chatEmojiPickerA = document.getElementById('chatEmojiPickerA');
-  const chatEmojiPickerB = document.getElementById('chatEmojiPickerB');
-  const chatTimerFillA = document.getElementById('chatTimerFillA');
-  const chatTimerFillB = document.getElementById('chatTimerFillB');
-  // The local player only ever controls their own team's window — the
-  // opponent's is read-only (see chatOppForm.classList.add(...) below).
-  const chatOwnForm = myTeam === 'B' ? chatFormB : chatFormA;
-  const chatOwnInput = myTeam === 'B' ? chatInputB : chatInputA;
-  const chatOwnSendBtn = myTeam === 'B' ? chatSendBtnB : chatSendBtnA;
-  const chatOwnEmojiBtn = myTeam === 'B' ? chatEmojiBtnB : chatEmojiBtnA;
-  const chatOwnEmojiPicker = myTeam === 'B' ? chatEmojiPickerB : chatEmojiPickerA;
-  const chatOwnTimerFill = myTeam === 'B' ? chatTimerFillB : chatTimerFillA;
-  const chatOppForm = myTeam === 'B' ? chatFormA : chatFormB;
+  // CHAT_ENABLED: the feature itself is fully built (this whole block).
+  // v1.2's rework: a full-rink mask (same ice-mask texture/shape as the Pass
+  // & Play handoff mask, see drawChatMaskBg/toggleChatMask below) instead of
+  // the old edge-to-edge two-window layout, opened/closed by the chat rock
+  // (desktop, see ROCK_ZONES.chat in onPointerDown) or #tbtn-chat (mobile).
+  const CHAT_ENABLED = true;
+  const chatMask = document.getElementById('chatMask');
+  const chatThread = document.getElementById('chatThread');
+  const chatComposeForm = document.getElementById('chatComposeForm');
+  const chatComposeInput = document.getElementById('chatComposeInput');
+  const chatComposeSendBtn = document.getElementById('chatComposeSendBtn');
+  const chatComposeEmojiBtn = document.getElementById('chatComposeEmojiBtn');
+  const chatComposeEmojiPicker = document.getElementById('chatComposeEmojiPicker');
+  const chatComposeTimerFill = document.getElementById('chatComposeTimerFill');
+  const chatBadgeMobile = document.getElementById('tbtn-chat-badge');
+  const CHAT_MAX_LEN = 60;
   // Unlimited sends, but at most one every CHAT_COOLDOWN_MS — a flat, real-
   // time cooldown instead of the old "2 slots tied to aim/reveal phase"
-  // quota. Simpler to reason about ("wait 30s between messages"), simpler to
-  // enforce (one timestamp per team, no per-manche reset to keep in sync
-  // with the game's own phase machine), and 30s already matches
-  // TURN_TIMER_MS — this is deliberately the same pace as one aiming turn,
-  // not an arbitrary number. Composing is never blocked by the cooldown,
-  // only the actual send — see syncChatCompose below.
-  const CHAT_COOLDOWN_MS = 30000;
+  // quota. Simpler to reason about, simpler to enforce (one timestamp per
+  // team, no per-manche reset to keep in sync with the game's own phase
+  // machine). Composing is never blocked by the cooldown, only the actual
+  // send — see syncChatCompose below.
+  const CHAT_COOLDOWN_MS = 20000;
   const CHAT_TIMER_C = 2 * Math.PI * 8; // matches the r=8 circle in index.html
   let chatLastSentAt = 0; // far enough in the past that the very first send is never blocked
   function chatCooldownRemaining() { return Math.max(0, CHAT_COOLDOWN_MS - (Date.now() - chatLastSentAt)); }
@@ -2024,32 +2037,33 @@ export function startGame(opts = {}) {
     const sendEnabled = inputEnabled && chatCooldownRemaining() === 0;
     if (inputEnabled !== chatInputEnabledCache) {
       chatInputEnabledCache = inputEnabled;
-      chatOwnInput.disabled = !inputEnabled;
-      chatOwnEmojiBtn.disabled = !inputEnabled;
-      if (!inputEnabled) chatOwnEmojiPicker.classList.add('hidden');
+      chatComposeInput.disabled = !inputEnabled;
+      chatComposeEmojiBtn.disabled = !inputEnabled;
+      if (!inputEnabled) chatComposeEmojiPicker.classList.add('hidden');
     }
     if (sendEnabled !== chatSendEnabledCache) {
       chatSendEnabledCache = sendEnabled;
-      chatOwnSendBtn.disabled = !sendEnabled;
+      chatComposeSendBtn.disabled = !sendEnabled;
     }
     // Ring fill goes from empty (just sent) to full (ready) — updated every
     // frame while cooling down, cheap enough not to need its own dirty-check.
     const progress = 1 - chatCooldownRemaining() / CHAT_COOLDOWN_MS;
-    chatOwnTimerFill.style.strokeDashoffset = String(CHAT_TIMER_C * (1 - progress));
-    chatOwnTimerFill.classList.toggle('ready', sendEnabled);
+    chatComposeTimerFill.style.strokeDashoffset = String(CHAT_TIMER_C * (1 - progress));
+    chatComposeTimerFill.classList.toggle('ready', sendEnabled);
   }
   // team here is whichever side the message came from (from the arbiter's
   // echo, see net.onChat below) — always drawn on that team's fixed board
   // side, same for both players' screens (the board itself isn't mirrored).
+  // Appends a bubble (SMS-style thread, not a single overwritten line) and
+  // scrolls it into view — history persists for the rest of the match,
+  // nothing recorded/replayed.
   function showChatMessage(team, text) {
-    const el = team === 'A' ? chatTextA : chatTextB;
-    if (el.textContent === text) return; // nothing actually changed
-    el.textContent = text;
-    el.classList.remove('chat-pop');
-    if (text) {
-      void el.offsetWidth; // restart the CSS transition even if the window is already showing something
-      el.classList.add('chat-pop');
-    }
+    if (!text) return;
+    const bubble = document.createElement('div');
+    bubble.className = `chat-bubble chat-bubble-${team.toLowerCase()}`;
+    bubble.textContent = text;
+    chatThread.appendChild(bubble);
+    chatThread.scrollTop = chatThread.scrollHeight;
   }
   // A small fixed set rather than a full system emoji grid — quick reactions,
   // not a general-purpose keyboard (see design brief: "sober, simple").
@@ -2058,42 +2072,32 @@ export function startGame(opts = {}) {
     // Cleared up front so a fresh startGame() call after an in-app return to
     // mode-select (see stopGame() below) doesn't append a second row of
     // buttons on top of whatever the previous match already built here —
-    // #chatEmojiPickerA/B are shared, persistent DOM, not recreated per match.
+    // #chatComposeEmojiPicker is shared, persistent DOM, not recreated per match.
     picker.innerHTML = '';
     for (const emoji of CHAT_EMOJI) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = emoji;
       btn.addEventListener('click', () => {
-        input.value = Array.from(input.value + emoji).slice(0, 30).join('');
+        input.value = Array.from(input.value + emoji).slice(0, CHAT_MAX_LEN).join('');
         picker.classList.add('hidden');
         input.focus();
       }, { signal });
       picker.appendChild(btn);
     }
   }
-  buildEmojiPicker(chatEmojiPickerA, chatInputA);
-  buildEmojiPicker(chatEmojiPickerB, chatInputB);
-  // tbtn-chat: mutes/unmutes the LOCAL player's own side of the chat (see
-  // CLAUDE.md-worthy design note — this is a moderation switch, not a
-  // regular message, so it rides its own net.sendChatMute channel instead of
-  // the chat cooldown above (see src/net.js) — always instant, unlimited.
-  // Clicking updates this player's own window immediately, no network round
-  // trip — maybeAutoSyncMute() below is what actually tells the other
-  // player, as soon as possible. If toggled back before that fires,
-  // chatMuted just equals chatLastSentMuted again and nothing ever gets
-  // sent — no separate "cancel" bookkeeping needed.
+  buildEmojiPicker(chatComposeEmojiPicker, chatComposeInput);
+  // tbtn-chat (mobile) / the chat rock (desktop, see ROCK_ZONES.chat in
+  // onPointerDown) both call this same toggle — opens/closes the chat mask,
+  // same show/hide gesture as clicking the icon again to dismiss it.
   const chatBtn = document.getElementById('tbtn-chat');
   const chatBtnCap = document.getElementById('tbtn-chat-cap');
-  const chatBtnSlash = document.getElementById('tbtn-chat-slash');
-  // #mobileController's own state icon (see index.html's comment on
-  // #tbtn-sound and .mc-icon-overlay in style.css) — a green fill over the
-  // existing baked outline once chat IS muted (starts hidden in the markup:
-  // resting/default state is off); desktop keeps the slash, mobile hides it
-  // and uses this instead, both driven off the same chatMuted state. No
-  // "off" icon needed — the baked art's own resting look (plain outline, no
-  // fill) already reads as off.
-  const chatBtnOnIcon = document.getElementById('tbtn-chat-on-icon');
+  // Mute toggle (chatMuted/chatBtnSlash/chatBtnOnIcon/net.sendChatMute) is
+  // deliberately parked, not wired to any control right now — see
+  // conversation. chatMuted stays permanently false until that UI comes
+  // back, so syncChatCompose's `!chatMuted` check below is a harmless no-op
+  // in the meantime, and net.onChatMute (further down) simply never fires
+  // since nothing calls net.sendChatMute anymore.
   let chatMuted = false;
   let chatLastSentMuted = false; // what the opponent currently believes, as far as we've told them
   function pressChatBtn() {
@@ -2102,61 +2106,58 @@ export function startGame(opts = {}) {
     chatBtnCap.classList.add('pressed');
     audio.play('button');
   }
-  // The button itself (icon swap) always responds, even without a chat
-  // channel to actually mute (local pass-and-play/solo vs AI) — was gated
-  // entirely behind `if (net)` before, which made it look dead/unresponsive
-  // outside net play. The net-specific effects (message, compose sync)
-  // still only make sense with an actual opponent, so those stay gated
-  // inside.
+  let chatMaskOpen = false;
+  let chatUnread = false;
+  function setChatUnread(v) {
+    chatUnread = v;
+    if (chatBadgeMobile) chatBadgeMobile.classList.toggle('show', v);
+  }
+  function toggleChatMask() {
+    chatMaskOpen = !chatMaskOpen;
+    chatMask.classList.toggle('hidden', !chatMaskOpen);
+    if (chatMaskOpen) {
+      setChatUnread(false);
+      chatComposeInput.focus();
+    }
+    syncChatCompose();
+  }
+  // The button itself always responds, even without a chat channel to
+  // actually use (local pass-and-play/solo vs AI) — gating entirely behind
+  // `if (net)` would make it look dead/unresponsive outside net play.
   chatBtn.addEventListener('click', () => {
     pressChatBtn();
-    chatMuted = !chatMuted;
-    chatBtnSlash.classList.toggle('show', chatMuted);
-    chatBtnOnIcon.classList.toggle('hidden', !chatMuted);
-    if (net && CHAT_ENABLED) {
-      showChatMessage(myTeam, chatMuted ? 'Chat OFF' : '');
-      chatOwnInput.value = '';
-      syncChatCompose();
-    }
+    if (net && CHAT_ENABLED) toggleChatMask();
+    else console.log('[toolbar] chat pressed — no chat available');
   }, { signal });
   if (net && CHAT_ENABLED) {
-    chatOppForm.classList.add('chat-window-form-hidden');
-    chatOwnEmojiBtn.addEventListener('click', () => {
-      chatOwnEmojiPicker.classList.toggle('hidden');
+    chatComposeEmojiBtn.addEventListener('click', () => {
+      chatComposeEmojiPicker.classList.toggle('hidden');
     }, { signal });
     document.addEventListener('click', (e) => {
-      if (chatOwnEmojiPicker.classList.contains('hidden')) return;
+      if (chatComposeEmojiPicker.classList.contains('hidden')) return;
       // contains(), not === — a click on the emoji button's own SVG icon has
       // e.target set to the SVG (or one of its inner shapes), never the
       // <button> element itself, so the old strict-equality check missed it:
       // this same click bubbled up to here and immediately re-hid the picker
       // the button's own handler (above) had just shown, in one event.
-      if (chatOwnEmojiBtn.contains(e.target) || chatOwnEmojiPicker.contains(e.target)) return;
-      chatOwnEmojiPicker.classList.add('hidden');
+      if (chatComposeEmojiBtn.contains(e.target) || chatComposeEmojiPicker.contains(e.target)) return;
+      chatComposeEmojiPicker.classList.add('hidden');
     }, { signal });
-    chatOwnForm.addEventListener('submit', (e) => {
+    chatComposeForm.addEventListener('submit', (e) => {
       e.preventDefault();
       if (chatMuted || chatCooldownRemaining() > 0) return;
-      const text = Array.from(chatOwnInput.value.trim()).slice(0, 30).join('');
+      const text = Array.from(chatComposeInput.value.trim()).slice(0, CHAT_MAX_LEN).join('');
       if (!text) return;
       net.sendChat(text);
       chatLastSentAt = Date.now();
       audio.play('chatOut', { volume: 0.251 }); // -12dB
       // Shown locally right away rather than waiting on the arbiter's own
       // echo of this same send (net.onChat below) — same "own screen updates
-      // instantly, network catches up" pattern as the mute toggle above.
+      // instantly, network catches up" pattern used elsewhere in this file.
       showChatMessage(myTeam, text);
-      chatOwnInput.value = '';
-      chatOwnEmojiPicker.classList.add('hidden');
+      chatComposeInput.value = '';
+      chatComposeEmojiPicker.classList.add('hidden');
       syncChatCompose();
-    }, { signal });
-  } else {
-    // Outside a LAN match there's no chat to mute — same click-SFX-only stub
-    // the whole toolbar used to have for this button (see main.js). Also
-    // covers a live net match while CHAT_ENABLED is false (see above).
-    chatBtn.addEventListener('click', () => {
-      pressChatBtn();
-      console.log('[toolbar] chat pressed — no chat available');
     }, { signal });
   }
   // Sends the local mute toggle's current state to the opponent as soon as
@@ -2192,7 +2193,7 @@ export function startGame(opts = {}) {
     const { title, body } = NET_DEAD_END_COPY[kind];
     showOverlay(`<h2>${title}</h2><p>${body}</p>`);
     overlay.onclick = () => { stopGame(); onExit?.(); };
-    chatOwnInput.disabled = true; chatOwnSendBtn.disabled = true; chatOwnEmojiBtn.disabled = true;
+    chatComposeInput.disabled = true; chatComposeSendBtn.disabled = true; chatComposeEmojiBtn.disabled = true;
     chatInputEnabledCache = false; chatSendEnabledCache = false;
   }
   // J1->J2: no "pass the device" screen, straight into the other team's aim phase.
@@ -2353,18 +2354,23 @@ export function startGame(opts = {}) {
     controlsEnabled = true;
     beginMatchIntro();
     if (CHAT_ENABLED) {
-      chatBar.classList.remove('hidden');
-      // While self-muted, the opponent's updates are simply dropped — they
-      // keep chatting into a void without knowing it (see the design note on
-      // tbtn-chat above). Our own echoed sends (team === myTeam) still apply
-      // normally, since that's how our own message actually gets displayed
-      // (see the optimistic showChatMessage call at send time too).
+      // Mask itself starts hidden (chatMaskOpen=false) — CHAT_ENABLED just
+      // means the plumbing is live, opening is always an explicit click on
+      // the rock/#tbtn-chat.
+      //
+      // The arbiter echoes every chat message back to BOTH players,
+      // including the sender (see server/arbiter.js) — our own send already
+      // shows its bubble instantly at submit time (the optimistic
+      // showChatMessage call there), so re-appending it here on our own
+      // echo would double it up. Only the opponent's messages (team !==
+      // myTeam) get appended/cued/badged here; while self-muted, those are
+      // simply dropped — the opponent keeps chatting into a void without
+      // knowing it (see the design note on tbtn-chat above).
       net.onChat(({ team, text }) => {
-        if (chatMuted && team !== myTeam) return;
-        // Only the opponent's messages get the "IN" cue — our own echo of the
-        // send we just made (already cued with "OUT" above) shouldn't chime
-        // twice.
-        if (team !== myTeam) audio.play('chatIn', { volume: 0.251 }); // -12dB
+        if (team === myTeam) return;
+        if (chatMuted) return;
+        audio.play('chatIn', { volume: 0.251 }); // -12dB
+        if (!chatMaskOpen) setChatUnread(true);
         showChatMessage(team, text);
       });
       // Separate channel from onChat above (see net.sendChatMute) — same
@@ -3904,6 +3910,8 @@ export function startGame(opts = {}) {
   //   is false (matches the old toolbar cap's own on/off icon swap)
   // - exit/play: always lit at baseline, with a brief dip-then-recover
   //   flicker on click (ROCK_FLASH_MS)
+  // - chat: lit iff a LAN opponent is actually reachable (net truthy) — dark/
+  //   inert otherwise, same dip-then-recover flicker as exit/play on click
   //
   // Mobile-only: these rocks' functions are all reachable from the mobile
   // controller (see index.html's #mobileController), and their carved icons
@@ -3918,9 +3926,10 @@ export function startGame(opts = {}) {
       ice: iceLit ? 1 : 0,
       laser: isBasicLaser() ? 0 : 1,
       exit: 1, play: 1,
+      chat: net ? 1 : 0,
     };
     const now = performance.now();
-    for (const id of ['exit', 'play']) {
+    for (const id of ['exit', 'play', 'chat']) {
       const t = (now - rockFlash[id]) / ROCK_FLASH_MS;
       if (t >= 0 && t < 1) alphas[id] = 1 - 0.75 * Math.sin(Math.PI * t); // dip then recover
     }
@@ -3934,6 +3943,17 @@ export function startGame(opts = {}) {
       if (imgs.light.complete) ctx.drawImage(imgs.light, g.lx, g.ly, g.lw, g.lh);
       ctx.restore();
     }
+    drawChatBadge();
+  }
+  // Unread-message pastille — top-right corner of the chat rock's halo box,
+  // shown only while there's something new to see and the mask isn't already
+  // open (opening it clears chatUnread, see toggleChatMask).
+  function drawChatBadge() {
+    if (!net || !chatUnread || chatMaskOpen) return;
+    if (!chatBadgeImage.complete || !chatBadgeImage.naturalWidth) return;
+    const g = ROCK_GLOW.chat;
+    const size = g.w * 0.42;
+    ctx.drawImage(chatBadgeImage, g.x + g.w - size * 0.7, g.y - size * 0.3, size, size);
   }
 
   // Score is a filigrane baked "under the ice" rather than on a wood plaque
@@ -5577,6 +5597,7 @@ export function startGame(opts = {}) {
     // atmosphere.draw(ctx); // neutralized for perf, see note at createAtmosphere()
     syncSweepButton();
     drawHandoffMask();
+    drawChatMaskBg();
   }
 
   // ---------- Dev perf logging (temporary — see perf audit, delete once done) ----------
@@ -5691,10 +5712,10 @@ export function startGame(opts = {}) {
   // (toolbar/logo confirm dialogs); goalMenuBtn/replayExitBtn above call it
   // directly since they already have closure access, then hand off to
   // opts.onExit for the "now show mode-select" part this closure doesn't own.
-  // #chatTextA/B and #syncToast are persistent, page-level DOM shared across
+  // #chatThread and #syncToast are persistent, page-level DOM shared across
   // every match instance — unlike canvas-drawn content (redrawn fresh every
   // frame straight from this instance's own state, so it can never leak) or
-  // #chatEmojiPickerA/B (already rebuilt fresh per instance, see
+  // #chatComposeEmojiPicker (already rebuilt fresh per instance, see
   // buildEmojiPicker's own comment on this same class of bug), these two
   // only ever change reactively (a chat send, a sync-mismatch event) — with
   // nothing to react to yet in a brand new match, whatever they were last
@@ -5702,7 +5723,7 @@ export function startGame(opts = {}) {
   // a match entirely) and by "Play Again" (same instance, so there's no
   // fresh DOM to inherit a clean slate from either).
   function resetSharedMatchChrome() {
-    chatTextA.textContent = ''; chatTextB.textContent = '';
+    chatThread.innerHTML = '';
     syncToast.classList.add('hidden'); syncToast.classList.remove('problem');
   }
 
@@ -5729,16 +5750,9 @@ export function startGame(opts = {}) {
     // reused) would silently trigger this dead closure's stopGame()/onExit.
     overlay.onclick = null;
     if (isReplay) hideReplayBar();
-    chatBar.classList.add('hidden');
+    chatMask.classList.add('hidden');
+    setChatUnread(false);
     resetSharedMatchChrome();
-    // chatMuted itself is this instance's own closure state, already gone
-    // once this instance is torn down — the NEXT instance's chatMuted starts
-    // at its own default (false), so the slash icon needs to agree with
-    // that here (see resetSharedMatchChrome's own comment: not safe to fold
-    // this into it, "Play Again" reuses this instance's real chatMuted value
-    // instead of resetting it, and would otherwise fall out of sync with it).
-    chatBtnSlash.classList.remove('show');
-    chatBtnOnIcon.classList.add('hidden');
     // Visual ready-state left on #startOverlay's tiles (see halfA/halfB
     // above) would otherwise show as already-ready the next time a local
     // match is picked from mode-select.
