@@ -1211,33 +1211,40 @@ canvas {
    below), not the old two-window flex layout. Hidden outside a live LAN
    match / while closed (see src/game.js's toggleChatMask). z-index above the
    canvas but below #overlay's dialogs (10) — a chat send should never be
-   reachable through a "quit match?" confirm. */
+   reachable through a "quit match?" confirm.
+   pointer-events:none at the root, same click-through-except-its-own-
+   controls pattern as .mobile-layout #app / #toolbar-top elsewhere in this
+   file — .chat-thread/.chat-compose below get it back individually. Without
+   this, the whole inset:0 box (including the empty space over the chat rock
+   itself) swallowed every click, so re-tapping the rock to close the mask
+   never reached the canvas's own onPointerDown/rockZoneAt at all. */
 #chatMask {
-  position: absolute; inset: 0; z-index: 5; pointer-events: auto;
+  position: absolute; inset: 0; z-index: 5; pointer-events: none;
   display: flex; flex-direction: column;
 }
 #chatMask.hidden { display: none; }
-/* Thread pinned to the top ~55% of the mask, scrollable — per feedback, the
-   bottom stays clear for the compose bar + whatever room a phone's own
-   keyboard needs, rather than a bottom-anchored thread that would get
-   covered the moment the keyboard opens. Bubbles append oldest-to-newest
-   (see game.js's showChatMessage) and justify-content:flex-end keeps the
-   most recent ones pinned to the bottom of this box, growing upward, same
-   feel as a real SMS thread. */
+/* Thread + compose both confined to the actual ice rect, not the full
+   canvas (which includes a lot of decorative forest margin around a much
+   smaller centered rink) — inset % values are FX0/FX1/FY0/FY1 as fractions
+   of the canvas's own W/H (3312x1896), i.e. exactly .team-select's own
+   already-measured box (see that rule above) trimmed in a bit further so
+   bubbles/compose sit inside the ice, not flush against the wood frame. */
 .chat-thread {
-  position: absolute; top: 6%; left: 9%; right: 9%; height: 50%;
+  position: absolute; top: 35%; left: 35%; right: 34%; height: 20%;
+  pointer-events: auto;
   display: flex; flex-direction: column; justify-content: flex-end; gap: 6px;
   overflow-y: auto; padding: 4px 2px;
 }
 .chat-bubble {
-  max-width: 72%; padding: 7px 13px; border-radius: 16px; font-size: 14px; line-height: 1.3;
+  max-width: 85%; padding: 7px 13px; border-radius: 16px; font-size: 13px; line-height: 1.3;
   font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
   color: var(--ink); word-break: break-word;
 }
 .chat-bubble-a { align-self: flex-start; background: var(--teamA-dark); border-bottom-left-radius: 4px; }
 .chat-bubble-b { align-self: flex-end; background: var(--teamB-dark); border-bottom-right-radius: 4px; }
 .chat-compose {
-  position: absolute; left: 9%; right: 9%; bottom: 10%;
+  position: absolute; left: 35%; right: 34%; bottom: 35%;
+  pointer-events: auto;
   display: flex; gap: 8px; align-items: flex-end;
 }
 .chat-compose-input {
