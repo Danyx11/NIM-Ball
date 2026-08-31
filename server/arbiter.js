@@ -78,7 +78,7 @@ export function createArbiter(wssOptions) {
   // just client-side, since a client is trivially editable. A flat rolling
   // cooldown rather than a per-manche quota, so it's independent of the
   // game's own phase machine — no reset needed on resetRound() below.
-  const CHAT_COOLDOWN_MS = 30000;
+  const CHAT_COOLDOWN_MS = 20000;
   let lastChatAt = { A: 0, B: 0 };
   // Match-start handshake (see src/main.js's showReadyScreen /
   // src/net.js's sendReady): both sides must tap "Prêt" before EITHER
@@ -162,11 +162,11 @@ export function createArbiter(wssOptions) {
         const now = Date.now();
         if (now - lastChatAt[team] < CHAT_COOLDOWN_MS) return; // still cooling down
         // Array.from(...) rather than a plain string slice — a plain
-        // text.slice(0, 30) counts UTF-16 code units, which can split an
+        // text.slice(0, 60) counts UTF-16 code units, which can split an
         // emoji's surrogate pair in half; Array.from splits on whole
         // codepoints instead (see CHAT_EMOJI in game.js).
         const text = typeof msg.text === 'string'
-          ? Array.from(msg.text.replace(/[\r\n\t]+/g, ' ').trim()).slice(0, 30).join('')
+          ? Array.from(msg.text.replace(/[\r\n\t]+/g, ' ').trim()).slice(0, 60).join('')
           : '';
         if (!text) return;
         lastChatAt[team] = now;

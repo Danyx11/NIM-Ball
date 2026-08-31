@@ -278,6 +278,11 @@
           <img class="tbtn-base" id="tbtn-chat-img" alt=""><img class="tbtn-cap" id="tbtn-chat-cap" alt="">
           <div class="tbtn-muted-slash" id="tbtn-chat-slash"></div>
           <svg class="mc-icon-overlay mc-chat-anchor hidden" id="tbtn-chat-on-icon" viewBox="0 0 24 24" aria-hidden="true"><polygon fill="#c2e8f2" points="22.00,10.13 22.02,11.20 22.01,12.30 21.57,13.30 20.82,14.14 20.42,15.10 19.60,15.78 18.78,16.40 17.98,16.98 17.23,17.58 16.38,18.04 15.50,18.40 14.52,18.43 13.58,18.43 12.73,18.81 11.82,18.86 10.91,18.81 9.97,18.83 9.12,18.43 8.27,18.10 7.25,18.04 1.66,22.60 3.85,15.92 3.07,15.18 2.59,14.24 2.22,13.25 1.79,12.26 1.46,11.22 1.40,10.13 1.46,9.04 1.79,8.00 2.22,7.01 2.59,6.02 3.42,5.28 3.85,4.34 4.85,3.86 5.44,3.04 6.40,2.68 7.25,2.22 8.27,2.15 9.12,1.83 10.05,1.83 10.91,1.45 11.82,1.40 12.73,1.45 13.58,1.83 14.52,1.83 15.50,1.86 16.38,2.22 17.23,2.68 18.20,3.04 18.78,3.86 19.60,4.48 20.42,5.16 21.19,5.96 21.57,6.96 22.01,7.96 22.02,9.06"/></svg>
+          <!-- Unread-message pastille (see game.js's setChatUnread) — plain
+               CSS dot, not the baked chat-badge.webp used on the desktop
+               rock, since this one only ever needs to be a small red circle
+               over a DOM button. Starts hidden; .show toggled on/off. -->
+          <div class="tbtn-chat-badge" id="tbtn-chat-badge"></div>
         </button>
         <button class="tbtn" id="tbtn-exit" type="button" aria-label="Exit">
           <img class="tbtn-base" id="tbtn-exit-img" alt=""><img class="tbtn-cap" id="tbtn-exit-cap" alt="">
@@ -660,6 +665,60 @@
       </div>
       <div id="joinCodeContent" class="config-lobby-content"></div>
     </div>
+    <!-- About (see index.html's #navAbout sidebar link, wired in main.js) —
+         static info screen, no icon (no dedicated glyph for it like the mode
+         tiles/connect gate have). Same config-panel/mode-connect (Nimiq Light
+         Blue) shell + config-lobby-content centered-text convention as
+         joinCodeContent for the paragraphs below. -->
+    <div id="aboutOverlay" class="config-panel mode-connect hidden">
+      <button class="config-back" id="aboutBackBtn" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="config-header">
+        <span class="config-mode-title">About</span>
+      </div>
+      <div class="config-lobby-content about-content">
+        <h2>Play. Anyone. Anywhere.</h2>
+        <p>NimiCurl is a fast and playful game of ice, physics and precision.</p>
+        <p>Challenge a friend, plan your shots in secret, then watch both moves unfold at the same time. Bounce, collide, score — or simply get closer to the center.</p>
+        <p class="about-tagline">Two ways to play. One frozen arena.</p>
+        <p class="about-credit">Dev by Nimiq French Community Members / Powered by Nimiq</p>
+      </div>
+    </div>
+    <!-- Nimiq (index.html's #navNimiq sidebar link, wired in main.js) — same
+         config-panel/mode-connect shell + config-lobby-content convention as
+         #aboutOverlay above, its own dedicated panel since it has real copy
+         (unlike League/Partnership's shared placeholder below). -->
+    <div id="nimiqOverlay" class="config-panel mode-connect hidden">
+      <button class="config-back" id="nimiqBackBtn" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="config-header">
+        <span class="config-mode-title">Nimiq</span>
+      </div>
+      <div class="config-lobby-content">
+        <p>Nimiq is a blockchain built to make crypto simple and accessible to everyone.</p>
+        <p>Its biggest strength is its user-friendly approach: no technical knowledge is required to get started. Creating a wallet takes just a few seconds, directly in your browser, with a simple and intuitive experience.</p>
+        <p>Nimiq makes sending, receiving and using digital money feel as easy as using a regular app — without the usual complexity of crypto.</p>
+        <p>Nimicurl is one of the ways we want to make that experience even more accessible: by letting people discover Nimiq simply by playing a game with their friends.</p>
+      </div>
+    </div>
+    <!-- Shared placeholder panel for League/Partnership (index.html's
+         #navLeague/#navPartnership, wired in main.js) — same config-panel/
+         mode-connect shell + toggle-on-reclick principle as #aboutOverlay,
+         just a single reused overlay with a JS-filled title since both are
+         "not built yet" screens with identical body copy. -->
+    <div id="constructionOverlay" class="config-panel mode-connect hidden">
+      <button class="config-back" id="constructionBackBtn" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="config-header">
+        <span class="config-mode-title" id="constructionTitle"></span>
+      </div>
+      <div class="config-lobby-content">
+        <p>Under construction.</p>
+      </div>
+    </div>
     <div id="startOverlay" class="team-select hidden">
       <div class="half a" id="halfA">
         <div class="check" id="checkA">○</div>
@@ -674,57 +733,36 @@
     </div>
   </div>
   <!-- Duel LAN chat: only shown for a live LAN match (see src/game.js's
-       `if (net)` chat wiring). Two independent windows, one under each half
-       of the board — équipe bleue (A) on the left, équipe jaune (B) on the
-       right, matching the board's own fixed left/right layout. Each window
-       shows that team's current displayed state (a message, or "Chat OFF"
-       while that team has muted itself via #tbtn-chat) — persists until
-       either a newer message or a mute toggle replaces it, nothing
-       recorded/replayed. Only the local player's own window gets a compose
-       form (see game.js hiding the other one). Sends are unlimited in
-       count but rate-limited to one every 30s (see CHAT_COOLDOWN_MS in
-       game.js) — the small ring next to the emoji button fills back up as
-       that cooldown clears; composing/emoji-picking is never blocked by it,
-       only the actual send. -->
-  <div id="chatBar" class="hidden">
-    <div class="chat-window chat-window-a" id="chatWindowA">
-      <div class="chat-window-text" id="chatTextA"></div>
-      <form class="chat-window-form" id="chatFormA" autocomplete="off">
-        <input class="chat-window-input" id="chatInputA" type="text" maxlength="30" placeholder="Message (30 max)" disabled>
-        <div class="chat-window-controls">
-          <div class="chat-window-controls-top">
-            <svg class="chat-timer" viewBox="0 0 20 20" aria-hidden="true">
-              <circle class="chat-timer-track" cx="10" cy="10" r="8"></circle>
-              <circle class="chat-timer-fill" id="chatTimerFillA" cx="10" cy="10" r="8"></circle>
-            </svg>
-            <button class="chat-emoji-btn" id="chatEmojiBtnA" type="button" aria-label="Emoji" disabled>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-            </button>
-          </div>
-          <button class="chat-window-send" id="chatSendBtnA" type="submit" aria-label="Send" disabled>➤</button>
+       `if (net)` chat wiring). Full-rink mask, same ice-mask texture/shape
+       as the Pass & Play handoff mask (drawChatMaskBg/toggleChatMask in
+       game.js), opened/closed by the chat rock (desktop) or #tbtn-chat
+       (mobile) — replaces the old two-window edge-to-edge layout. Messages
+       from both teams append as bubbles into one scrolling thread pinned to
+       the top of the mask (team A left, team B right, matching the board's
+       own fixed left/right layout) — the bottom stays clear for the compose
+       bar + whatever room a phone's own keyboard needs. Sends are unlimited
+       in count but rate-limited (see CHAT_COOLDOWN_MS in game.js) — the
+       small ring next to the emoji button fills back up as that cooldown
+       clears; composing/emoji-picking is never blocked by it, only the
+       actual send. Reparented into #game-card by main.js, same as #overlay. -->
+  <div id="chatMask" class="hidden">
+    <div class="chat-thread" id="chatThread"></div>
+    <form class="chat-compose" id="chatComposeForm" autocomplete="off">
+      <input class="chat-compose-input" id="chatComposeInput" type="text" maxlength="60" placeholder="Message (60 max)" disabled>
+      <div class="chat-compose-controls">
+        <div class="chat-compose-controls-top">
+          <svg class="chat-timer" viewBox="0 0 20 20" aria-hidden="true">
+            <circle class="chat-timer-track" cx="10" cy="10" r="8"></circle>
+            <circle class="chat-timer-fill" id="chatComposeTimerFill" cx="10" cy="10" r="8"></circle>
+          </svg>
+          <button class="chat-emoji-btn" id="chatComposeEmojiBtn" type="button" aria-label="Emoji" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+          </button>
         </div>
-        <div class="chat-emoji-picker hidden" id="chatEmojiPickerA"></div>
-      </form>
-    </div>
-    <div class="chat-window chat-window-b" id="chatWindowB">
-      <div class="chat-window-text" id="chatTextB"></div>
-      <form class="chat-window-form" id="chatFormB" autocomplete="off">
-        <input class="chat-window-input" id="chatInputB" type="text" maxlength="30" placeholder="Message (30 max)" disabled>
-        <div class="chat-window-controls">
-          <div class="chat-window-controls-top">
-            <svg class="chat-timer" viewBox="0 0 20 20" aria-hidden="true">
-              <circle class="chat-timer-track" cx="10" cy="10" r="8"></circle>
-              <circle class="chat-timer-fill" id="chatTimerFillB" cx="10" cy="10" r="8"></circle>
-            </svg>
-            <button class="chat-emoji-btn" id="chatEmojiBtnB" type="button" aria-label="Emoji" disabled>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="8.5" cy="10" r="1.1" fill="currentColor"/><circle cx="15.5" cy="10" r="1.1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-0.7 4-2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-            </button>
-          </div>
-          <button class="chat-window-send" id="chatSendBtnB" type="submit" aria-label="Send" disabled>➤</button>
-        </div>
-        <div class="chat-emoji-picker hidden" id="chatEmojiPickerB"></div>
-      </form>
-    </div>
+        <button class="chat-compose-send" id="chatComposeSendBtn" type="submit" aria-label="Send" disabled>➤</button>
+      </div>
+      <div class="chat-emoji-picker hidden" id="chatComposeEmojiPicker"></div>
+    </form>
   </div>
 </div>
   <div id="fg-stage">
