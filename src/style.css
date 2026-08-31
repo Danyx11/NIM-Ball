@@ -1247,27 +1247,32 @@ canvas {
   pointer-events: auto;
   display: flex; gap: 8px; align-items: flex-end;
 }
+/* Dark-on-light everywhere in this bar — it sits directly on the light
+   ice-mask texture, not one of the game's usual dark panels, so the normal
+   --ink/--ink-dim (near-white, tuned for --panel's dark navy) read as
+   invisible here. Same fix pattern as .config-panel.mode-curling/
+   mode-joincode above (swap to --bg-deep for a light background), just
+   applied locally instead of redefining --ink-dim (this bar has no child
+   using --ink-dim for anything else). */
 .chat-compose-input {
-  flex: 1; min-width: 0; padding: 9px 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.06); color: var(--ink); font-size: 14px; font-family: inherit;
+  flex: 1; min-width: 0; padding: 9px 14px; border-radius: 999px; border: 1px solid rgba(11,31,42,0.18);
+  background: rgba(255,255,255,0.8); color: var(--bg-deep); font-size: 14px; font-family: inherit;
 }
-.chat-compose-input::placeholder { color: var(--ink-dim); }
+.chat-compose-input::placeholder { color: rgba(11,31,42,0.55); }
 .chat-compose-input:disabled { opacity: 0.4; }
 .chat-compose-controls { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .chat-compose-controls-top { display: flex; gap: 6px; align-items: center; }
 /* Timer ring + emoji button stacked above the send button — see game.js's
    syncChatCompose for the ring's live fill and the CHAT_EMOJI picker. */
-.chat-window-controls { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.chat-window-controls-top { display: flex; gap: 6px; align-items: center; }
 .chat-timer { width: 16px; height: 16px; transform: rotate(-90deg); }
-.chat-timer-track { fill: none; stroke: rgba(255,255,255,0.15); stroke-width: 2; }
+.chat-timer-track { fill: none; stroke: rgba(11,31,42,0.15); stroke-width: 2; }
 .chat-timer-fill {
-  fill: none; stroke: var(--ink-dim); stroke-width: 2; stroke-linecap: round;
+  fill: none; stroke: rgba(11,31,42,0.55); stroke-width: 2; stroke-linecap: round;
   stroke-dasharray: 50.265; stroke-dashoffset: 50.265; transition: stroke-dashoffset 200ms linear;
 }
 .chat-timer-fill.ready { stroke: var(--accent); }
 .chat-emoji-btn {
-  width: 18px; height: 18px; padding: 0; border: none; background: none; color: var(--ink-dim);
+  width: 18px; height: 18px; padding: 0; border: none; background: none; color: var(--bg-deep);
   display: flex; align-items: center; justify-content: center;
 }
 .chat-emoji-btn svg { width: 16px; height: 16px; }
@@ -1536,6 +1541,20 @@ button:disabled { opacity: 0.35; cursor: default; }
    it needs the same right-edge safe margin to keep the compose bar/thread
    clear of the joystick/toolbar panel on mobile landscape. */
 .mobile-layout #chatMask { right: var(--controller-reserved-w); }
+/* .chat-thread/.chat-compose's desktop insets (see those rules above) are
+   FX0..FY1 as fractions of the canvas's own un-cropped W/H (3312x1896) — on
+   mobile the canvas is a real, separately-positioned box showing a cropped
+   + further CSS-scaled window of that same scene (MOBILE_CROP + the
+   .stage-wrap-detached left/top/width math, see those rules), not a simple
+   scaled copy of the desktop canvas — so the desktop ice fractions don't
+   describe where the ice actually lands inside #chatMask's own box here (a
+   #game-card child, not nested in that transform at all). This is exactly
+   the "bubbles only show in the bottom half" bug: the desktop numbers were
+   being applied unchanged. Re-measured directly (getBoundingClientRect on
+   #stage vs #chatMask, see conversation) rather than re-deriving through
+   three layered transforms by hand. */
+.mobile-layout .chat-thread { top: 5%; left: 14%; right: 12%; height: 22%; }
+.mobile-layout .chat-compose { left: 14%; right: 12%; bottom: 37%; }
 /* Network sync-check toast (see index.html/game.js) — translucent pill, not
    #overlay's near-opaque backdrop, since the rollback tween needs the stones
    underneath to stay visible while it plays. Non-interactive: it only ever
