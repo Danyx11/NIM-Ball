@@ -1106,6 +1106,21 @@ export function startGame(opts = {}) {
   let mancheStartSnapshot = null;
   let currentMancheIndex = null;
   let pendingMancheAdvance = null;
+  // Net dead-end watchdog (see onValidate's 'lanWait' branch / net.onLaunch /
+  // net.onDisconnect below): there's no ping/pong on either arbiter, so a
+  // silently dropped connection (wifi cut, no clean close frame ever sent)
+  // never fires net.onDisconnect at all — the local player would just sit on
+  // 'lanWait' forever with nothing telling them the match is over. Started
+  // the moment our own shots go out and we start waiting on the opponent's;
+  // cleared the moment that wait actually resolves, one way or another
+  // (onLaunch = they answered, onDisconnect = we got a real close signal
+  // instead). If neither happens within LAN_WAIT_TIMEOUT_MS, that silence
+  // itself is treated as the disconnect.
+  const LAN_WAIT_TIMEOUT_MS = 120000;
+  let lanWaitWatchdogId = null;
+  function clearLanWaitWatchdog() {
+    if (lanWaitWatchdogId !== null) { clearTimeout(lanWaitWatchdogId); lanWaitWatchdogId = null; }
+  }
   // Shown only if validation is still pending SYNC_WAIT_INDICATOR_MS after
   // the local animation itself already reached this gate — in normal LAN
   // conditions the arbiter's verdict arrives within milliseconds of launch
@@ -1588,7 +1603,7 @@ export function startGame(opts = {}) {
     if (dist < MAX_DRAG) {
       if (dist - drag.lastTickDist >= DRAG_TICK_STEP) {
         drag.lastTickDist = dist;
-        audio.play('dragTick', { volume: 0.316, rate: 0.95 + Math.random() * 0.1 }); // -10dB
+        audio.play('dragTick', { volume: 0.221, rate: 0.95 + Math.random() * 0.1 }); // was 0.316, -30%
       } else if (dist < drag.lastTickDist) {
         // shortening: track silently so the next stretch resumes ticking
         // right away instead of first re-crossing the old high-water mark
@@ -1927,7 +1942,7 @@ export function startGame(opts = {}) {
   // is always in the DOM (index.html), so these are safe no-ops otherwise.
   const syncToast = document.getElementById('syncToast');
   function showSyncWaiting() {
-    syncToast.textContent = 'Synchronisation…';
+    syncToast.textContent = 'Syncing…';
     syncToast.classList.remove('problem', 'hidden');
   }
   function hideSyncToast() {
@@ -1935,7 +1950,7 @@ export function startGame(opts = {}) {
     syncToast.classList.add('hidden');
   }
   function showSyncProblem() {
-    syncToast.textContent = 'Problème de synchronisation — la manche va être rejouée.';
+    syncToast.textContent = 'Sync problem — the manche will be replayed.';
     syncToast.classList.add('problem');
     syncToast.classList.remove('hidden');
   }
@@ -2156,6 +2171,30 @@ export function startGame(opts = {}) {
 
   function showOverlay(html) { overlay.classList.remove('hidden'); ovContent.innerHTML = html; }
   function hideOverlay() { overlay.classList.add('hidden'); }
+  // Net match dead-end (see net.onDisconnect / the 'lanWait' watchdog above)
+  // — two distinct messages depending on which signal we actually got:
+  // 'quit' when the arbiter/socket told us the opponent is gone (a real
+  // close event — in practice this is what a deliberate exit or a browser
+  // tab closing normally produces), 'timeout' when nothing ever told us
+  // anything and LAN_WAIT_TIMEOUT_MS of silence is our only evidence
+  // something's wrong (a genuinely dead connection, no graceful close frame
+  // ever sent). Previously a true dead end (no button, no way out) — the
+  // whole panel is now one big click target back to the menu, since there's
+  // nothing else useful to do here (no reconnection support, see CLAUDE.md).
+  const NET_DEAD_END_COPY = {
+    quit: { title: 'Match over', body: 'The opponent left the match.' },
+    timeout: { title: 'Connection lost', body: 'No response from the opponent for 2 minutes.' },
+  };
+  function showNetDeadEnd(kind) {
+    clearLanWaitWatchdog();
+    audio.stopAmbience();
+    audio.stopAllGlides();
+    const { title, body } = NET_DEAD_END_COPY[kind];
+    showOverlay(`<h2>${title}</h2><p>${body}</p>`);
+    overlay.onclick = () => { stopGame(); onExit?.(); };
+    chatOwnInput.disabled = true; chatOwnSendBtn.disabled = true; chatOwnEmojiBtn.disabled = true;
+    chatInputEnabledCache = false; chatSendEnabledCache = false;
+  }
   // J1->J2: no "pass the device" screen, straight into the other team's aim phase.
   // J2->sim: a fixed beat after the PLAY press before the shots actually launch —
   // long enough for the launchEngine cue (played instantly at reveal start,
@@ -2184,6 +2223,11 @@ export function startGame(opts = {}) {
       phase = 'lanWait';
       // No full-screen overlay here on purpose — the arena stays visible while
       // waiting; see drawWaitingLabel() for the small under-ice "waiting" label.
+      clearLanWaitWatchdog();
+      lanWaitWatchdogId = trackedTimeout(() => {
+        if (phase !== 'lanWait') return; // resolved (or the match already ended) in the meantime
+        showNetDeadEnd('timeout');
+      }, LAN_WAIT_TIMEOUT_MS);
       return;
     }
     if (aiTeam) {
@@ -2332,6 +2376,7 @@ export function startGame(opts = {}) {
       });
     }
     net.onLaunch(({ shotsA, shotsB, sweepA, sweepB, mancheIndex }) => {
+      clearLanWaitWatchdog();
       hideOverlay();
       phase = 'pending';
       playLaunchEngine(myTeam);
@@ -2419,16 +2464,10 @@ export function startGame(opts = {}) {
     // problem nimball" design note). Once the real match is running, a
     // mid-match 'opponentJoined' carries no useful information, so no-op it.
     net.onOpponentJoined(() => {});
-    net.onDisconnect(() => {
-      // Dead-end screen (no button, no way back into aim/reveal) — leaving
-      // ambience running behind it would mean it plays forever with no
-      // in-game state left to ever stop it.
-      audio.stopAmbience();
-      audio.stopAllGlides();
-      showOverlay(`<h2>Connexion perdue</h2><p>L'autre joueur s'est déconnecté.</p>`);
-      chatOwnInput.disabled = true; chatOwnSendBtn.disabled = true; chatOwnEmojiBtn.disabled = true;
-      chatInputEnabledCache = false; chatSendEnabledCache = false;
-    });
+    // A real close/'opponentLeft' signal actually arrived (see
+    // showNetDeadEnd's own comment on why that reads as 'quit' rather than
+    // a silent drop, and the 'lanWait' watchdog above for the other case).
+    net.onDisconnect(() => showNetDeadEnd('quit'));
   } else if (aiTeam) {
     // Solo vs IA: no lobby/ready-tap step needed (only one human) — straight
     // into the human's aim phase, same as LAN skips the local ready screen.
@@ -2442,10 +2481,10 @@ export function startGame(opts = {}) {
     startOverlay.classList.add('hidden');
     controlsEnabled = true;
     showOverlay(`
-      <h2>Replay prêt</h2>
-      <p>${replayAllPoints.length} point${replayAllPoints.length > 1 ? 's' : ''} à revoir</p>
+      <h2>Replay ready</h2>
+      <p>${replayAllPoints.length} point${replayAllPoints.length > 1 ? 's' : ''} to watch</p>
       <div class="goal-actions">
-        <button class="bigbtn" id="replayStartBtn">▶ Lancer le replay</button>
+        <button class="bigbtn" id="replayStartBtn">▶ Start replay</button>
       </div>
     `);
     document.getElementById('replayStartBtn').onclick = () => {
@@ -3338,7 +3377,7 @@ export function startGame(opts = {}) {
     // Nature ambience pauses under the +1 panel — restarts the instant the
     // player dismisses it below, back into the next round.
     audio.stopAmbience();
-    audio.play('pointOk', { volume: 0.45 }); // -7dB, clip is hot at full level
+    audio.play('pointOk', { volume: 0.315 }); // was 0.45, -30%
     // Tinted by whichever team just scored (blue for A, gold for B — see
     // style.css's #overlay.team-a-scored/.team-b-scored), not by mode/vibe:
     // this panel is the one place in a live match where "who scored" matters
@@ -3378,9 +3417,9 @@ export function startGame(opts = {}) {
     // resumes it for the fresh match).
     audio.stopAmbience();
     audio.stopAllGlides();
-    audio.play('pointOk', { volume: 0.45, onEnded: () => audio.play('ticket2', { volume: 0.45 }) }); // -7dB, point-ding then ticket fanfare, back to back
+    audio.play('pointOk', { volume: 0.315 }); // was 0.45, -30% — ticket2 fanfare removed
     const winningTeam = scoreA >= WIN_SCORE ? 'A' : 'B';
-    showOverlay(`<p>Génération du ticket…</p>`);
+    showOverlay(`<p>Generating ticket…</p>`);
     const stats = {
       durationMs: performance.now() - matchStartTime,
       goals: scoreA + scoreB,
@@ -3407,13 +3446,13 @@ export function startGame(opts = {}) {
     if (phase !== 'gameover') return;
     showOverlay(`
       <div class="ticket-wrap" id="ticketWrap">
-        <img class="ticket-img" id="ticketImg" alt="Ticket de match Nim-Curl">
+        <img class="ticket-img" id="ticketImg" alt="Nim-Curl match ticket">
       </div>
       <div class="goal-actions">
         <button class="bigbtn" id="goalPlayAgainBtn">▶ Play Again</button>
         ${onChangeSettings ? '<button class="bigbtn" id="goalChangeSettingsBtn">⚙ Change Settings</button>' : ''}
         <button class="bigbtn" id="goalMatchReplayBtn">🔁 Replay</button>
-        <button class="bigbtn" id="goalShareBtn">📤 Partager</button>
+        <button class="bigbtn" id="goalShareBtn">📤 Share</button>
         <button class="bigbtn" id="goalMenuBtn">🚪 Menu</button>
       </div>
     `);
@@ -3512,7 +3551,7 @@ export function startGame(opts = {}) {
         try {
           await navigator.clipboard.writeText(`${resultText} ${location.href}`);
           const original = shareBtn.textContent;
-          shareBtn.textContent = 'Copié !';
+          shareBtn.textContent = 'Copied!';
           trackedTimeout(() => { shareBtn.textContent = original; }, 1500);
         } catch { /* e.g. document lost focus right as this fired — nothing to do */ }
       }
@@ -3528,7 +3567,7 @@ export function startGame(opts = {}) {
     audio.play('win');
     hideReplayBar();
     const winningTeam = scoreA >= scoreB ? 'A' : 'B';
-    showOverlay(`<p>Chargement…</p>`);
+    showOverlay(`<p>Loading…</p>`);
     const stats = {
       durationMs: performance.now() - matchStartTime,
       goals: scoreA + scoreB,
@@ -3546,9 +3585,9 @@ export function startGame(opts = {}) {
     });
     if (phase !== 'gameover') return;
     showOverlay(`
-      <img class="ticket-img" id="ticketImg" alt="Ticket de replay">
+      <img class="ticket-img" id="ticketImg" alt="Replay ticket">
       <div class="goal-actions">
-        <button class="bigbtn" id="goalReplayAgainBtn">🔁 Revoir</button>
+        <button class="bigbtn" id="goalReplayAgainBtn">🔁 Watch Again</button>
         <button class="bigbtn" id="goalMenuBtn">🚪 Menu</button>
       </div>
     `);
@@ -5676,13 +5715,19 @@ export function startGame(opts = {}) {
     audio.stopAmbience();
     audio.stopAllGlides();
     if (net) {
-      // Suppress the "Connexion perdue" dead-end screen (net.onDisconnect
-      // above) that ws.close() below would otherwise trigger — this is an
+      // Suppress the "Match over" dead-end screen (net.onDisconnect above)
+      // that ws.close() below would otherwise trigger — this is an
       // intentional exit, not a dropped connection.
       net.onDisconnect(() => {});
       net.close();
     }
     hideOverlay();
+    // #overlay is shared, page-level DOM (see resetSharedMatchChrome's own
+    // comment) — showNetDeadEnd's click-anywhere-to-exit handler must not
+    // survive past this instance, or a stray click on some unrelated dialog
+    // (e.g. main.js's own "Quit the match?" confirm, next time #overlay is
+    // reused) would silently trigger this dead closure's stopGame()/onExit.
+    overlay.onclick = null;
     if (isReplay) hideReplayBar();
     chatBar.classList.add('hidden');
     resetSharedMatchChrome();

@@ -25,8 +25,7 @@ export const SFX_SRC = {
   launchEngine: `${ASSET_BASE}sfx/launch engine.m4a`, // small machinery cue, first sound in the reveal — before the glide whoosh and the stones' departure
   stoneDead: `${ASSET_BASE}sfx/stone dead.m4a`, // a knocked-out stone's shrink-into-the-void animation starts
   stoneFall: `${ASSET_BASE}sfx/stone fall 3.m4a`, // a stone (not the ball) drops into the goal mouth
-  pointOk: `${ASSET_BASE}sfx/Point ok.m4a`,   // the +1 point-result panel appearing (mid-match, non-deciding point)
-  ticket2: `${ASSET_BASE}sfx/ticket 2.m4a`,   // the match-winning ticket screen appearing
+  pointOk: `${ASSET_BASE}sfx/Point ok.m4a`,   // the +1 point-result panel appearing (mid-match, non-deciding point) — also used for the final winning point, see showVictory in game.js
   sweepAppear: `${ASSET_BASE}sfx/ice sphere 3.m4a`, // balai patch placed, played right after the toolbar's button.m4a, see sweepBtn in game.js
   chatIn: `${ASSET_BASE}sfx/message IN.m4a`,   // a real chat message arrives from the opponent (not our own echo, not the mute toggle) — see net.onChat in game.js
   chatOut: `${ASSET_BASE}sfx/message OUT.m4a`, // local player's own chat message send, played optimistically at submit time
@@ -40,8 +39,8 @@ const SCHEDULE_LOOKAHEAD_S = 1; // schedule the next scheduled copy/leg (ambienc
 export const LASER_SRC = `${ASSET_BASE}sfx/laser sample.m4a`;
 export const LASER_LOOP_POINT_S = 0.5; // ping-pong body starts here; the 0..this attack only ever plays once, right as a stone is grabbed
 export const LASER_END_TRIM_S = 0.3; // clip's last 300ms is never played — trimmed off both the attack and the loop's far turnaround
-export const LASER_VOLUME_MIN_DB = -37; // was -40, +3dB — discrete, right at grab (drag distance 0)
-export const LASER_VOLUME_MAX_DB = -32; // was -35, +3dB — small lift at max pull distance, see setLaserIntensity()
+export const LASER_VOLUME_MIN_DB = -34; // was -37, +40% (~+2.9dB) — discrete, right at grab (drag distance 0)
+export const LASER_VOLUME_MAX_DB = -29; // was -32, +40% (~+2.9dB) — small lift at max pull distance, see setLaserIntensity()
 // Lowpass cutoff sweeps between these two, breathing in sync with the aimed
 // stone's own halo pulse (see startLaser()'s phaseOffsetS param) — same
 // period as game.js's HALO_PULSE_PERIOD, kept as a plain number here since

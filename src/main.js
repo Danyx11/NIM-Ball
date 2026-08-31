@@ -450,7 +450,7 @@ const fsRecommendText = document.getElementById('fsRecommendText');
 // do nothing, so the copy instead points at the one thing that actually
 // works on that browser: installing to the home screen.
 if (!FULLSCREEN_SUPPORTED && !IS_STANDALONE) {
-  fsRecommendText.textContent = 'Ajoute Nim-Curl à l’écran d’accueil pour jouer en plein écran (icône de partage Safari)';
+  fsRecommendText.textContent = 'Add Nim-Curl to your Home Screen to play fullscreen (Safari share icon)';
 }
 fsRecommendIcon.addEventListener('click', () => {
   audio.play('button');
@@ -1373,9 +1373,7 @@ function showJoinCodeScreen(errorMsg) {
   const input = document.getElementById('joinCodeInput');
   const joinBtn = document.getElementById('joinCodeSubmitBtn');
   input.addEventListener('input', () => {
-    // Hex-only now that every real code is minted from MATCH_CODE_ALPHABET
-    // (see generateMatchCode) — anything else can't possibly match a room.
-    input.value = input.value.toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 4);
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
   });
   joinBtn.onclick = () => { audio.play('button'); joinMatch(input.value, joinBtn, showJoinCodeScreen); };
   joinCodeOverlay.classList.remove('hidden');
@@ -1548,42 +1546,31 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
 // both removed) that's since been replaced by showCreateMatchScreen going
 // straight to Classic/Custom.
 //
-// Strictly hexadecimal (0-9A-F) rather than a wider ambiguity-avoiding
-// alphabet — needed so the code's very first character can double as a
-// vibe flag (see codeVibe/generateMatchCode below): its numeric value's
-// parity says which ruleset the room is running, odd = NimiCurl (hockey),
-// even = Pure Curling. Hex already excludes O and I by construction, so
-// this doesn't reopen the old 0/O, 1/I misread problem generateMatchCode's
-// original ambiguity-avoiding alphabet was built to dodge.
-const MATCH_CODE_ALPHABET = '0123456789ABCDEF';
-
-// Every character of the room's own PartyKit room-name path segment must
-// stay a plain [0-9A-F] hex digit for this to round-trip; generateMatchCode
-// below is the only place codes are minted, so that invariant always holds.
-function vibeCodeParity(vibe) { return vibe === 'curling' ? 0 : 1; }
-// Reads the vibe straight off a code, with zero server round-trip — lets
-// "Join with a code" (joinMatch below) orient the interface at the exact
-// same instant hostMatch's own room already knows which ruleset it's
-// running, instead of waiting on connectMatch()'s 'joined' reply. Falls
-// back to null on anything that isn't a valid hex digit (a mistyped code,
-// or one from before this scheme existed) so callers can just ignore it
-// and let the server's own net.vibe (still sent regardless, see hostMatch)
-// be the sole source of truth in that case.
-function codeVibe(code) {
-  const n = parseInt(code?.[0], 16);
-  if (Number.isNaN(n)) return null;
-  return n % 2 === 0 ? 'curling' : 'hockey';
-}
-function generateMatchCode(vibe) {
-  const parity = vibeCodeParity(vibe);
-  const firstChars = [...MATCH_CODE_ALPHABET].filter((c) => parseInt(c, 16) % 2 === parity);
-  let code = firstChars[Math.floor(Math.random() * firstChars.length)];
-  for (let i = 1; i < 4; i++) code += MATCH_CODE_ALPHABET[Math.floor(Math.random() * MATCH_CODE_ALPHABET.length)];
+// Alphabet excludes visually ambiguous characters (0/O, 1/I) since the code
+// is read off one screen and typed on another, often by voice or a glance
+// across a room — a misread digit would just bounce off `full`/an empty room
+// instead of erroring clearly, so cutting the ambiguity avoids that class of
+// mistake at the source.
+//
+// Purely a room password now — carries no information of its own (see
+// conversation: an earlier version packed vibe+matchConfig into the code
+// itself as a hedge against a possibly-stale arbiter deployment, but that
+// traded away most of the code's entropy for no real gain once the arbiter
+// relay was confirmed correct). The room itself is authoritative on its own
+// ruleset: hostMatch below sends matchConfig+vibe to the room the moment it
+// connects, before the code is ever shared, and a joiner's connectMatch()
+// promise only resolves once the room's own 'joined' reply — carrying that
+// same matchConfig+vibe back — has arrived (see net.js), so there's no
+// window where a joiner could render anything under the wrong ruleset.
+const MATCH_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function generateMatchCode() {
+  let code = '';
+  for (let i = 0; i < 4; i++) code += MATCH_CODE_ALPHABET[Math.floor(Math.random() * MATCH_CODE_ALPHABET.length)];
   return code;
 }
 
 async function hostMatch(matchConfig) {
-  const code = generateMatchCode(activeVibe);
+  const code = generateMatchCode();
   showLoadingOverlay();
   try {
     const net = await connectMatch(code);
@@ -1634,26 +1621,23 @@ async function joinMatch(code, joinBtn, retryScreen) {
   if (code.length !== 4) return;
   if (joinBtn) joinBtn.disabled = true;
   showLoadingOverlay();
-  // Decode the vibe straight off the code (see codeVibe/generateMatchCode
-  // above) and adopt it immediately — before the socket even opens — so
-  // "Join with a code" orients itself (tint classes, Change Settings, the
-  // eventual startGame() vibe) off the code alone rather than waiting on a
-  // round trip to the room. This is what actually orients the interface;
-  // net.vibe below is only a same-value confirmation once connected, not
-  // the source of truth (see its own comment).
-  const decodedVibe = codeVibe(code);
-  if (decodedVibe) activeVibe = decodedVibe;
   try {
     const net = await connectMatch(code);
     hideLoadingOverlay();
-    // Confirms the code's own encoding above against the creator's actual
-    // choice as stored server-side (see hostMatch's sendMatchConfig /
-    // party/arbiter.js) — should always agree in the normal flow, since
-    // hostMatch mints the code from that same activeVibe. Only actually
-    // matters as a fallback for a code minted before this scheme existed
-    // (decodedVibe null) or a stale/misdeployed arbiter that never got the
-    // vibe field (net.vibe null) — whichever of the two actually has a
-    // value wins, and if both do they're expected to already match.
+    // Adopt the creator's actual vibe (see hostMatch's sendMatchConfig /
+    // party/arbiter.js) instead of trusting whatever tile this client
+    // happened to be on before typing the code in — that pick only got them
+    // to the "enter code" screen, it was never a promise the match itself
+    // would run that vibe. Reassigning activeVibe here (not just threading
+    // net.vibe into this one startGame() call) keeps every other vibe-aware
+    // bit of UI between here and kickoff (tint classes, Change Settings)
+    // consistent too. No-op for Duel LAN, which never sends a vibe (net.vibe
+    // stays null there, see net.js) and for "Join with a code", which has no
+    // vibe tile of its own to have picked in the first place. connectMatch()'s
+    // promise only resolves once the room's own 'joined' reply — carrying
+    // this same vibe (and matchConfig below) — has arrived (see net.js), so
+    // showLoadingOverlay above already covers the entire window where we
+    // don't yet know the room's real ruleset; nothing renders before then.
     if (net.vibe) activeVibe = net.vibe;
     // The creator's matchConfig, as stored server-side and handed back in
     // this connection's own 'joined' message (see net.js/party/arbiter.js)

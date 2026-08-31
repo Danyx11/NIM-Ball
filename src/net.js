@@ -138,11 +138,11 @@ function connectSocket(url) {
     };
 
     ws.addEventListener('error', () => {
-      if (!settled) { settled = true; reject(new Error('Connexion au serveur impossible.')); }
+      if (!settled) { settled = true; reject(new Error('Could not connect to the server.')); }
     });
 
     ws.addEventListener('close', () => {
-      if (!settled) { settled = true; reject(new Error('Connexion au serveur impossible.')); return; }
+      if (!settled) { settled = true; reject(new Error('Could not connect to the server.')); return; }
       if (disconnectCb) disconnectCb();
     });
 
@@ -156,10 +156,10 @@ function connectSocket(url) {
         settled = true;
         resolve(net);
       } else if (msg.type === 'full') {
-        if (!settled) { settled = true; reject(new Error('Partie déjà complète.')); }
+        if (!settled) { settled = true; reject(new Error('Match already full.')); }
         ws.close();
       } else if (msg.type === 'closed') {
-        if (!settled) { settled = true; reject(new Error('Ce code de partie n’est plus valide.')); }
+        if (!settled) { settled = true; reject(new Error('This match code is no longer valid.')); }
         ws.close();
       } else if (msg.type === 'opponentJoined') {
         if (opponentJoinedCb) opponentJoinedCb();
