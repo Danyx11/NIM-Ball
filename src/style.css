@@ -154,7 +154,11 @@ html, body {
      own aspect-ratio below is the same ratio, so this max() still sizes the
      card to fill the viewport on either axis exactly as before, just against
      the smaller cropped reference frame. */
-  --card-w: max(100vw, calc(100dvh * 2218 / 1295));
+  /* var(--stable-vh, 100dvh), not a plain 100dvh — see main.js's setStableVh
+     for why: 100dvh shrinks for the on-screen keyboard, and this formula is
+     what drives #game-card's whole size, so that shrink was the actual
+     "arène remonte" bug reported on-device. */
+  --card-w: max(100vw, calc(var(--stable-vh, 100dvh) * 2218 / 1295));
   --right-margin: calc(100vw - var(--card-w) - var(--card-left-gap));
   /* Reserved width of the controller column (gap + panel) — #mobileController
      (the actual joystick/toolbar panel, see its own rule below) sizes itself
