@@ -1593,6 +1593,16 @@ button:disabled { opacity: 0.35; cursor: default; }
    is column but doesn't itself center/gap content (Classic/Custom and
    Custom Settings above lay out their own children directly). */
 .config-lobby-content { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+/* About/Nimiq/League/Partnership (all .mode-connect .config-lobby-content
+   panels, per explicit request) — the plain --ink-dim body-text color above
+   (#9fb8bc, a muted teal-gray) reads poorly against these panels' translucent
+   blue tint. Redefining --ink-dim locally rather than overriding `color`
+   directly, same reasoning as .mode-curling/.mode-joincode further down: it
+   re-resolves live wherever .config-lobby-content p's var() reads it, so this
+   alone covers every paragraph on all four panels without a second rule.
+   Doesn't touch #connectGateOverlay (no .config-lobby-content there) or
+   #joinCodeOverlay (.mode-joincode, untouched). */
+.config-panel.mode-connect .config-lobby-content { --ink-dim: rgba(255, 255, 255, 0.85); }
 /* About panel only (#aboutOverlay) — the two closing lines read as a
    standalone tagline and a small credit footer, not more body copy, so they
    get their own weight/size instead of inheriting .config-lobby-content p's
