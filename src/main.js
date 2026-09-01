@@ -50,6 +50,26 @@ function setStableVh() {
 setStableVh();
 window.addEventListener('orientationchange', () => setTimeout(setStableVh, 120));
 
+// Still moved on-device after the --stable-vh fix above, so the "arène
+// remonte" symptom isn't (only) #game-card's own size reacting to 100dvh —
+// it's iOS Safari's native "scroll the focused input above the keyboard"
+// behavior, which pans the *visual* viewport even with html/body both
+// overflow:hidden (see that rule in style.css) and every layout dimension
+// otherwise untouched. There's no CSS switch for this; window.visualViewport
+// is WebKit's own API for detecting it, so on every visualViewport
+// resize/scroll (both fire for this pan) this snaps the page's scroll
+// position straight back to 0,0 — user-scalable=no in index.html already
+// keeps pinch-zoom out of the picture, so scrollX/Y is the only offset left
+// to fight. Harmless to call on every such event: window.scrollTo doesn't
+// touch #chatThread's own independent overflow-y scroll.
+function pinVisualViewport() {
+  if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', pinVisualViewport);
+  window.visualViewport.addEventListener('scroll', pinVisualViewport);
+}
+
 const ASSET_BASE = import.meta.env.BASE_URL;
 
 // Branded loading screen (index.html's #loadingOverlay, self-contained/
