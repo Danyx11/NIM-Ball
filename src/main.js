@@ -31,6 +31,25 @@ for (const key in COLORS) {
   document.documentElement.style.setProperty(CSS_VAR_NAMES[key], COLORS[key]);
 }
 
+// --stable-vh: a keyboard-immune stand-in for 100dvh, used by .mobile-layout's
+// --card-w (style.css) to size #game-card — and therefore the whole match,
+// canvas + #chatMask included. `interactive-widget=resizes-visual` (see
+// index.html) was tried first and confirmed NOT to help on-device (see git
+// history): the iOS version in use likely predates that meta's support, so
+// 100dvh keeps shrinking for the keyboard regardless of its value, and
+// #game-card (sized off 100dvh) shrinks/re-centers right along with it —
+// that's the actual "l'arène remonte" bug, not a scroll. window.innerHeight
+// is the one viewport metric iOS Safari has never tied to the keyboard (only
+// visualViewport.height moves for that), so it's what --stable-vh locks to.
+// Deliberately reacts to orientationchange only, not resize/visualViewport
+// events — those also fire for the keyboard opening/closing, which is
+// exactly the case this must ignore.
+function setStableVh() {
+  document.documentElement.style.setProperty('--stable-vh', `${window.innerHeight}px`);
+}
+setStableVh();
+window.addEventListener('orientationchange', () => setTimeout(setStableVh, 120));
+
 const ASSET_BASE = import.meta.env.BASE_URL;
 
 // Branded loading screen (index.html's #loadingOverlay, self-contained/
