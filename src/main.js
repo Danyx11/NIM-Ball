@@ -218,7 +218,7 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
   // Mobile keeps its existing behavior untouched (still #game-card children)
   // — #menuStage isn't part of mobile's layout yet.
   const menuHost = IS_MOBILE ? gameCard : document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -392,9 +392,12 @@ const exitCap = document.getElementById('tbtn-exit-cap');
 // can trigger the exact same logic as the old toolbar button.
 function triggerExit() {
   playToolbarClick(exitCap);
+  // howTo has no match/score at stake, so its copy just names the tutorial
+  // and where leaving it goes, rather than warning about lost progress.
+  const isHowTo = activeMatchMode === 'howTo';
   showLobby(`
-    <h2>Quit the match?</h2>
-    <p>The current match will be lost.</p>
+    <h2>${isHowTo ? 'Quit tutorial' : 'Quit the match?'}</h2>
+    <p>${isHowTo ? 'Back to menu' : 'The current match will be lost.'}</p>
     <div style="display:flex; gap:12px;">
       <button class="bigbtn" id="exitYesBtn">Yes</button>
       <button class="bigbtn" id="exitNoBtn">No</button>
@@ -410,6 +413,9 @@ function triggerExit() {
   document.getElementById('exitNoBtn').onclick = () => { audio.play('button'); hideLobby(); };
 }
 exitBtn.addEventListener('click', triggerExit);
+// Small quick-exit tab on the howTo tutorial's own instruction tile (see
+// index.html's #howToTileExitBtn) — same confirm dialog, no separate logic.
+document.getElementById('howToTileExitBtn').addEventListener('click', triggerExit);
 
 // The 5 HUD rocks baked into the V2 arena art (see design-lab's
 // arena-v2-hud-buttons.html for the original zone-mapping prototype) replace
@@ -510,12 +516,21 @@ function isPortraitMobile() { return IS_MOBILE && window.matchMedia('(orientatio
 // mode-select screen. Self-contained (sets the final state outright rather
 // than assuming what ran before it), so both the initial entry below and the
 // orientation listener can just call it.
+// isFirstConnectGate marks THIS specific reason for opening the gate — no
+// identity existed yet, i.e. a genuine first-ever connection — as opposed to
+// the identity pill's disconnect action reopening the same gate later, which
+// sets it back to false right before doing so. proceedPastConnectGate below
+// reads it once (then resets it) to decide whether the new #introHowToOverlay
+// prompt belongs in the flow this time (see conversation — only ever on that
+// true first connection, never on a later manual reconnect).
+let isFirstConnectGate = false;
 function revealAfterGates() {
   if (IOS_FULLSCREEN_FIX_ENABLED && !IS_STANDALONE) {
     modeOverlay.classList.add('hidden');
     fsRecommendOverlay.style.display = '';
     fsRecommendOverlay.classList.remove('hidden');
   } else if (!getIdentity()) {
+    isFirstConnectGate = true;
     showConnectGate();
   } else {
     showModeDrawer();
@@ -759,6 +774,7 @@ connectBtn.addEventListener('click', () => {
   clearIdentity();
   hubAddress = null;
   syncIdentityPill();
+  isFirstConnectGate = false; // a manual reconnect, not the true first one — see revealAfterGates
   showConnectGate();
 });
 // "Claim a handle" CTA (desktop only, see syncIdentityPill above — the label
@@ -937,6 +953,13 @@ function showLobby(html, mode = null) {
   let cls = null;
   if (mode === 'passplay' || mode === 'remote') cls = vibeTintClass();
   else if (mode === 'solo' || mode === 'replay') cls = `mode-${mode}`;
+  // howTo's own "Quit tutorial?" confirm (see triggerExit) fell through to
+  // #overlay's plain dark scrim default, unbranded — per explicit feedback,
+  // match the How To hub/rules panels' own tint (.config-panel.mode-hockey,
+  // "Nimiq Light Blue") rather than adding a near-identical
+  // #overlay.mode-howTo rule just for this — #overlay.mode-hockey is
+  // already the exact same rgba(5,130,202,0.55).
+  else if (mode === 'howTo') cls = 'mode-hockey';
   if (cls) overlay.classList.add(cls);
   overlay.classList.add('overlay-boxed');
   overlay.classList.remove('hidden');
@@ -1269,11 +1292,37 @@ function showConnectGate() {
 
 // Lands on the actual mode tiles once the gate resolves either way — same
 // reveal returnToModeSelect() does, minus the match-teardown half (there's
-// never a match running yet at this point).
+// never a match running yet at this point). On a genuine first-ever
+// connection (isFirstConnectGate, see revealAfterGates above) the new
+// #introHowToOverlay Learn/Skip prompt lands here instead, one time only —
+// consumed immediately so nothing later in this same session re-triggers it.
 function proceedPastConnectGate() {
   connectGateOverlay.classList.add('hidden');
-  showModeDrawer();
+  if (isFirstConnectGate) {
+    isFirstConnectGate = false;
+    showIntroHowToScreen();
+  } else {
+    showModeDrawer();
+  }
 }
+
+const introHowToOverlay = document.getElementById('introHowToOverlay');
+const ihtLearnBtn = document.getElementById('ihtLearnBtn');
+const ihtSkipBtn = document.getElementById('ihtSkipBtn');
+function showIntroHowToScreen() {
+  modeOverlay.classList.remove('hidden');
+  introHowToOverlay.classList.remove('hidden');
+}
+ihtLearnBtn.addEventListener('click', () => {
+  audio.play('button');
+  introHowToOverlay.classList.add('hidden');
+  showHowToScreen();
+});
+ihtSkipBtn.addEventListener('click', () => {
+  audio.play('button');
+  introHowToOverlay.classList.add('hidden');
+  showModeDrawer();
+});
 
 cgConnectBtn.addEventListener('click', () => {
   audio.play('button');
@@ -1511,7 +1560,7 @@ navNimiq.addEventListener('click', () => {
   else hideNimiqScreen();
 });
 nimiqBackBtn.addEventListener('click', hideNimiqScreen);
-// How To (index.html's #navHowTo/#helpBtn) — opens the "How to?" hub
+// How To (index.html's #helpBtn) — opens the "How to?" hub
 // (#howToHubOverlay) instead of launching the tutorial directly (see
 // conversation): same toggle-on-reclick/show/hide shape as About/Nimiq
 // above. The hub's own 3 pills (below) are what actually launch the
@@ -1531,7 +1580,7 @@ const htCurlingBtn = document.getElementById('htCurlingBtn');
 // the hide (hideLobby/hideNetPanel), same as returnToModeSelect's own
 // hideMatchChrome pairing elsewhere in this file.
 const OTHER_MENU_OVERLAY_IDS = [
-  'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay',
+  'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay',
   'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay',
   'aboutOverlay', 'constructionOverlay', 'nimiqOverlay',
   'nimicurlRulesOverlay', 'pureCurlingRulesOverlay',
@@ -1553,28 +1602,38 @@ function hideHowToScreen() {
   howToHubOverlay.classList.add('hidden');
   returnToModeSelect();
 }
-const navHowTo = document.getElementById('navHowTo');
-navHowTo.addEventListener('click', () => {
+htBackBtn.addEventListener('click', hideHowToScreen);
+// Help button (see conversation) — the sole entry point now (the sidebar's
+// own "How to" nav item is gone, this button was judged enough on its own).
+// Same toggle-on-reclick shape #navHowTo used to have, just moved directly
+// onto this button instead of proxying through a click() on the removed one.
+const helpBtn = document.getElementById('helpBtn');
+helpBtn.addEventListener('click', () => {
   if (activeStopGame) return;
   if (howToHubOverlay.classList.contains('hidden')) showHowToScreen();
   else hideHowToScreen();
 });
-htBackBtn.addEventListener('click', hideHowToScreen);
-// Help button (see conversation) — affordance next to the tile grid on both
-// platforms now, plugged straight into the same "How to" entry point above
-// rather than its own copy.
-const helpBtn = document.getElementById('helpBtn');
-helpBtn.addEventListener('click', () => navHowTo.click());
 
 // "How to play" pill — the actual interactive tutorial (see game.js's howTo
-// mode), same self-contained single-stone flow and same mobile-only gate as
-// before this feature (its spotlight geometry assumes #mobileController/the
-// mobile canvas crop) — just moved here from #navHowTo's own click handler,
-// which now only opens the hub above. Still a silent no-op on desktop for
-// now, not this pill's own concern to fix.
-htPlayBtn.addEventListener('click', () => {
-  if (!IS_MOBILE || activeStopGame) return;
+// mode), same self-contained single-stone flow and same mobile-only gate it
+// always had (its spotlight geometry assumes #mobileController/the mobile
+// canvas crop). Still a silent no-op on desktop for now, not this pill's own
+// concern to fix.
+// "How to play" is often the very first thing a curious player taps — much
+// less warm-up time than a real match usually gets (see preloadCoreAssets's
+// own comment: match assets load in the *background* once the initial
+// #loadingOverlay lifts, deliberately not gating mode-select, on the
+// assumption there's normally enough browsing-the-menu time for that
+// background load to finish first). Re-awaiting the same promise here
+// (cheap/already-cached if it's done, per explicit request otherwise) means
+// the tutorial's opening frame never draws with sprites still mid-download.
+let howToLoading = false;
+htPlayBtn.addEventListener('click', async () => {
+  if (!IS_MOBILE || activeStopGame || howToLoading) return;
   audio.play('button');
+  howToLoading = true;
+  showLoadingOverlay();
+  await preloadCoreAssets(IS_MOBILE).catch(() => {});
   howToHubOverlay.classList.add('hidden');
   modeOverlay.classList.add('hidden');
   document.body.classList.add('howto-active');
@@ -1582,6 +1641,16 @@ htPlayBtn.addEventListener('click', () => {
   activeMatchMode = 'howTo';
   activeStopGame = startGame({ ...rockHandlers, howTo: true, mobile: IS_MOBILE });
   syncIdentityPill();
+  // startGame() itself still bakes its own team-avatar sprite (identicon +
+  // module ring composited together, see game.js's tryBakeBubble) via a
+  // fire-and-forget Promise chain — even for the default address
+  // preloadCoreAssets just warmed, that's at least one more microtask after
+  // this call returns, so hiding the overlay right here (like above) still
+  // let it land as a visible flat-color placeholder stone for a frame or two.
+  // A short buffer keeps that bake behind the overlay instead.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  hideLoadingOverlay();
+  howToLoading = false;
 });
 
 // "NimiCurl rules" / "Pure Curling rules" pills — each mode's own fixed-tint
