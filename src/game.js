@@ -1025,21 +1025,6 @@ export function startGame(opts = {}) {
     if (shineT !== null) drawHandoffShine(shineT);
     drawHandoffLabel(maskAlpha);
   }
-  // Chat mask background: the same full-rink ice-mask texture/shape as the
-  // Pass & Play handoff above, toggled by toggleChatMask instead of the
-  // handoff state machine — plain instant show/hide, no in/out fade (the
-  // handoff's fade exists to sell "the other player can't peek", which
-  // doesn't apply here; a follow-up can add one for polish). The DOM chat
-  // thread/compose bar (#chatMask, reparented over this same canvas box by
-  // main.js) paint on top of this for the actual text.
-  function drawChatMaskBg() {
-    if (!chatMaskOpen) return;
-    if (!handoffMaskImage.complete || !handoffMaskImage.naturalWidth) return;
-    ctx.save();
-    ctx.clip(HANDOFF_MASK_PATH);
-    ctx.drawImage(handoffMaskImage, NOTCH_X0, FY0, NOTCH_X1 - NOTCH_X0, FY1 - FY0);
-    ctx.restore();
-  }
   // Kicks off the 'in' stage; completeHandoff() (see onValidate/beginAimPhase)
   // applies whatever real phase transition was deferred once 'out' finishes.
   // skipWhistle only matters for the handoffA->aimA leg (see beginAimPhase's
@@ -2045,18 +2030,19 @@ export function startGame(opts = {}) {
   }
 
   // ---- Duel LAN chat (see server/arbiter.js's per-team cooldown + CLAUDE.md
-  // "chat" notes). One scrolling thread, both teams' bubbles appended in
-  // order as they arrive — history persists for the rest of the match,
+  // "chat" notes). Two team-colored columns, each team's own cards appended
+  // in order as they arrive — history persists for the rest of the match,
   // nothing recorded/replayed. Only ever wired up when net is set.
   //
   // CHAT_ENABLED: the feature itself is fully built (this whole block).
-  // v1.2's rework: a full-rink mask (same ice-mask texture/shape as the Pass
-  // & Play handoff mask, see drawChatMaskBg/toggleChatMask below) instead of
-  // the old edge-to-edge two-window layout, opened/closed by the chat rock
-  // (desktop, see ROCK_ZONES.chat in onPointerDown) or #tbtn-chat (mobile).
+  // v1.2's rework: a full-screen two-column panel instead of the old
+  // edge-to-edge thread, opened/closed by the chat rock (desktop, see
+  // ROCK_ZONES.chat in onPointerDown), #tbtn-chat (mobile), or #chatExitBtn.
   const CHAT_ENABLED = true;
   const chatMask = document.getElementById('chatMask');
-  const chatThread = document.getElementById('chatThread');
+  const chatFeedA = document.getElementById('chatFeedA');
+  const chatFeedB = document.getElementById('chatFeedB');
+  const chatExitBtn = document.getElementById('chatExitBtn');
   const chatComposeForm = document.getElementById('chatComposeForm');
   const chatComposeInput = document.getElementById('chatComposeInput');
   const chatComposeSendBtn = document.getElementById('chatComposeSendBtn');
@@ -2064,6 +2050,40 @@ export function startGame(opts = {}) {
   const chatComposeEmojiPicker = document.getElementById('chatComposeEmojiPicker');
   const chatComposeTimerFill = document.getElementById('chatComposeTimerFill');
   const chatBadgeMobile = document.getElementById('tbtn-chat-badge');
+  // Real per-address identicons (same lib/algorithm as the stone bubbles and
+  // the goal-panel avatar) rather than a generic icon — reuses IDENTICON_ADDRESS,
+  // already resolved (real wallet for this device's own team, the shared
+  // default placeholder for the opponent's — see identiconOverride in
+  // main.js) by the time startGame() got here. Kicked off once, up front:
+  // by the time a chat send is even possible (mask opened, message typed),
+  // this has long since resolved — chatAvatarUrl stays null only in the
+  // sliver of time before that first .then() lands, in which case the card
+  // just shows its plain background-color fallback (see .chat-card-avatar).
+  const chatAvatarUrl = { A: null, B: null };
+  Promise.all([
+    getIdenticonPngDataUrl(IDENTICON_ADDRESS.A, 128),
+    getIdenticonPngDataUrl(IDENTICON_ADDRESS.B, 128),
+  ]).then(([a, b]) => { chatAvatarUrl.A = a; chatAvatarUrl.B = b; });
+  // Two independent native scrollbars (chatFeedB starts +32px lower than
+  // chatFeedA — see .chat-col-b .chat-feed's own quinconce comment in
+  // style.css — so they don't necessarily share a scroll range) driven
+  // together: scrolling either one mirrors the *fraction* scrolled (not the
+  // raw pixel offset, which would clamp early against whichever column's
+  // range is smaller) onto the other, so a left card and its right-side
+  // neighbor never drift out of alignment as the player scrolls history.
+  let chatScrollGuard = false;
+  function mirrorChatScroll(from, to) {
+    return () => {
+      if (chatScrollGuard) return;
+      chatScrollGuard = true;
+      const fromRange = from.scrollHeight - from.clientHeight;
+      const toRange = to.scrollHeight - to.clientHeight;
+      to.scrollTop = fromRange > 0 ? (from.scrollTop / fromRange) * toRange : 0;
+      chatScrollGuard = false;
+    };
+  }
+  chatFeedA.addEventListener('scroll', mirrorChatScroll(chatFeedA, chatFeedB), { signal });
+  chatFeedB.addEventListener('scroll', mirrorChatScroll(chatFeedB, chatFeedA), { signal });
   const CHAT_MAX_LEN = 60;
   // Unlimited sends, but at most one every CHAT_COOLDOWN_MS — a flat, real-
   // time cooldown instead of the old "2 slots tied to aim/reveal phase"
@@ -2097,18 +2117,33 @@ export function startGame(opts = {}) {
     chatComposeTimerFill.classList.toggle('ready', sendEnabled);
   }
   // team here is whichever side the message came from (from the arbiter's
-  // echo, see net.onChat below) — always drawn on that team's fixed board
-  // side, same for both players' screens (the board itself isn't mirrored).
-  // Appends a bubble (SMS-style thread, not a single overwritten line) and
-  // scrolls it into view — history persists for the rest of the match,
-  // nothing recorded/replayed.
+  // echo, see net.onChat below) — always appended to that team's own fixed
+  // column, same for both players' screens (the board itself isn't
+  // mirrored, and neither is this). Scrolling the team's own feed to its
+  // new bottom fires that feed's 'scroll' listener, which mirrors the other
+  // column to match (see mirrorChatScroll above) — history persists for the
+  // rest of the match, nothing recorded/replayed.
   function showChatMessage(team, text) {
     if (!text) return;
-    const bubble = document.createElement('div');
-    bubble.className = `chat-bubble chat-bubble-${team.toLowerCase()}`;
-    bubble.textContent = text;
-    chatThread.appendChild(bubble);
-    chatThread.scrollTop = chatThread.scrollHeight;
+    const feed = team === 'A' ? chatFeedA : chatFeedB;
+    const card = document.createElement('div');
+    card.className = 'chat-card';
+    const avatar = document.createElement('div');
+    avatar.className = 'chat-card-avatar';
+    const url = chatAvatarUrl[team];
+    if (url) avatar.style.backgroundImage = `url(${url})`;
+    const body = document.createElement('div');
+    body.className = 'chat-card-body';
+    const meta = document.createElement('div');
+    meta.className = 'chat-card-meta';
+    meta.textContent = `manche ${round}`;
+    const msg = document.createElement('div');
+    msg.className = 'chat-card-msg';
+    msg.textContent = text;
+    body.append(meta, msg);
+    card.append(avatar, body);
+    feed.appendChild(card);
+    feed.scrollTop = feed.scrollHeight;
   }
   // A small fixed set rather than a full system emoji grid — quick reactions,
   // not a general-purpose keyboard (see design brief: "sober, simple").
@@ -2174,6 +2209,7 @@ export function startGame(opts = {}) {
     if (net && CHAT_ENABLED) toggleChatMask();
     else console.log('[toolbar] chat pressed — no chat available');
   }, { signal });
+  chatExitBtn.addEventListener('click', () => { toggleChatMask(); }, { signal });
   if (net && CHAT_ENABLED) {
     chatComposeEmojiBtn.addEventListener('click', () => {
       chatComposeEmojiPicker.classList.toggle('hidden');
@@ -6265,7 +6301,6 @@ export function startGame(opts = {}) {
     // atmosphere.draw(ctx); // neutralized for perf, see note at createAtmosphere()
     syncSweepButton();
     drawHandoffMask();
-    drawChatMaskBg();
     // matchIntroAnimDone, not phase !== 'matchIntro': the 'matchStart' audio
     // clip driving beginAimPhase(true)'s onEnded (see beginMatchIntro) can in
     // principle finish (or fail to decode and fire 'ended' near-instantly)
@@ -6388,7 +6423,7 @@ export function startGame(opts = {}) {
   // (toolbar/logo confirm dialogs); goalMenuBtn/replayExitBtn above call it
   // directly since they already have closure access, then hand off to
   // opts.onExit for the "now show mode-select" part this closure doesn't own.
-  // #chatThread and #syncToast are persistent, page-level DOM shared across
+  // #chatFeedA/B and #syncToast are persistent, page-level DOM shared across
   // every match instance — unlike canvas-drawn content (redrawn fresh every
   // frame straight from this instance's own state, so it can never leak) or
   // #chatComposeEmojiPicker (already rebuilt fresh per instance, see
@@ -6399,7 +6434,7 @@ export function startGame(opts = {}) {
   // a match entirely) and by "Play Again" (same instance, so there's no
   // fresh DOM to inherit a clean slate from either).
   function resetSharedMatchChrome() {
-    chatThread.innerHTML = '';
+    chatFeedA.innerHTML = ''; chatFeedB.innerHTML = '';
     syncToast.classList.add('hidden'); syncToast.classList.remove('problem');
   }
 

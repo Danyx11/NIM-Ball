@@ -1353,73 +1353,110 @@ canvas {
   display: block; width: 100%; height: auto; touch-action: none;
 }
 
-/* Duel LAN chat — full-rink mask (same box as the canvas: reparented to
-   #game-card by main.js, position:absolute;inset:0 like #overlay right
-   below), not the old two-window flex layout. Hidden outside a live LAN
-   match / while closed (see src/game.js's toggleChatMask). z-index above the
-   canvas but below #overlay's dialogs (10) — a chat send should never be
-   reachable through a "quit match?" confirm.
-   pointer-events:none at the root, same click-through-except-its-own-
-   controls pattern as .mobile-layout #app / #toolbar-top elsewhere in this
-   file — .chat-thread/.chat-compose below get it back individually. Without
-   this, the whole inset:0 box (including the empty space over the chat rock
-   itself) swallowed every click, so re-tapping the rock to close the mask
-   never reached the canvas's own onPointerDown/rockZoneAt at all. */
+/* Duel LAN chat — full-screen panel (reparented to #game-card by main.js,
+   position:absolute;inset:0 like #overlay right below), split into two
+   team-colored columns (each team's own cards/messages on its own fixed
+   side, left=A/right=B, matching the board's own fixed left/right layout)
+   with the compose bar pinned to the bottom, above wherever a phone's own
+   keyboard will dock — see conversation for why nothing tries to confine
+   the keyboard itself to one side (a web page can't). Hidden outside a live
+   LAN match / while closed (see src/game.js's toggleChatMask). z-index
+   above the canvas but below #overlay's dialogs (10) — a chat send should
+   never be reachable through a "quit match?" confirm.
+   Fully modal (pointer-events:auto at the root) once open — closing is via
+   #chatExitBtn now, not click-through to the chat rock underneath, so
+   there's no need for the click-through-except-its-own-controls trick
+   #overlay's siblings use elsewhere in this file. */
 #chatMask {
-  position: absolute; inset: 0; z-index: 5; pointer-events: none;
+  position: absolute; inset: 0; z-index: 5; pointer-events: auto;
   display: flex; flex-direction: column;
 }
 #chatMask.hidden { display: none; }
-/* Thread + compose both confined to the actual ice rect, not the full
-   canvas (which includes a lot of decorative forest margin around a much
-   smaller centered rink) — inset % values are FX0/FX1/FY0/FY1 as fractions
-   of the canvas's own W/H (3312x1896), i.e. exactly .team-select's own
-   already-measured box (see that rule above) trimmed in a bit further so
-   bubbles/compose sit inside the ice, not flush against the wood frame. */
-.chat-thread {
-  position: absolute; top: 35%; left: 35%; right: 34%; height: 20%;
-  pointer-events: auto;
-  display: flex; flex-direction: column; justify-content: flex-end; gap: 6px;
-  overflow-y: auto; padding: 4px 2px;
+.chat-columns { flex: 1; min-height: 0; display: flex; position: relative; }
+.chat-col {
+  flex: 1 1 50%; min-width: 0; box-sizing: border-box; position: relative;
+  display: flex; flex-direction: column; padding: 3.5% 3%;
+  /* Nimiq Blue / Nimiq Gold, same hexes the goal-scored flash already tints
+     with (--teamA/--teamB) — backdrop-filter blurs the live board showing
+     through rather than a flat static texture, so it reads as "the ice,
+     softened" instead of a separate image pasted over it. */
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
-.chat-bubble {
-  max-width: 85%; padding: 7px 13px; border-radius: 16px; font-size: 13px; line-height: 1.3;
+.chat-col-a { background: rgba(63,169,245,0.55); }
+.chat-col-b { background: rgba(255,201,77,0.55); }
+.chat-col-title {
+  font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  margin-bottom: 10px; flex: 0 0 auto;
+}
+.chat-col-a .chat-col-title { color: var(--teamA-dark); }
+.chat-col-b .chat-col-title { color: var(--teamB-dark); }
+.chat-feed { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
+/* Quinconce: team B's whole feed starts half a card-row lower than team
+   A's, so a left card and its right-side neighbor interleave vertically
+   across the seam instead of lining up in two flat rows — see conversation
+   (tried aligning cards within one column first, rejected: wanted this
+   between the two columns instead). */
+.chat-col-b .chat-feed { margin-top: 32px; }
+.chat-feed::-webkit-scrollbar { width: 5px; }
+.chat-feed::-webkit-scrollbar-track { background: rgba(11,31,42,0.08); border-radius: 4px; }
+.chat-feed::-webkit-scrollbar-thumb { background: rgba(11,31,42,0.32); border-radius: 4px; }
+.chat-card {
+  background: #fff; border-radius: 14px; padding: 9px 13px; box-shadow: 0 2px 10px rgba(11,31,42,0.14);
+  display: flex; gap: 10px; align-items: flex-start; flex: 0 0 auto;
+}
+.chat-card-avatar {
+  width: 32px; height: 32px; border-radius: 9px; background-size: cover; background-position: center;
+  flex: 0 0 auto; background-color: rgba(11,31,42,0.08);
+}
+.chat-card-body { min-width: 0; }
+.chat-card-meta { font-size: 10px; color: rgba(11,31,42,0.4); margin-bottom: 2px; }
+.chat-card-msg {
+  font-size: 14px; color: var(--bg-deep); line-height: 1.32; word-break: break-word;
   font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
-  color: var(--ink); word-break: break-word;
 }
-.chat-bubble-a { align-self: flex-start; background: var(--teamA-dark); border-bottom-left-radius: 4px; }
-.chat-bubble-b { align-self: flex-end; background: var(--teamB-dark); border-bottom-right-radius: 4px; }
+/* Exit — dead-center on the seam between the two columns. No filled button
+   chip, no drop shadow (per explicit feedback: "j'aime pas son aspect
+   bouton") — just the glyph on a soft translucent backdrop so it stays
+   legible over both the blue and yellow halves. */
+.chat-exit-btn {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 5;
+  width: 40px; height: 40px; border-radius: 50%; border: none; padding: 0;
+  background: rgba(255,255,255,0.22); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+.chat-exit-btn svg { width: 19px; height: 19px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35)); }
 .chat-compose {
-  position: absolute; left: 35%; right: 34%; bottom: 35%;
-  pointer-events: auto;
-  display: flex; gap: 8px; align-items: flex-end;
+  flex: 0 0 auto; box-sizing: border-box; display: flex; gap: 8px; align-items: flex-end;
+  padding: 10px 4%; background: rgba(11,31,42,0.92);
 }
-/* Dark-on-light everywhere in this bar — it sits directly on the light
-   ice-mask texture, not one of the game's usual dark panels, so the normal
-   --ink/--ink-dim (near-white, tuned for --panel's dark navy) read as
-   invisible here. Same fix pattern as .config-panel.mode-curling/
-   mode-joincode above (swap to --bg-deep for a light background), just
-   applied locally instead of redefining --ink-dim (this bar has no child
-   using --ink-dim for anything else). */
+/* Dark-on-light for the input specifically — it sits on its own near-black
+   bar (unlike the columns above), but the field itself is still a light
+   pill, so the normal --ink/--ink-dim (near-white, tuned for --panel's dark
+   navy) would still read as invisible against it. Same fix pattern as
+   .config-panel.mode-curling/mode-joincode above (swap to --bg-deep for a
+   light background), applied locally since nothing else in this bar reads
+   --ink-dim. */
 .chat-compose-input {
   flex: 1; min-width: 0; padding: 9px 14px; border-radius: 999px; border: 1px solid rgba(11,31,42,0.18);
-  background: rgba(255,255,255,0.8); color: var(--bg-deep); font-size: 14px; font-family: inherit;
+  background: rgba(255,255,255,0.9); color: var(--bg-deep); font-size: 14px; font-family: inherit;
 }
 .chat-compose-input::placeholder { color: rgba(11,31,42,0.55); }
 .chat-compose-input:disabled { opacity: 0.4; }
 .chat-compose-controls { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .chat-compose-controls-top { display: flex; gap: 6px; align-items: center; }
 /* Timer ring + emoji button stacked above the send button — see game.js's
-   syncChatCompose for the ring's live fill and the CHAT_EMOJI picker. */
+   syncChatCompose for the ring's live fill and the CHAT_EMOJI picker. Light
+   strokes/icon here (unlike the input above): they sit directly on
+   .chat-compose's own dark navy bar, not on a light surface. */
 .chat-timer { width: 16px; height: 16px; transform: rotate(-90deg); }
-.chat-timer-track { fill: none; stroke: rgba(11,31,42,0.15); stroke-width: 2; }
+.chat-timer-track { fill: none; stroke: rgba(255,255,255,0.2); stroke-width: 2; }
 .chat-timer-fill {
-  fill: none; stroke: rgba(11,31,42,0.55); stroke-width: 2; stroke-linecap: round;
+  fill: none; stroke: rgba(255,255,255,0.65); stroke-width: 2; stroke-linecap: round;
   stroke-dasharray: 50.265; stroke-dashoffset: 50.265; transition: stroke-dashoffset 200ms linear;
 }
 .chat-timer-fill.ready { stroke: var(--accent); }
 .chat-emoji-btn {
-  width: 18px; height: 18px; padding: 0; border: none; background: none; color: var(--bg-deep);
+  width: 18px; height: 18px; padding: 0; border: none; background: none; color: rgba(255,255,255,0.75);
   display: flex; align-items: center; justify-content: center;
 }
 .chat-emoji-btn svg { width: 16px; height: 16px; }
@@ -1688,26 +1725,12 @@ button:disabled { opacity: 0.35; cursor: default; }
    it needs the same right-edge safe margin to keep the compose bar/thread
    clear of the joystick/toolbar panel on mobile landscape. */
 .mobile-layout #chatMask { right: var(--controller-reserved-w); }
-/* .chat-thread/.chat-compose's desktop insets (see those rules above) are
-   FX0..FY1 as fractions of the canvas's own un-cropped W/H (3312x1896) — on
-   mobile the canvas is a real, separately-positioned box showing a cropped
-   + further CSS-scaled window of that same scene (MOBILE_CROP + the
-   .stage-wrap-detached left/top/width math, see those rules), not a simple
-   scaled copy of the desktop canvas — so the desktop ice fractions don't
-   describe where the ice actually lands inside #chatMask's own box here (a
-   #game-card child, not nested in that transform at all). This is exactly
-   the "bubbles only show in the bottom half" bug: the desktop numbers were
-   being applied unchanged. Re-measured directly (getBoundingClientRect on
-   #stage vs #chatMask, see conversation) rather than re-deriving through
-   three layered transforms by hand. */
-/* Pushed further down/inward from the first pass (top:5%/left:14%/right:12%)
-   — on a real device the bubbles were still landing on the wood beams above
-   the ice (see conversation screenshot), meaning the measured ice-top offset
-   from the 700x360 Browser-pane test didn't hold on a real phone's actual
-   aspect ratio. More top margin + tighter left/right keeps the whole thread
-   box safely inside the ice regardless of that per-device drift. */
-.mobile-layout .chat-thread { top: 12%; left: 18%; right: 16%; height: 16%; }
-.mobile-layout .chat-compose { left: 18%; right: 16%; bottom: 37%; }
+/* No mobile-specific insets needed for the columns/compose below (unlike
+   the old ice-anchored thread/compose, which needed per-platform ice-rect
+   math — see git history, "bubbles land on the wood beams" — because it
+   tried to sit *inside* the ice art specifically). This design just fills
+   #chatMask's own box edge-to-edge on both platforms, and #chatMask itself
+   already gets the platform-correct box above. */
 /* Network sync-check toast (see index.html/game.js) — translucent pill, not
    #overlay's near-opaque backdrop, since the rollback tween needs the stones
    underneath to stay visible while it plays. Non-interactive: it only ever

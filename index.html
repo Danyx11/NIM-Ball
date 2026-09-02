@@ -944,20 +944,34 @@
     </div>
   </div>
   <!-- Duel LAN chat: only shown for a live LAN match (see src/game.js's
-       `if (net)` chat wiring). Full-rink mask, same ice-mask texture/shape
-       as the Pass & Play handoff mask (drawChatMaskBg/toggleChatMask in
-       game.js), opened/closed by the chat rock (desktop) or #tbtn-chat
-       (mobile) — replaces the old two-window edge-to-edge layout. Messages
-       from both teams append as bubbles into one scrolling thread pinned to
-       the top of the mask (team A left, team B right, matching the board's
-       own fixed left/right layout) — the bottom stays clear for the compose
-       bar + whatever room a phone's own keyboard needs. Sends are unlimited
-       in count but rate-limited (see CHAT_COOLDOWN_MS in game.js) — the
-       small ring next to the emoji button fills back up as that cooldown
-       clears; composing/emoji-picking is never blocked by it, only the
-       actual send. Reparented into #game-card by main.js, same as #overlay. -->
+       `if (net)` chat wiring). Full-screen panel, split into two team-
+       colored columns (team A's own cards on the left, team B's on the
+       right — matching the board's own fixed left/right layout, never
+       mirrored), opened/closed by the chat rock (desktop) or #tbtn-chat
+       (mobile), or by #chatExitBtn dead-center on the seam between the two
+       columns. The compose bar is pinned to the very bottom of the panel —
+       nothing sits below it, so it's always clear of wherever a phone's own
+       keyboard docks (see main.js's --stable-vh / visualViewport pin for
+       why that keyboard doesn't otherwise shove the whole panel around).
+       Sends are unlimited in count but rate-limited (see CHAT_COOLDOWN_MS
+       in game.js) — the small ring next to the emoji button fills back up
+       as that cooldown clears; composing/emoji-picking is never blocked by
+       it, only the actual send. Reparented into #game-card by main.js,
+       same as #overlay. -->
   <div id="chatMask" class="hidden">
-    <div class="chat-thread" id="chatThread"></div>
+    <div class="chat-columns">
+      <div class="chat-col chat-col-a">
+        <div class="chat-col-title">Team Blue</div>
+        <div class="chat-feed" id="chatFeedA"></div>
+      </div>
+      <div class="chat-col chat-col-b">
+        <div class="chat-col-title">Team Yellow</div>
+        <div class="chat-feed" id="chatFeedB"></div>
+      </div>
+      <button class="chat-exit-btn" type="button" id="chatExitBtn" aria-label="Fermer le chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+      </button>
+    </div>
     <form class="chat-compose" id="chatComposeForm" autocomplete="off">
       <input class="chat-compose-input" id="chatComposeInput" type="text" maxlength="60" placeholder="Message (60 max)" disabled>
       <div class="chat-compose-controls">
