@@ -218,7 +218,7 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
   // Mobile keeps its existing behavior untouched (still #game-card children)
   // — #menuStage isn't part of mobile's layout yet.
   const menuHost = IS_MOBILE ? gameCard : document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -657,6 +657,7 @@ navSections.forEach((section) => {
   const label = section.querySelector('.nav-label');
   const items = section.querySelector('.nav-section-items');
   label.addEventListener('click', () => {
+    audio.play('navToggle'); // one cue per tap, whichever way this section just moved (opened, or closed)
     const wasOpen = section.classList.contains('open');
     navSections.forEach((s) => {
       s.classList.remove('open');
@@ -1001,6 +1002,7 @@ function hideMatchChrome() {
   toolbarBottom.classList.add('hidden');
   mobileController.classList.add('hidden');
   startOverlay.classList.add('hidden');
+  document.body.classList.remove('howto-active');
   if (IS_MOBILE) sidebar.classList.remove('in-match');
 }
 
@@ -1509,8 +1511,228 @@ navNimiq.addEventListener('click', () => {
   else hideNimiqScreen();
 });
 nimiqBackBtn.addEventListener('click', hideNimiqScreen);
-// How to (index.html's #navHowTo) has no destination yet — visual sidebar
-// shell only for this pass, intentionally left unwired.
+// How To (index.html's #navHowTo/#helpBtn) — opens the "How to?" hub
+// (#howToHubOverlay) instead of launching the tutorial directly (see
+// conversation): same toggle-on-reclick/show/hide shape as About/Nimiq
+// above. The hub's own 3 pills (below) are what actually launch the
+// tutorial or open a rules panel.
+const howToHubOverlay = document.getElementById('howToHubOverlay');
+const htBackBtn = document.getElementById('htBackBtn');
+const htPlayBtn = document.getElementById('htPlayBtn');
+const htNimicurlBtn = document.getElementById('htNimicurlBtn');
+const htCurlingBtn = document.getElementById('htCurlingBtn');
+// #helpBtn stays visible over literally any menu screen (see conversation),
+// not just mode-select's own tile grid — so opening the hub from there has
+// to hide every OTHER menu panel that could conceivably be open underneath
+// it too, not just the handful (About/Nimiq/the two rules panels) that
+// happened to matter for the "reached from the sidebar/hub" paths this
+// originally covered. Listed by id (not a shared "every config-panel"
+// helper) since a couple of these need their own extra cleanup alongside
+// the hide (hideLobby/hideNetPanel), same as returnToModeSelect's own
+// hideMatchChrome pairing elsewhere in this file.
+const OTHER_MENU_OVERLAY_IDS = [
+  'connectGateOverlay', 'classicCustomOverlay', 'customSettingsOverlay',
+  'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay',
+  'aboutOverlay', 'constructionOverlay', 'nimiqOverlay',
+  'nimicurlRulesOverlay', 'pureCurlingRulesOverlay',
+];
+function showHowToScreen() {
+  audio.play('button');
+  hideLobby();
+  hideNetPanel();
+  OTHER_MENU_OVERLAY_IDS.forEach((id) => document.getElementById(id).classList.add('hidden'));
+  updateNcrScrollPill();
+  updatePcrScrollPill();
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  vibeSubOverlay.classList.add('hidden');
+  howToHubOverlay.classList.remove('hidden');
+}
+function hideHowToScreen() {
+  audio.play('button');
+  howToHubOverlay.classList.add('hidden');
+  returnToModeSelect();
+}
+const navHowTo = document.getElementById('navHowTo');
+navHowTo.addEventListener('click', () => {
+  if (activeStopGame) return;
+  if (howToHubOverlay.classList.contains('hidden')) showHowToScreen();
+  else hideHowToScreen();
+});
+htBackBtn.addEventListener('click', hideHowToScreen);
+// Help button (see conversation) — affordance next to the tile grid on both
+// platforms now, plugged straight into the same "How to" entry point above
+// rather than its own copy.
+const helpBtn = document.getElementById('helpBtn');
+helpBtn.addEventListener('click', () => navHowTo.click());
+
+// "How to play" pill — the actual interactive tutorial (see game.js's howTo
+// mode), same self-contained single-stone flow and same mobile-only gate as
+// before this feature (its spotlight geometry assumes #mobileController/the
+// mobile canvas crop) — just moved here from #navHowTo's own click handler,
+// which now only opens the hub above. Still a silent no-op on desktop for
+// now, not this pill's own concern to fix.
+htPlayBtn.addEventListener('click', () => {
+  if (!IS_MOBILE || activeStopGame) return;
+  audio.play('button');
+  howToHubOverlay.classList.add('hidden');
+  modeOverlay.classList.add('hidden');
+  document.body.classList.add('howto-active');
+  showToolbar();
+  activeMatchMode = 'howTo';
+  activeStopGame = startGame({ ...rockHandlers, howTo: true, mobile: IS_MOBILE });
+  syncIdentityPill();
+});
+
+// "NimiCurl rules" / "Pure Curling rules" pills — each mode's own fixed-tint
+// rules panel (see index.html's own comment on #nimicurlRulesOverlay), back
+// returns to the hub rather than straight to mode-select. Icons cloned from
+// the top-level #modeHockey/#modeCurling tiles once at init, same
+// modeIconSvg()-style reuse as every other cloned header icon in this file
+// — no dedicated new asset for these.
+const nimicurlRulesOverlay = document.getElementById('nimicurlRulesOverlay');
+const ncrBackBtn = document.getElementById('ncrBackBtn');
+const ncrModeIcon = document.getElementById('ncrModeIcon');
+const pureCurlingRulesOverlay = document.getElementById('pureCurlingRulesOverlay');
+const pcrBackBtn = document.getElementById('pcrBackBtn');
+const pcrModeIcon = document.getElementById('pcrModeIcon');
+ncrModeIcon.replaceChildren(modeHockey.querySelector('.mode-icon').cloneNode(true));
+pcrModeIcon.replaceChildren(modeCurling.querySelector('.mode-icon').cloneNode(true));
+// Scroll thumb for .rules-scroll, the inner scrolling body of these two
+// panels (see index.html's own comment on #ncrScroll/.rules-scroll-pill —
+// split out from the panel itself so the back button never scrolls off
+// screen, and so this can measure plain layout metrics instead of a
+// viewport-relative rect). Same pattern as updateNavScrollPill above for the
+// sidebar nav's own accordion sections — offsetTop/scrollHeight/clientHeight
+// are unaffected by .config-panel's transform/opacity entrance animation, so
+// there's no settle-timing window to work around here. Reading these off a
+// `.hidden` (display:none) panel gives 0/0, so calling this is safe (self-
+// hides) even while that panel isn't showing.
+function updateRulesScrollPill(panelEl) {
+  const scroll = panelEl.querySelector('.rules-scroll');
+  const pill = panelEl.querySelector('.rules-scroll-pill');
+  const overflow = scroll.scrollHeight - scroll.clientHeight;
+  if (panelEl.classList.contains('hidden') || overflow <= 1) {
+    pill.classList.remove('visible');
+    return;
+  }
+  const trackHeight = scroll.clientHeight;
+  const thumbHeight = Math.max(24, trackHeight * (scroll.clientHeight / scroll.scrollHeight));
+  const thumbTop = scroll.offsetTop + (scroll.scrollTop / overflow) * (trackHeight - thumbHeight);
+  pill.style.height = `${thumbHeight}px`;
+  pill.style.top = `${thumbTop}px`;
+  pill.classList.add('visible');
+}
+const updateNcrScrollPill = () => updateRulesScrollPill(nimicurlRulesOverlay);
+const updatePcrScrollPill = () => updateRulesScrollPill(pureCurlingRulesOverlay);
+nimicurlRulesOverlay.querySelector('.rules-scroll').addEventListener('scroll', updateNcrScrollPill);
+pureCurlingRulesOverlay.querySelector('.rules-scroll').addEventListener('scroll', updatePcrScrollPill);
+window.addEventListener('resize', () => { updateNcrScrollPill(); updatePcrScrollPill(); });
+// Manual drag-to-scroll, on top of touch-action:pan-y (see style.css's own
+// .rules-scroll rule) rather than instead of it — html/body's own
+// touch-action:none (kills iOS pull-to-refresh during gameplay, see that
+// rule's comment) is supposed to be overridable by a descendant's own
+// touch-action, and it is in most engines, but this stayed broken on the one
+// real device that matters most even after that CSS-only fix, and then
+// again after a first touchstart/touchmove-only JS fallback (see
+// conversation) — a passive:true touchstart apparently still let the
+// browser's own gesture recognizer decide/cancel the sequence before our
+// touchmove ever got a chance to preventDefault it. Pointer Events instead
+// of raw Touch events (covers touch/mouse/pen in one path, and
+// setPointerCapture keeps tracking even if the finger drifts outside the
+// element mid-drag) with preventDefault called from pointerDOWN, not just
+// move, takes over the gesture from first contact instead of trying to
+// interrupt one already in progress.
+function enableDragScroll(el) {
+  let startY = 0;
+  let startScrollTop = 0;
+  let pointerId = null;
+  el.addEventListener('pointerdown', (evt) => {
+    if (evt.pointerType === 'mouse' && evt.button !== 0) return;
+    pointerId = evt.pointerId;
+    startY = evt.clientY;
+    startScrollTop = el.scrollTop;
+    try { el.setPointerCapture(pointerId); } catch { /* capture is a nice-to-have, not required for the scroll math below */ }
+    evt.preventDefault();
+  });
+  el.addEventListener('pointermove', (evt) => {
+    if (pointerId === null || evt.pointerId !== pointerId) return;
+    el.scrollTop = startScrollTop - (evt.clientY - startY);
+    evt.preventDefault();
+  });
+  const stop = (evt) => { if (evt.pointerId === pointerId) pointerId = null; };
+  el.addEventListener('pointerup', stop);
+  el.addEventListener('pointercancel', stop);
+  // Trackpad two-finger swipe (how this got tested — see conversation) fires
+  // wheel events, not pointer ones, so the drag handling above never saw it
+  // at all — separate handler, same "drive scrollTop ourselves" approach.
+  el.addEventListener('wheel', (evt) => {
+    el.scrollTop += evt.deltaY;
+    evt.preventDefault();
+  }, { passive: false });
+}
+enableDragScroll(document.getElementById('ncrScroll'));
+enableDragScroll(document.getElementById('pcrScroll'));
+function showNimicurlRulesScreen() {
+  audio.play('button');
+  howToHubOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  nimicurlRulesOverlay.classList.remove('hidden');
+  updateNcrScrollPill();
+}
+function showPureCurlingRulesScreen() {
+  audio.play('button');
+  howToHubOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  pureCurlingRulesOverlay.classList.remove('hidden');
+  updatePcrScrollPill();
+}
+htNimicurlBtn.addEventListener('click', showNimicurlRulesScreen);
+htCurlingBtn.addEventListener('click', showPureCurlingRulesScreen);
+ncrBackBtn.addEventListener('click', () => { nimicurlRulesOverlay.classList.add('hidden'); updateNcrScrollPill(); showHowToScreen(); });
+pcrBackBtn.addEventListener('click', () => { pureCurlingRulesOverlay.classList.add('hidden'); updatePcrScrollPill(); showHowToScreen(); });
+// Locked to #sidebar's own live left edge (horizontal) and #bg-logo's own
+// live vertical center (vertical) rather than guessed fixed px offsets (see
+// conversation — a plain CSS position broke on mobile, where #bg-logo sits
+// in a differently-sized/padded column than desktop's, and doesn't track
+// the canvas resizing either). Recomputed on resize and after orientation
+// actually settles (same 120ms pattern as setStableVh above — the rect read
+// right at the orientationchange event fires mid-rotation, before layout
+// catches up). Hides itself if the logo isn't actually visible right now
+// (width 0 — e.g. mobile's .in-match brand hiding) instead of collapsing to
+// some meaningless top:0 position.
+// Matches #helpBtn's own CSS height (36px) — read as a constant instead of
+// helpBtn.offsetHeight, which is 0 (and silently throws the vertical math
+// off by half this value) on the very first call that actually reveals the
+// button: logoRect starting 0-width (see below) adds .hidden first, and
+// that class is still on the button (still display:none, still 0
+// offsetHeight) at the moment this same function later computes `top` for
+// the call that's about to remove it.
+const HELP_BTN_SIZE = 36;
+function positionHelpBtn() {
+  const logoRect = bgLogo.getBoundingClientRect();
+  if (!logoRect.width) { helpBtn.classList.add('hidden'); return; }
+  const sidebarRect = sidebar.getBoundingClientRect();
+  // Mobile's column is much narrower than desktop's (see conversation) — the
+  // same 24px gap that reads fine against desktop's wide margin looks like a
+  // stray gap there, and the exact logo-center math lands a touch low on
+  // mobile specifically (its own tighter row), so both get a small
+  // mobile-only correction rather than changing desktop's already-correct
+  // numbers.
+  const gap = IS_MOBILE ? 10 : 24;
+  const verticalNudge = IS_MOBILE ? 4 : 0;
+  helpBtn.style.right = `${window.innerWidth - sidebarRect.left + gap}px`;
+  helpBtn.style.top = `${logoRect.top + logoRect.height / 2 - HELP_BTN_SIZE / 2 - verticalNudge}px`;
+  helpBtn.classList.remove('hidden');
+}
+positionHelpBtn();
+// #bg-logo's src is set asynchronously (see background.js) — its rect is
+// still 0-width at the positionHelpBtn() call above if that hasn't
+// resolved yet, so also reposition once it actually has something to
+// measure.
+bgLogo.addEventListener('load', positionHelpBtn);
+window.addEventListener('resize', positionHelpBtn);
+window.addEventListener('orientationchange', () => setTimeout(positionHelpBtn, 120));
 replayUploadBackBtn.addEventListener('click', () => {
   audio.play('button');
   replayUploadOverlay.classList.add('hidden');

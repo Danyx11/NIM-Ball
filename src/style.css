@@ -229,6 +229,35 @@ html, body {
   margin-top: -5px; /* nudge up, see conversation — both platforms, mobile has no position override of its own to fight */
 }
 
+/* Help button (see conversation) — fixed to the viewport like #sidebar
+   itself, sitting in the gap between the tile grid and the sidebar/
+   controller column, level with the brand logo. top/right are set inline
+   by main.js's positionHelpBtn() (locked to #sidebar's own live left edge
+   and #bg-logo's own live vertical center, recomputed on resize/rotate)
+   rather than fixed here — a plain CSS guess broke on mobile, where
+   #bg-logo sits in a differently-sized/padded column than desktop's (see
+   conversation). Simple circle + glyph, same subtle "translucent white on
+   dark" language as .config-back elsewhere, just a touch more muted (this
+   is a passive affordance sitting over the arena art, not an active screen
+   control). Sits directly over the raw arena photo, not over #modeOverlay's
+   own scrim (this button is a page-level sibling, outside that stacking) —
+   the image crops differently at every aspect ratio, so it can land on
+   bright sky as easily as on a dark tree line; rather than chase a "dark
+   enough" spot that moves with the viewport, the button carries its own
+   contrast (opacity + drop shadow) so it reads on either. */
+#helpBtn {
+  position: fixed; z-index: 2;
+  width: 36px; height: 36px; border-radius: 50%;
+  border: none; background: rgba(255,255,255,0.22); color: rgba(255,255,255,0.9);
+  box-shadow: 0 2px 10px rgba(11,31,42,0.45);
+  font-family: 'Mulish', sans-serif; font-weight: 800; font-size: 16px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+#helpBtn.hidden { display: none; }
+#helpBtn:hover { background: rgba(255,255,255,0.32); color: #fff; }
+
 /* Nav sits right under the brand now (desktop and mobile alike — mobile
    already worked this way, see .mobile-layout .sidebar-nav below); the
    identity pill's own margin-top:auto (.nq-connect-btn) is what now eats the
@@ -724,6 +753,101 @@ html, body {
    empty box, since an empty flex container with no children still occupies
    the desktop `top:80%` slot even with nothing to show. */
 .mobile-layout #toolbar-bottom { display: none; }
+
+/* How To tutorial overlay (see index.html + src/game.js's howTo mode):
+   mobile-only, spotlight + instruction tile living outside #stage-wrap (see
+   index.html's own comment on why) so `position: fixed` resolves against the
+   real viewport regardless of #stage-wrap's mobile transform. Both pieces
+   are pointer-events:none — purely visual, real taps land on the actual
+   canvas/button underneath; game.js reads live game state to gate/advance
+   steps and repositions #howToHole/#howToCorridorBar every frame in JS.
+   Scoped to .mobile-layout throughout (never shown on desktop — this
+   tutorial is mobile-only per explicit request, and its geometry assumes
+   #mobileController/the mobile canvas crop exist). This file has no bare
+   `.hidden{display:none}` utility (see .mc-icon-overlay.hidden's own
+   comment above) — every piece here needs its own scoped .hidden rule. */
+#howToOverlay { display: none; }
+.mobile-layout #howToOverlay:not(.hidden) {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+#howToOverlay.hidden { display: none; }
+/* The simple circular spotlight case (every step except the ice corridor
+   below): a full-viewport div painted with a radial-gradient whose center/
+   radii are set in JS every frame to track the current step's target (a DOM
+   control's own getBoundingClientRect(), or a canvas-space point converted
+   to screen px) — clear in the middle, dim beyond it, with a soft feathered
+   ring in between (per explicit request) rather than a hard-edged cutout, so
+   the transition itself is what's set here as the default gradient shape;
+   only the actual center/radii change per frame. */
+#howToHole {
+  position: fixed;
+  inset: 0;
+  transition: background .22s ease;
+}
+#howToHole.hidden { display: none; }
+/* The one non-circular case: "aim through the ice" needs a light corridor
+   between the stone and the ice zone that fades out at both ends rather
+   than cutting hard — a box-shadow hole can't do that, an SVG mask with a
+   gradient can (see index.html's #howToCorridorGrad/#howToCorridorBar,
+   sized and rotated in JS to the live stone->zone axis every frame). */
+#howToCorridor { position: fixed; inset: 0; width: 100%; height: 100%; }
+#howToCorridor.hidden { display: none; }
+/* Instruction tile: always fully lit above the dim overlay (never itself
+   spotlighted/dimmed). Fixed at #mobileController's bottom-right — the
+   identity pill's own slot, hidden for the tutorial's duration (see
+   body.howto-active below) — left/top/width set in JS (howToPositionTile)
+   to match that spot exactly, deliberately overlapping the controller's own
+   bottom edge by a few px rather than leaving a gap. Two earlier layouts (a
+   per-step fixed position, then dynamic left/right-of-the-stone) were both
+   dropped per explicit feedback once the tile was small enough to just live
+   here permanently. Nimiq Blue panel (--nb-100's own rgb triple, the same
+   "dark text on white"-pairing blue used across the sidebar) at a medium
+   opacity (a fade-on-drag idea was tried and dropped — didn't actually solve
+   anything, see conversation — so this fixed value is the whole story);
+   kept small (compact padding/font) so it covers as little as possible;
+   Mulish via the inherited body font. */
+#howToTile { display: none; }
+.mobile-layout #howToTile:not(.hidden) {
+  display: block;
+  position: fixed;
+  z-index: 9;
+  background: rgba(31, 35, 72, 0.72);
+  color: #fff;
+  border-radius: 12px;
+  padding: 7px 11px 9px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  pointer-events: none;
+}
+#howToTile.hidden { display: none; }
+#howToTileCount { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: rgba(255,255,255,0.65); }
+#howToTileTitle { font-size: 14px; font-weight: 700; line-height: 1.2; margin-top: 1px; }
+#howToTileText { font-size: 11.5px; font-weight: 400; line-height: 1.28; color: rgba(255,255,255,0.88); margin-top: 2px; }
+/* The one real button in the whole overlay (see index.html's own comment on
+   it) — Nimiq Gold, same accent already used for other CTAs (e.g. the
+   "Claim a handle" pill), so it reads as the one thing here worth tapping. */
+#howToGotItBtn {
+  display: block;
+  pointer-events: auto;
+  margin: 6px 0 0;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent);
+  color: #3a2900;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#howToGotItBtn.hidden { display: none; }
+/* "the pill disappears" for the tutorial's duration, per explicit request —
+   the tile takes its place directly above the controller, so the two would
+   otherwise overlap. */
+body.howto-active #connectBtn { display: none; }
 
 /* Shared shell for mobile-only full-screen intro gates (see main.js): plain
    dark scrim + one big centered icon + caption, shown before #modeOverlay so
@@ -1557,8 +1681,14 @@ button:disabled { opacity: 0.35; cursor: default; }
    being applied unchanged. Re-measured directly (getBoundingClientRect on
    #stage vs #chatMask, see conversation) rather than re-deriving through
    three layered transforms by hand. */
-.mobile-layout .chat-thread { top: 5%; left: 14%; right: 12%; height: 22%; }
-.mobile-layout .chat-compose { left: 14%; right: 12%; bottom: 37%; }
+/* Pushed further down/inward from the first pass (top:5%/left:14%/right:12%)
+   — on a real device the bubbles were still landing on the wood beams above
+   the ice (see conversation screenshot), meaning the measured ice-top offset
+   from the 700x360 Browser-pane test didn't hold on a real phone's actual
+   aspect ratio. More top margin + tighter left/right keeps the whole thread
+   box safely inside the ice regardless of that per-device drift. */
+.mobile-layout .chat-thread { top: 12%; left: 18%; right: 16%; height: 16%; }
+.mobile-layout .chat-compose { left: 18%; right: 16%; bottom: 37%; }
 /* Network sync-check toast (see index.html/game.js) — translucent pill, not
    #overlay's near-opaque backdrop, since the rollback tween needs the stones
    underneath to stay visible while it plays. Non-interactive: it only ever
@@ -2039,6 +2169,13 @@ button:disabled { opacity: 0.35; cursor: default; }
   background: var(--scrim-92); border-radius: 24px;
   display: flex; flex-direction: column; padding: 26px 30px;
   box-sizing: border-box; overflow: auto;
+  /* html/body set touch-action:none (see style.css's own base rule) to kill
+     iOS's pull-to-refresh/pinch-zoom during gameplay — that also silences
+     touch scrolling inside any nested overflow:auto region, including this
+     one, unless re-enabled here explicitly (see conversation: rules panels
+     were unscrollable by touch on a real phone despite overflow:auto being
+     set and JS-measured overflow being correct). */
+  touch-action: pan-y;
   /* Elevation layer 3/3 (tile -> open tile menu): the strongest of the three
      tiers, one notch past the tile's own layer-2 shadow, still short/faint/
      cool-tinted (Nimiq Blue) — enough to read "this sits above the tile
@@ -2205,6 +2342,123 @@ button:disabled { opacity: 0.35; cursor: default; }
 #customSettingsOverlay:not(.hidden) .config-row:nth-child(2) { animation-delay: 135ms; }
 #customSettingsOverlay:not(.hidden) .config-row:nth-child(3) { animation-delay: 180ms; }
 #customSettingsOverlay:not(.hidden) .config-row:nth-child(4) { animation-delay: 225ms; }
+
+/* "How to?" hub's 3 pills (see conversation) — one alone on top, two side by
+   side below, same .config-preset-btn look as Classic/Custom's own pair.
+   Reuses .config-presets as-is for the bottom row. */
+.howto-pyramid { display: flex; flex-direction: column; gap: 16px; flex: 1; justify-content: center; }
+/* max-width: none overrides the shared .config-preset-btn rule's own
+   max-width:260px (see conversation — "les extremités gauche et droite
+   doivent être alignées"): .config-presets below has no cap of its own
+   either, so it already stretches to .howto-pyramid's full width by default
+   (flex containers stretch their children's cross axis unless told
+   otherwise); this pill needs the same free rein to land on the exact same
+   left/right edges as that row, whatever width the panel ends up being. */
+.howto-pill-top { width: 100%; max-width: none; }
+/* NIMICURL RULES vs PURE CURLING RULES otherwise end up visibly different
+   widths (see conversation — "des tailles de pills identiques") even though
+   both are flex:1: with flex-basis:0 and the default min-width:auto, a flex
+   item won't shrink below its own content's natural width, so the shorter
+   "NIMICURL" pill just hugs its own text instead of matching its sibling.
+   min-width:0 removes that floor so the pair genuinely splits the row 50/50
+   regardless of which word is longer. */
+.howto-pyramid .config-presets .config-preset-btn { min-width: 0; }
+/* "PURE CURLING" doesn't fit this pill's default 19px font + 20px side
+   padding while keeping "RULES" on its own line below (see conversation —
+   the <br> is what's wanted, wrapping PURE/CURLING onto separate lines is
+   not). Tighter side padding + a smaller font shared by both rules pills
+   (so NIMICURL/RULES stays visually matched to PURE CURLING/RULES rather
+   than one looking bigger) claws back room; the panel-width bump below
+   (#howToHubOverlay etc.) supplies the rest. */
+.howto-rules-pill { padding-left: 10px; padding-right: 10px; }
+.howto-rules-name { font-size: 15px; white-space: nowrap; }
+/* A bit wider across all three linked screens (hub + both rules panels, see
+   conversation) — both for the equal-split pills above to have real room to
+   breathe, and so the panel doesn't visibly change width as you go
+   hub -> NimiCurl Rules -> Pure Curling Rules -> back. min-width, not a
+   bigger max-width: .config-panel is width:fit-content, so a bigger max-width
+   alone wouldn't pull it wider without content demanding it; min-width
+   forces the floor directly. Value picked with margin under the narrowest
+   realistic mobile-landscape ceiling (.mobile-layout .config-panel's own
+   max-width formula, ~380-440px on real phone widths ~600-700px) rather than
+   maxing it out, so it never conflicts with that cap and forces overflow
+   into the joystick column. */
+.mobile-layout #howToHubOverlay,
+.mobile-layout #nimicurlRulesOverlay,
+.mobile-layout #pureCurlingRulesOverlay { min-width: 360px; }
+#howToHubOverlay,
+#nimicurlRulesOverlay,
+#pureCurlingRulesOverlay { min-width: 400px; }
+
+/* NimiCurl/Pure Curling rules panels (see conversation). Reserved arena
+   screenshot slot — same aspect ratio as the real arena art (1200x905, see
+   CLAUDE.md's "Coordinate system" section) so dropping an actual screenshot
+   in later doesn't reflow this panel's layout; empty/translucent for now,
+   no placeholder art of its own since real screenshots are coming per
+   explicit request rather than a mockup that'd just need replacing. */
+.rules-arena-slot {
+  width: 100%; max-width: 320px; aspect-ratio: 1200 / 905;
+  border-radius: 14px; background: rgba(255,255,255,0.1);
+  border: 1px dashed rgba(255,255,255,0.3);
+  align-self: center;
+  margin-bottom: 20px;
+}
+.config-panel.mode-curling .rules-arena-slot { background: rgba(11,31,42,0.08); border-color: rgba(11,31,42,0.25); }
+/* Mobile's own max-height (see .mobile-layout .config-panel's own 88%-of-a-
+   short-viewport cap) leaves much less room than desktop — the reservation
+   above was tall enough there to push the actual rules text off the bottom
+   edge with nothing suggesting it could even scroll to it (see conversation
+   — .rules-scroll-pill below is the fix for that half; this is the other
+   half, just reserving less to begin with). */
+.mobile-layout .rules-arena-slot { max-width: 160px; margin-bottom: 12px; }
+.rules-objective { max-width: 320px; align-self: center; margin: 0 0 20px; text-align: center; font-size: 14px; line-height: 1.5; }
+.rules-rows { max-width: 320px; width: 100%; align-self: center; flex: none; gap: 14px; }
+.rules-value { font-weight: 700; font-size: 13px; }
+.rules-note { max-width: 320px; align-self: center; margin: 20px 0 0; text-align: center; font-size: 12px; line-height: 1.5; color: var(--ink-dim); }
+
+/* The actual scrolling element for these two panels (see conversation — the
+   panel itself used to scroll as a whole, cutting the back button off-screen
+   on a short mobile viewport and forcing a viewport-relative scroll-thumb
+   that broke on real devices). No max-height on desktop — .config-panel's
+   own max-height:88%/overflow:auto is already a generous safety net there
+   (this whole split only exists for mobile's much shorter viewport), and an
+   explicit cap here would just add pointless scrolling to content that
+   already fit fine. */
+/* touch-action set directly here too (not just on .config-panel above) —
+   this is the actual overflow-y:auto element now that the panel itself no
+   longer scrolls as a whole (see conversation), so the permissive value
+   belongs on the element that owns the gesture, not just an ancestor of it. */
+.rules-scroll { overflow-y: auto; touch-action: pan-y; display: flex; flex-direction: column; }
+/* Mobile-only explicit cap (not flex:1 + min-height:0 "fill whatever's
+   left") — .config-panel's own height is intrinsic (height:fit-content),
+   and a flex-basis:0 item asked to grow inside an intrinsically-sized flex
+   container is exactly the kind of sizing real mobile Safari has resolved
+   inconsistently in testing (content silently collapsing to nothing); a
+   flat vh cap has no such ambiguity in any engine. 45vh leaves comfortable
+   room for the header above it even on a short landscape phone (~350px
+   tall). */
+.mobile-layout .rules-scroll { max-height: 45vh; }
+/* Scroll thumb for .rules-scroll above — same "real element, not native
+   scrollbar styling" reasoning as .nav-scroll-pill (iOS Safari doesn't
+   support ::-webkit-scrollbar at all), and the same fix for the same root
+   cause: absolute against this panel (.config-panel is already
+   position:absolute, so it's already the containing block — no extra
+   position:relative needed), NOT nested inside .rules-scroll itself, so it
+   stays put instead of scrolling away with the content it represents.
+   main.js's updateRulesScrollPill sizes/positions/shows this only when
+   .rules-scroll is both open (panel not .hidden) and actually overflowing —
+   reads scrollHeight/clientHeight/offsetTop, all plain layout metrics
+   untouched by .config-panel's own transform/opacity entrance animation, so
+   (unlike the previous getBoundingClientRect-based version) there's no
+   settle-timing window where a first call can read a stale position. */
+.rules-scroll-pill {
+  position: absolute; right: 6px; width: 3px; border-radius: 999px;
+  background: rgba(255,255,255,0.5);
+  opacity: 0; pointer-events: none;
+  transition: opacity .15s ease;
+}
+.rules-scroll-pill.visible { opacity: 1; }
+.config-panel.mode-curling .rules-scroll-pill { background: rgba(11,31,42,0.5); }
 
 /* True pills now (999px, matching --nimiq-radius-pill/.nq-button in the
    Nimiq UI Kit and this app's own base `button` rule) — were a 12px/9px
