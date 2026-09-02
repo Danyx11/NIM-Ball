@@ -114,14 +114,17 @@ const ICON_SOUND_OFF = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="
 // ARENA_FRAME_SRC — main.js already knows IS_MOBILE synchronously before
 // calling this, so there's no reason to pay for the desktop-sized download
 // on a phone that's about to load the small variant anyway in startGame().
-export function preloadCoreAssets(mobile = false) {
+// `howTo`: skips the score-digit URLs below — the tutorial has no score to
+// show and, per explicit request, doesn't even load those images (see
+// scoreDigitImages in startGame(), also skipped there for howTo).
+export function preloadCoreAssets(mobile = false, howTo = false) {
   const urls = [
     LIGHT_LAYER_SRC,
     mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC,
     BALL_SRC,
     ...Object.keys(ROCK_GLOW).flatMap((id) => [`${ASSET_BASE}rocks/${id}-flou.webp`, `${ASSET_BASE}rocks/${id}-light.webp`]),
     `${ASSET_BASE}rocks/chat-badge.webp`,
-    ...['A', 'B'].flatMap((team) => ['0', '1', '2', '3'].map((d) => `${ASSET_BASE}score-digits/${team}-${d}.png`)),
+    ...(howTo ? [] : ['A', 'B'].flatMap((team) => ['0', '1', '2', '3'].map((d) => `${ASSET_BASE}score-digits/${team}-${d}.png`))),
     `${ASSET_BASE}hex-timer/ring-full.png`,
     `${ASSET_BASE}hex-timer/ring-full-red.png`,
     `${ASSET_BASE}waiting-label/word.png`,
@@ -149,7 +152,7 @@ export function preloadCoreAssets(mobile = false) {
 }
 
 export function startGame(opts = {}) {
-  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false } = opts;
+  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onHowToReady = null } = opts;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
   // default preset; Custom is the same shape with different values. Every
   // caller not yet wired to the Classic/Custom flow (vs AI, replay) simply
@@ -467,6 +470,15 @@ export function startGame(opts = {}) {
     bubbleSprites[team] = {};
     for (const key of LED_STATE_KEYS) bubbleSprites[team][key] = bakeBubble(imgs[key], id, STONE_R * 2, identiconBgColors[team]);
     bubbleSprites[team].dead = desaturateSprite(bubbleSprites[team]['0'], DEAD_SATURATION, DEAD_LIGHTEN);
+    // howTo's only stone (team A) has everything it needs to draw correctly
+    // from this point on — fires main.js's onHowToReady, if given, so its
+    // loading overlay can lift right as this resolves rather than the
+    // instant startGame() was merely called (per explicit feedback: assets
+    // were still visibly finishing underneath the overlay before this).
+    // Deliberately NOT tied to onHowToAimPhase/the intro animation finishing
+    // — the whole point is to still catch the huddle slide-in playing live
+    // once the overlay lifts, not have it already over underneath it.
+    if (howTo && team === 'A' && onHowToReady && !howToReadyFired) { howToReadyFired = true; onHowToReady(); }
   }
   for (const team of ['A', 'B']) {
     Promise.all([
@@ -566,11 +578,15 @@ export function startGame(opts = {}) {
   // circular timer ring instead of flanking the hexagon, see
   // scripts/bake_curling_arena.py) — same folder, "curling-" prefixed files.
   const scoreDigitImages = { A: {}, B: {} };
-  for (const team of ['A', 'B']) {
-    for (const d of ['0', '1', '2', '3']) {
-      const img = new Image();
-      img.src = vibe === 'curling' ? `${ASSET_BASE}score-digits/curling-${team}-${d}.png` : `${ASSET_BASE}score-digits/${team}-${d}.png`;
-      scoreDigitImages[team][d] = img;
+  // howTo: no score to show (single stone, no opponent) — skip loading
+  // these entirely rather than just not drawing them (per explicit request).
+  if (!howTo) {
+    for (const team of ['A', 'B']) {
+      for (const d of ['0', '1', '2', '3']) {
+        const img = new Image();
+        img.src = vibe === 'curling' ? `${ASSET_BASE}score-digits/curling-${team}-${d}.png` : `${ASSET_BASE}score-digits/${team}-${d}.png`;
+        scoreDigitImages[team][d] = img;
+      }
     }
   }
   // Under-ice hex turn-timer ring (see drawHexTimer below) — pre-baked once
@@ -3973,26 +3989,45 @@ export function startGame(opts = {}) {
       g._resetToX = target.x; g._resetToY = target.y;
       g.x = g._resetFromX; g.y = g._resetFromY;
     }
-    matchIntroStart = performance.now();
-    phase = 'matchIntro';
-    audio.playAmbience(); // starts together with matchStart below, fades in under it
-    audio.play('matchStart', {
-      volume: 0.562, // was 1 (default), -5dB
-      onEnded: () => {
-        if (phase === 'matchIntro') beginAimPhase(true);
-      },
-    });
-    // Safety net mirroring beginRoundReset's own: updateMatchIntro() only
-    // ever runs from inside loop()'s own requestAnimationFrame, which a
-    // backgrounded/hidden tab can starve of frames for the whole animation —
-    // without this, a tab that comes back mid-intro (audio keeps playing on
-    // its own clock regardless, so beginAimPhase() can already have fired by
-    // then) would leave every stone stuck at its stacked starting spot. This
-    // normally fires *after* the tween has already finished on its own
-    // (phase stays 'matchIntro' until the longer matchStart clip ends, not
-    // just until the slide is done) — matchIntroAnimDone below is what makes
-    // that redundant call a no-op instead of corrupting positions.
-    trackedTimeout(() => { if (phase === 'matchIntro') updateMatchIntro(); }, MATCH_INTRO_MOVE_MS + 150);
+    // howTo: the stones above are already parked at their huddle start
+    // point — hold there a beat before the glide actually starts moving
+    // (per explicit feedback: the tutorial's own loading overlay lifts as
+    // soon as assets are ready, see tryBakeBubble's onHowToReady, which can
+    // land well before this point — starting the clock immediately meant
+    // the glide could already be mid-flight, or even over, by the time the
+    // overlay actually lifted, so only its tail end ever showed). This
+    // guarantees a clean start once the overlay is gone, so the whole glide
+    // plays out on screen.
+    const startClock = () => {
+      matchIntroStart = performance.now();
+      phase = 'matchIntro';
+      audio.playAmbience(); // starts together with matchStart below, fades in under it
+      audio.play('matchStart', {
+        // howTo: silent (per explicit request — no "match start" sting for a
+        // solo tutorial) but still played at volume 0 rather than skipped
+        // outright — onEnded is what actually ends 'matchIntro' below, and a
+        // muted/skipped play() fires that instantly (see audio.js's own
+        // early return), which would cut the huddle slide-in animation
+        // short instead of just going quiet.
+        volume: howTo ? 0 : 0.562, // was 1 (default), -5dB
+        onEnded: () => {
+          if (phase === 'matchIntro') beginAimPhase(true);
+        },
+      });
+      // Safety net mirroring beginRoundReset's own: updateMatchIntro() only
+      // ever runs from inside loop()'s own requestAnimationFrame, which a
+      // backgrounded/hidden tab can starve of frames for the whole animation —
+      // without this, a tab that comes back mid-intro (audio keeps playing on
+      // its own clock regardless, so beginAimPhase() can already have fired by
+      // then) would leave every stone stuck at its stacked starting spot. This
+      // normally fires *after* the tween has already finished on its own
+      // (phase stays 'matchIntro' until the longer matchStart clip ends, not
+      // just until the slide is done) — matchIntroAnimDone below is what makes
+      // that redundant call a no-op instead of corrupting positions.
+      trackedTimeout(() => { if (phase === 'matchIntro') updateMatchIntro(); }, MATCH_INTRO_MOVE_MS + 150);
+    };
+    if (howTo) trackedTimeout(startClock, 700);
+    else startClock();
   }
   function updateMatchIntro() {
     // Without this guard, a call after the tween already finalized (its
@@ -4032,6 +4067,9 @@ export function startGame(opts = {}) {
   // the mobile joystick reparent comment above) — resolves fine regardless
   // of current parent.
   let howToStep = 0;
+  // Guards onHowToReady (see onHowToAimPhase below) so it only ever fires
+  // once, on the tutorial's very first real frame, not again every round.
+  let howToReadyFired = false;
   // True while the "basic laser" step's preset demo shot is up (see
   // howToStartLaserDemo) — blocks the player from grabbing the stone/stick
   // at all (see onPointerDown/onJoystickDown's own guards), since there's
@@ -4130,10 +4168,11 @@ export function startGame(opts = {}) {
   // guard needed here. Restores the stone to a fresh, undamaged look before
   // moving on — the LED demo above leaves g.hits wherever its cycle was.
   howToGotItBtnEl.addEventListener('click', () => {
+    audio.play('button'); // same click as the toolbar's own buttons
     const stone = entities.A[0];
     if (stone) { stone.hits = 0; stone.dead = false; stone.deadMix = 0; }
-    howToStepDone = true;
-    scheduleHowToAdvance();
+    // advanceHowTo() itself resets howToStepDone — no separate 1s wait here.
+    advanceHowTo();
   }, { signal });
   // See howToJoystickWasDown's own comment — a real listener, not frame
   // polling, so a very quick tap-and-release on the stick can't slip past
@@ -4164,7 +4203,8 @@ export function startGame(opts = {}) {
     howToHoleEl.style.background = `radial-gradient(circle at ${cx}px ${cy}px, rgba(4,10,14,0) 0px, rgba(4,10,14,0) ${inner}px, rgba(4,10,14,0.78) ${outer}px)`;
   }
   // No spotlight this frame — the whole board stays fully lit (the fallback
-  // whenever a step's target isn't currently showable, e.g. mid-drag).
+  // whenever a step's target isn't currently showable, e.g. mid-drag, or a
+  // real shot is flying and needs to be watched unobstructed).
   function howToClearHole() {
     howToHoleEl.classList.add('hidden');
     howToCorridorEl.classList.add('hidden');
@@ -4374,11 +4414,22 @@ export function startGame(opts = {}) {
       howToStepDone = false;
     }
     howToOverlayEl.classList.remove('hidden');
+    // Positioned once here, right before the tile is ever unhidden — without
+    // this it briefly renders at its un-positioned CSS default (top-left of
+    // the viewport, since #howToTile sets no top/left/right of its own,
+    // only howToPositionTileNear does) for a frame or two, until syncHowTo()'s
+    // very next call recomputes the real per-step position (per explicit
+    // feedback — a real, visible flash there, caught on screen capture). The
+    // stone's own screen point is a safe default target regardless of which
+    // step is about to show (case 0/1 use it directly; every other case
+    // repositions to its own target on the very next frame anyway).
+    const stone = entities.A[0];
+    if (stone) {
+      const p = howToCanvasToScreen(stone.x, stone.y);
+      howToPositionTileNear(p.x, p.y);
+    }
     howToTileEl.classList.remove('hidden');
     howToRenderTile();
-    // Tile position itself isn't touched here — the very next syncHowTo()
-    // call positions it fresh, next to whatever this new step's case shows
-    // (see howToPositionTileNear).
   }
   // "Basic laser" step: rather than have the player hunt for a wall bounce
   // themselves (an earlier version of this step — see conversation, dropped
@@ -4448,7 +4499,22 @@ export function startGame(opts = {}) {
     // the only other place that unhides it, only fires on a real phase
     // transition, which closing the dialog never causes).
     howToTileEl.classList.remove('hidden');
-    if (howToStepDone || phase !== 'aimA') { howToClearHole(); return; }
+    // A real shot is flying/settling (Play/Slide just fired) — go fully
+    // bright so it can be watched unobstructed, same as before.
+    if (phase !== 'aimA') { howToClearHole(); return; }
+    // Step finished but nothing physically moved (a tap/release/toggle, not
+    // a fired shot) — per explicit feedback, the 1s wait before the next
+    // step's spotlight (see scheduleHowToAdvance) should read as "nothing
+    // happens", not as a visible change of its own: touching hole/corridor
+    // here at all (even to a uniform dim, tried first) still reads as a
+    // flicker sandwiched between the old target's spotlight and the new
+    // one's. So this is a deliberate no-op — whatever the completed step's
+    // case last drew stays exactly as it is, frozen, until advanceHowTo()
+    // swaps in the next step's own case below. Relies on each case NOT
+    // clearing its own target the instant it detects its own completion
+    // (see case 1/case 4's own comments on this — case 2/case 5 already
+    // got this right).
+    if (howToStepDone) return;
     switch (howToStep) {
       case 0: // meet your stone — no game action gates this, only the
         // "Got it?" pill (see howToGotItBtnEl's click handler) — the LED
@@ -4458,9 +4524,16 @@ export function startGame(opts = {}) {
         break;
       case 1: { // select — advances only on the real tap-release (selectedStone,
         // set by onPointerUp's pendingTap branch), never mid-gesture.
+        // Completion checked before ever calling howToShowEntityTarget, not
+        // after — calling it unconditionally first (the false branch clears
+        // the hole) used to blank the spotlight the instant `chosen` went
+        // true, one frame before the top-level howToStepDone freeze above
+        // even got a chance to take over — same target (the stone) as step
+        // 0 right before it, so nothing needs to change here at all until
+        // advanceHowTo() actually moves on.
         const chosen = selectedStone === stone;
-        howToShowEntityTarget(stone, !chosen);
         if (chosen) { howToStepDone = true; scheduleHowToAdvance(); }
+        else howToShowEntityTarget(stone, true);
         break;
       }
       case 2: { // aim — advances on release (the 2s lock is just a bonus
@@ -4487,9 +4560,21 @@ export function startGame(opts = {}) {
       case 3: // play — advances on tap, see onValidate's howTo branch
         howToShowDomTarget('tbtn-play', true);
         break;
-      case 4: { // ice boost
-        howToShowDomTarget('tbtn-sweep', !sweep.A.active);
-        if (sweep.A.active) { howToStepDone = true; scheduleHowToAdvance(); }
+      case 4: { // ice boost — same reordering as case 1 above and for the
+        // same reason: checking sweep.A.active first, instead of calling
+        // howToShowDomTarget unconditionally and letting its own false
+        // branch clear the hole, keeps this from blanking the spotlight one
+        // frame before the top-level freeze takes over. Explicitly clears
+        // the hole the instant the button is tapped (per explicit request)
+        // so the ice zone's own appear animation is fully visible, not
+        // still dimmed under the (now stale) spotlight.
+        if (sweep.A.active) {
+          howToClearHole();
+          howToStepDone = true;
+          scheduleHowToAdvance();
+        } else {
+          howToShowDomTarget('tbtn-sweep', true);
+        }
         break;
       }
       case 5: { // position the ice — same three-states-checked-in-order
@@ -4687,9 +4772,13 @@ export function startGame(opts = {}) {
   }
 
   function drawScoreHud() {
-    drawUnderIceScore();
+    // howTo: no score to show — see scoreDigitImages above, never even
+    // loaded for howTo (per explicit request).
+    if (!howTo) drawUnderIceScore();
     if (phase === 'lanWait') drawWaitingLabel();
-    if (vibe === 'curling') drawCircleTimer(); else drawHexTimer();
+    // howTo: no turn timer — a single untimed player working through fixed
+    // steps has nothing for a countdown to mean (per explicit request).
+    if (!howTo) { if (vibe === 'curling') drawCircleTimer(); else drawHexTimer(); }
   }
 
   // LAN mode, local shot already sent: "waiting" burned under the ice between
