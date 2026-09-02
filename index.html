@@ -163,6 +163,17 @@
       </span>
     </div>
   </div>
+  <!-- Help button (see conversation) — sits just left of the sidebar/
+       controller column, level with the brand logo, on both platforms now
+       (main.js's positionHelpBtn locks it to their live rects — see that
+       function's own comment). Persists over every menu screen, not just
+       mode-select's own tile grid (see conversation), so opening the "How
+       to?" hub from here has to hide whatever else was open underneath
+       first (main.js's showHowToScreen). Plugged into the same destination
+       as the sidebar's own "How to" nav item — that entry stays in the menu
+       too for now, per explicit request, until it's decided whether to keep
+       it there long-term. -->
+  <button id="helpBtn" type="button" aria-label="How to play">?</button>
   <!-- Mobile-only unified controller — one flat white panel (the validated
        "remote control" mockup, design/ui/ChatGPT Image 19 août 2026,
        22_39_44.png, baked as two real assets: public/ui/controller-top.webp
@@ -196,6 +207,63 @@
       <img id="mcBodyImg" alt="">
       <div id="joystickRing"><div id="joystickStick"></div></div>
     </div>
+  </div>
+  <!-- How To tutorial: spotlight + instruction tile (see src/game.js's howTo
+       mode). Sits outside #stage-wrap on purpose — #stage-wrap is `transform`ed
+       on mobile (see #mobileController's own comment above on why that traps
+       position:fixed descendants inside its own box instead of the real
+       viewport), so this needs to be a sibling of it for `position: fixed` to
+       resolve against the actual screen. Both pieces are pointer-events:none —
+       purely visual, every real tap still lands on the actual canvas/button
+       underneath; game.js reads live game state to decide what to do with it.
+       #howToHole is the simple case (a circular window over a fixed DOM
+       control or a canvas-space point): a full-viewport radial-gradient,
+       clear in the middle and dim beyond it with a soft feathered ring in
+       between (center/radii set in JS every frame to the current target —
+       see game.js's howToSetHole), not a hard-edged cutout. #howToCorridor
+       is the one case that isn't a circle: the "aim through the ice" step's
+       light corridor between the stone and the ice zone, which needs to
+       fade at both ends AND along its sides rather than have a hard edge —
+       an SVG mask with a gradient (length) plus a blur filter (sides) does
+       that; a plain CSS gradient can't rotate to an arbitrary axis. -->
+  <div id="howToOverlay" class="hidden" aria-hidden="true">
+    <div id="howToHole" class="hidden"></div>
+    <svg id="howToCorridor" class="hidden" aria-hidden="true">
+      <defs>
+        <linearGradient id="howToCorridorGrad" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#fff"/>
+          <stop offset="18%" stop-color="#000"/>
+          <stop offset="82%" stop-color="#000"/>
+          <stop offset="100%" stop-color="#fff"/>
+        </linearGradient>
+        <!-- Softens the corridor's long sides (the gradient above only fades
+             its two short ends) — stdDeviation is an XML/SVG presentation
+             attribute, not a CSS property, so it can't read a CSS var()
+             (that silently fails: "Expected number" in the console, filter
+             just no-ops) — game.js's howToShowCorridor sets it directly via
+             setAttribute instead, scaled off the corridor's own width so the
+             blur radius reads proportionally soft regardless of zoom. -->
+        <filter id="howToCorridorBlur" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur id="howToCorridorBlurPrimitive" stdDeviation="6"/>
+        </filter>
+        <mask id="howToCorridorMask">
+          <rect width="100%" height="100%" fill="#fff"/>
+          <rect id="howToCorridorBar" fill="url(#howToCorridorGrad)" filter="url(#howToCorridorBlur)"/>
+        </mask>
+      </defs>
+      <rect width="100%" height="100%" fill="rgba(4,10,14,0.78)" mask="url(#howToCorridorMask)"/>
+    </svg>
+  </div>
+  <div id="howToTile" class="hidden" aria-hidden="true">
+    <div id="howToTileCount"></div>
+    <div id="howToTileTitle"></div>
+    <div id="howToTileText"></div>
+    <!-- Only the "meet your stone" step uses this — it isn't gated by any
+         game action, just this explicit dismiss (see game.js's
+         howToGotItBtn wiring). pointer-events:auto here specifically,
+         overriding #howToTile's own none (see style.css), since this is the
+         one real button anywhere in the overlay. -->
+    <button id="howToGotItBtn" class="hidden" type="button">Got it?</button>
   </div>
   <!-- "Rotate to landscape" intro gate, mobile-only (see main.js) — the whole
        mobile layout (right-margin joystick column) only works in landscape,
@@ -664,6 +732,99 @@
         <span class="config-mode-icon" id="joinCodeModeIcon"></span>
       </div>
       <div id="joinCodeContent" class="config-lobby-content"></div>
+    </div>
+    <!-- "How to?" hub (see conversation — #helpBtn/#navHowTo both open this
+         now instead of launching the tutorial directly) — same
+         config-panel shell as About/Nimiq below, but Nimiq Light Blue
+         (mode-hockey) per explicit request ("comme quand on entre dans un
+         mode"), with a visible title (this one breaks from the icon-only
+         convention the vibe-nested screens use, per explicit request too).
+         Three pills in a pyramid: "How to play" alone on top launches the
+         existing interactive tutorial (main.js — still mobile-only, same
+         gate as before this feature, just moved from #navHowTo's own click
+         handler onto this pill's), the pair below opens one of the two
+         rules panels further down. -->
+    <div id="howToHubOverlay" class="config-panel mode-hockey hidden">
+      <button class="config-back" id="htBackBtn" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="config-header">
+        <span class="config-mode-icon">
+          <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.5"/><path d="M12 17.2h.01"/></svg>
+        </span>
+        <span class="config-mode-title">How to?</span>
+      </div>
+      <div class="howto-pyramid">
+        <button class="config-preset-btn howto-pill-top" id="htPlayBtn" type="button">
+          <div class="config-preset-name">HOW TO PLAY</div>
+        </button>
+        <div class="config-presets">
+          <button class="config-preset-btn howto-rules-pill" id="htNimicurlBtn" type="button">
+            <div class="config-preset-name howto-rules-name">NIMICURL<br>RULES</div>
+          </button>
+          <button class="config-preset-btn howto-rules-pill" id="htCurlingBtn" type="button">
+            <div class="config-preset-name howto-rules-name">PURE CURLING<br>RULES</div>
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- NimiCurl / Pure Curling rules (see conversation) — reached only from
+         #howToHubOverlay above, back returns there rather than straight to
+         mode-select. Each keeps that mode's own fixed tint (mode-hockey/
+         mode-curling, same values #modeHockey/#modeCurling's own tiles use)
+         regardless of activeVibe, same reasoning as #joinCodeOverlay's own
+         fixed tint — this is about a specific mode's rules, not "whichever
+         vibe is currently picked". .rules-arena-slot is a placeholder — an
+         arena screenshot for each mode is coming later; empty for now so
+         this ships without blocking on that art. -->
+    <div id="nimicurlRulesOverlay" class="config-panel mode-hockey hidden">
+      <button class="config-back" id="ncrBackBtn" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="config-header">
+        <span class="config-mode-icon" id="ncrModeIcon"></span>
+        <span class="config-mode-title">NimiCurl Rules</span>
+      </div>
+      <!-- Scrollable body, split from the header/back button above (see
+           conversation — the old design scrolled the whole panel, which cut
+           off the back button on a short mobile viewport and needed a
+           viewport-relative scroll-thumb that broke on real devices).
+           .rules-scroll-pill just below is the real scroll-thumb element
+           for this, positioned absolute against this panel (same pattern as
+           the sidebar's own .nav-scroll-pill/.nav-section-items) — no
+           viewport math needed since it isn't nested inside the scrolling
+           element itself. -->
+      <div class="rules-scroll" id="ncrScroll">
+        <div class="rules-arena-slot" id="ncrArenaSlot" aria-hidden="true"></div>
+        <p class="rules-objective"><strong>Objective —</strong> slide your stones to score in the goal.</p>
+        <div class="config-rows rules-rows">
+          <div class="config-row"><span class="config-label">POINTS TO WIN</span><span class="rules-value">3</span></div>
+          <div class="config-row"><span class="config-label">TURN TIMER</span><span class="rules-value">30s</span></div>
+          <div class="config-row"><span class="config-label">ICE BOOST</span><span class="rules-value">1 per point</span></div>
+        </div>
+        <p class="rules-note">These are the default Classic rules — customize them anytime in Custom mode.</p>
+      </div>
+      <div class="rules-scroll-pill" id="ncrScrollPill" aria-hidden="true"></div>
+    </div>
+    <div id="pureCurlingRulesOverlay" class="config-panel mode-curling hidden">
+      <button class="config-back" id="pcrBackBtn" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="config-header">
+        <span class="config-mode-icon" id="pcrModeIcon"></span>
+        <span class="config-mode-title">Pure Curling Rules</span>
+      </div>
+      <div class="rules-scroll" id="pcrScroll">
+        <div class="rules-arena-slot" id="pcrArenaSlot" aria-hidden="true"></div>
+        <p class="rules-objective"><strong>Objective —</strong> slide your stones closest to the center.</p>
+        <div class="config-rows rules-rows">
+          <div class="config-row"><span class="config-label">POINTS TO WIN</span><span class="rules-value">3</span></div>
+          <div class="config-row"><span class="config-label">TURN TIMER</span><span class="rules-value">30s</span></div>
+          <div class="config-row"><span class="config-label">ICE BOOST</span><span class="rules-value">1 per point</span></div>
+        </div>
+        <p class="rules-note">These are the default Classic rules — customize them anytime in Custom mode.</p>
+      </div>
+      <div class="rules-scroll-pill" id="pcrScrollPill" aria-hidden="true"></div>
     </div>
     <!-- About (see index.html's #navAbout sidebar link, wired in main.js) —
          static info screen, no icon (no dedicated glyph for it like the mode

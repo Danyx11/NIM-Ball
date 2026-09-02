@@ -29,6 +29,7 @@ export const SFX_SRC = {
   sweepAppear: `${ASSET_BASE}sfx/ice sphere 3.m4a`, // balai patch placed, played right after the toolbar's button.m4a, see sweepBtn in game.js
   chatIn: `${ASSET_BASE}sfx/message IN.m4a`,   // a real chat message arrives from the opponent (not our own echo, not the mute toggle) — see net.onChat in game.js
   chatOut: `${ASSET_BASE}sfx/message OUT.m4a`, // local player's own chat message send, played optimistically at submit time
+  navToggle: `${ASSET_BASE}sfx/impact-stone-soft.m4a`, // mobile's two nav accordion sections opening/closing, see main.js
 };
 export const AMBIENCE_SRC = `${ASSET_BASE}sfx/ambience-forest.m4a`;
 export const AMBIENCE_VOLUME = 0.622; // was 1.107, -5dB
