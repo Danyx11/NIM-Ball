@@ -1003,6 +1003,15 @@ function showToolbar() {
   // (persistent, per explicit request), same as desktop's #sidebar always
   // does (see style.css's .mobile-layout #sidebar.in-match).
   if (IS_MOBILE) sidebar.classList.add('in-match');
+  // "?" only belongs on the tile grid (see conversation), never in a live
+  // match — positionHelpBtn()'s own #modeDrawer.hidden check (further down)
+  // already handles that for every submenu, but a path straight from the
+  // tile grid into a match (e.g. Solo vs AI) never actually toggles
+  // #modeDrawer's own class on the way in, so its MutationObserver has
+  // nothing to react to there. Explicit hide/show at these two choke points
+  // every match already funnels through (this function + the opposite one,
+  // hideMatchChrome below) covers that remaining gap.
+  helpBtn.classList.add('hidden');
 }
 
 // "Now show mode-select" half of the exit flow — the actual match teardown
@@ -1027,6 +1036,7 @@ function hideMatchChrome() {
   startOverlay.classList.add('hidden');
   document.body.classList.remove('howto-active');
   if (IS_MOBILE) sidebar.classList.remove('in-match');
+  positionHelpBtn(); // re-sync now that the match is over (see showToolbar's own comment) — stays hidden if this lands on a submenu (e.g. Custom Settings) rather than the tile grid itself
 }
 
 function returnToModeSelect() {
@@ -1633,24 +1643,24 @@ htPlayBtn.addEventListener('click', async () => {
   audio.play('button');
   howToLoading = true;
   showLoadingOverlay();
-  await preloadCoreAssets(IS_MOBILE).catch(() => {});
+  await preloadCoreAssets(IS_MOBILE, true).catch(() => {});
   howToHubOverlay.classList.add('hidden');
   modeOverlay.classList.add('hidden');
   document.body.classList.add('howto-active');
   showToolbar();
   activeMatchMode = 'howTo';
-  activeStopGame = startGame({ ...rockHandlers, howTo: true, mobile: IS_MOBILE });
-  syncIdentityPill();
-  // startGame() itself still bakes its own team-avatar sprite (identicon +
-  // module ring composited together, see game.js's tryBakeBubble) via a
-  // fire-and-forget Promise chain — even for the default address
-  // preloadCoreAssets just warmed, that's at least one more microtask after
-  // this call returns, so hiding the overlay right here (like above) still
-  // let it land as a visible flat-color placeholder stone for a frame or two.
-  // A short buffer keeps that bake behind the overlay instead.
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  // Loading stays up through the rest of startGame()'s own async work too —
+  // the identicon/bubble sprite bake (tryBakeBubble) plus the huddle
+  // slide-in beat — not just through preloadCoreAssets above. game.js's
+  // onHowToReady fires exactly once, the instant the tutorial's first real
+  // frame is actually ready to show (see onHowToAimPhase), so this resolves
+  // only then rather than the moment startGame() has merely been called.
+  await new Promise((resolve) => {
+    activeStopGame = startGame({ ...rockHandlers, howTo: true, mobile: IS_MOBILE, onHowToReady: resolve });
+  });
   hideLoadingOverlay();
   howToLoading = false;
+  syncIdentityPill();
 });
 
 // "NimiCurl rules" / "Pure Curling rules" pills — each mode's own fixed-tint
@@ -1779,6 +1789,26 @@ pcrBackBtn.addEventListener('click', () => { pureCurlingRulesOverlay.classList.a
 // the call that's about to remove it.
 const HELP_BTN_SIZE = 36;
 function positionHelpBtn() {
+  // Tile-grid only (see conversation — "dès qu'on rentre dans les modes on
+  // le dégage"), not "any menu screen" like this button's first version:
+  // #modeDrawer.hidden is what every submenu (vibe pick, Classic/Custom,
+  // Custom Settings, Remote Match, connect gate, About, etc. — a dozen+
+  // call sites) already toggles on its own way in, so gating on that one
+  // flag here covers all of them for free instead of touching each site.
+  // #modeOverlay.hidden is checked too — #modeDrawer itself starts (and
+  // often sits) without its own .hidden class even while invisible, purely
+  // because its ANCESTOR #modeOverlay is what's hidden instead (the home
+  // screen before the rotate/connect gates resolve, or any live match —
+  // confirmed live: helpBtn was showing on the pre-gate home screen without
+  // this check). The MutationObserver below re-runs this function every
+  // time #modeDrawer's own flag changes; showToolbar/hideMatchChrome
+  // (main.js) still hide/restore it explicitly too, for the direct
+  // tile-grid-to-match paths (e.g. Solo vs AI) that never actually toggle
+  // #modeDrawer's own class on the way in.
+  if (modeOverlay.classList.contains('hidden') || modeDrawer.classList.contains('hidden')) {
+    helpBtn.classList.add('hidden');
+    return;
+  }
   const logoRect = bgLogo.getBoundingClientRect();
   if (!logoRect.width) { helpBtn.classList.add('hidden'); return; }
   const sidebarRect = sidebar.getBoundingClientRect();
@@ -1802,6 +1832,12 @@ positionHelpBtn();
 bgLogo.addEventListener('load', positionHelpBtn);
 window.addEventListener('resize', positionHelpBtn);
 window.addEventListener('orientationchange', () => setTimeout(positionHelpBtn, 120));
+// Keeps helpBtn in sync with #modeDrawer's own hidden class the instant any
+// of its dozen+ toggle sites flips it, rather than needing a manual
+// positionHelpBtn() call added at each one individually.
+const helpBtnVisibilityObserver = new MutationObserver(positionHelpBtn);
+helpBtnVisibilityObserver.observe(modeDrawer, { attributes: true, attributeFilter: ['class'] });
+helpBtnVisibilityObserver.observe(modeOverlay, { attributes: true, attributeFilter: ['class'] });
 replayUploadBackBtn.addEventListener('click', () => {
   audio.play('button');
   replayUploadOverlay.classList.add('hidden');
