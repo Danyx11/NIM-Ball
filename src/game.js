@@ -1682,6 +1682,12 @@ export function startGame(opts = {}) {
   }
   function onPointerDown(evt) {
     audio.unlock();
+    // howTo's "basic laser" step shows a preset demo shot (see
+    // howToStartLaserDemo) rather than something the player aims — nothing
+    // to grab/drag here at all while it's up, so this blocks the gesture
+    // from ever starting rather than just its later move updates (that's
+    // the other, narrower howToAimLocked guard already in onPointerMove).
+    if (howToAimLocked) return;
     // Hand-off mask (Pass & Play, see startHandoff/completeHandoff above)
     // swallows all input while up — the whole point is nothing underneath is
     // reachable — and only reacts once fully opaque ('shown'), so a tap
@@ -1939,6 +1945,7 @@ export function startGame(opts = {}) {
     }
     function onJoystickDown(evt) {
       audio.unlock();
+      if (howToAimLocked) return; // see onPointerDown's own comment
       if (!isAimingPhase(phase)) return;
       const g = selectedStone;
       if (!g || !currentTeamStones().includes(g)) return;
@@ -1956,11 +1963,9 @@ export function startGame(opts = {}) {
     }
     function onJoystickMove(evt) {
       if (!joystickDrag) return;
-      // howTo's "bounce off a wall" step freezes the aim the instant the
-      // predicted trajectory shows a wall bounce (see checkHowToWallBounce)
-      // so the same shot stays visible, unchanged, through the following
-      // "basic laser" step — further movement is simply ignored until that
-      // freeze lifts (see onHowToAimPhase).
+      // howTo's "basic laser" step shows a preset demo shot the player never
+      // aims (see howToStartLaserDemo) — this only ever matters if that
+      // guard on onJoystickDown somehow didn't catch it first.
       if (howToAimLocked) return;
       evt.preventDefault();
       const p = joystickClientPos(evt);
@@ -2297,15 +2302,29 @@ export function startGame(opts = {}) {
     // exactly like the AI branch above but with nothing to apply for "B".
     if (howTo) {
       if (phase !== 'aimA') return;
+      // "Basic laser" step (7): a preset demo shot the tutorial stages
+      // itself purely to look at (see howToStartLaserDemo) — per explicit
+      // feedback, nothing should ever actually fire it, the power button's
+      // toggle is the only thing this step reacts to (see syncHowTo's
+      // 'laser' case, which calls scheduleHowToAdvance() directly on
+      // toggle, no onValidate() involved at all anymore). Bail here too in
+      // case a stray tap somehow still reaches Play during this step.
+      if (howToStep === 7) return;
       commitSweep('A');
-      // Steps 3 ("Play"), 6 ("Slide on the ice") and 8 ("Basic laser", whose
-      // frozen wall-bounce shot auto-fires here — see syncHowTo's 'laser'
-      // case) are the tutorial's three "a real shot is about to fly" steps.
-      // Rather than advance right away, flag it and let onHowToAimPhase()
-      // do the advancing once this shot has actually finished settling (see
-      // that function + scheduleHowToAdvance) — never chain into the next
-      // step while the stone is still visibly moving.
-      if (howToStep === 3 || howToStep === 6 || howToStep === 8) howToShotAdvancePending = true;
+      // Per explicit feedback: a step's spotlight must never linger once
+      // its action fires — without this, "Play"/"Slide on the ice" (3/6)
+      // kept re-showing their OWN case's target for the whole settle+wait
+      // window before the deferred advance actually landed (phase returns
+      // to 'aimA' well before that), since only phase !== 'aimA' guarded
+      // the top-level check, not this flag.
+      howToStepDone = true;
+      // Steps 3 ("Play") and 6 ("Slide on the ice") are the tutorial's
+      // "a real shot is about to fly" steps — rather than advance right
+      // away, flag it and let onHowToAimPhase() do the advancing once this
+      // shot has actually finished settling (see that function +
+      // scheduleHowToAdvance) — never chain into the next step while the
+      // stone is still visibly moving.
+      if (howToStep === 3 || howToStep === 6) howToShotAdvancePending = true;
       phase = 'pending';
       playLaunchEngine('A');
       scheduleGlideLeadIn(PRE_SIM_DELAY);
@@ -2902,15 +2921,21 @@ export function startGame(opts = {}) {
       // no-death bounce already uses, deliberately with no dead flag, no
       // stonesDestroyed tally, and no stoneBarFlash — only the plain
       // wall-hit squish/SFX reflectOffBar already plays either way.
+      // howTo: same "just bounces, no death" treatment as curling — the
+      // tutorial's lone stone reaching the goal bar used to kill it outright
+      // (killStoneOnBar, hockey vibe's normal behavior), which for a
+      // single-stone tutorial with nothing else to teach with is just a
+      // dead end. Per explicit request: react like a wall, same as the
+      // curling arena.
       let barHit = false;
       if (collideBar(e, BAR_LEFT)) {
         barHit = true;
-        if (e === state.ball || vibe === 'curling') { reflectOffBar(e, BAR_LEFT, silent); if (e === state.ball) { goalResult = 'goalB'; if (!silent) barGlowSide = 'left'; } }
+        if (e === state.ball || vibe === 'curling' || howTo) { reflectOffBar(e, BAR_LEFT, silent); if (e === state.ball) { goalResult = 'goalB'; if (!silent) barGlowSide = 'left'; } }
         else killStoneOnBar(e, BAR_LEFT, silent);
       }
       if (collideBar(e, BAR_RIGHT)) {
         barHit = true;
-        if (e === state.ball || vibe === 'curling') { reflectOffBar(e, BAR_RIGHT, silent); if (e === state.ball) { goalResult = 'goalA'; if (!silent) barGlowSide = 'right'; } }
+        if (e === state.ball || vibe === 'curling' || howTo) { reflectOffBar(e, BAR_RIGHT, silent); if (e === state.ball) { goalResult = 'goalA'; if (!silent) barGlowSide = 'right'; } }
         else killStoneOnBar(e, BAR_RIGHT, silent);
       }
       if (barHit) continue;
@@ -3971,50 +3996,60 @@ export function startGame(opts = {}) {
   // the mobile joystick reparent comment above) — resolves fine regardless
   // of current parent.
   let howToStep = 0;
-  // True while the "bounce off a wall" step has frozen the current aim (see
-  // onPointerMove/onJoystickMove's own guard) so the same predicted bounce
-  // stays on screen, unchanged, through the following "basic laser" step.
+  // True while the "basic laser" step's preset demo shot is up (see
+  // howToStartLaserDemo) — blocks the player from grabbing the stone/stick
+  // at all (see onPointerDown/onJoystickDown's own guards), since there's
+  // nothing here for them to aim themselves.
   let howToAimLocked = false;
   // Set true the first time joystickDrag goes non-null during the "aim"
   // step, so a release only counts as "done aiming" once the stick was
   // actually engaged (not an accidental release with nothing to release).
   // The 2s hold-to-lock is just an informational aside for this step, not a
   // requirement — release alone advances, locked or not (per explicit
-  // feedback: forcing a full hold read as an obstacle, not a lesson).
+  // feedback: forcing a full hold read as an obstacle, not a lesson). Set by
+  // a real mousedown/touchstart listener on #joystickRing (below), NOT by
+  // polling joystickDrag inside syncHowTo — a render() frame only runs on
+  // its own schedule, so polling can in principle miss a very quick
+  // tap-and-release entirely (never once observing joystickDrag truthy),
+  // which would leave this permanently false and the spotlight stuck on.
+  // The real listener can't miss it — it fires synchronously with the touch.
   let howToJoystickWasDown = false;
   // Set true the first time sweepDrag goes non-null during the "position the
   // ice" step, so a release only counts as "done repositioning" once an
   // actual drag happened (not on an accidental release with no movement).
   let howToSweepDragSeen = false;
-  // Snapshot of isBasicLaser() taken the moment the "basic laser" step
-  // starts — null when not currently watching for a change. A plain value
-  // compare each frame is simpler than wiring a change listener into
-  // settings.js for what's a one-shot tutorial gate.
+  // Last-observed isBasicLaser() value for the "basic laser" step — null
+  // when not currently watching. Updated (not reset to null) on every
+  // change, so howToLaserToggleCount below can count actual toggles rather
+  // than just detecting "different from where it started".
   let howToLaserBaseline = null;
-  // Every step transition goes through scheduleHowToAdvance() (see below)
-  // rather than calling advanceHowTo() the instant a step's condition is
-  // met — per explicit feedback, the tile/spotlight jumping to the next
-  // step the same frame the action completes read as too abrupt. This flag
-  // just guards against re-arming that timer every frame while the
-  // triggering condition stays true (e.g. sweep.A.active staying true).
-  let howToAdvancePending = false;
-  const HOWTO_ADVANCE_DELAY_MS = 1500;
-  // Set by onValidate()'s howTo branch for the three steps that fire a real
-  // shot (Play/Slide/the wall-bounce auto-fire) — the actual advance is then
-  // deferred to onHowToAimPhase(), which only ever runs once the shot has
-  // fully settled (see beginStraighten/tryAdvanceAfterManche), so the stone
-  // is always done moving before the next step's spotlight shows (per
-  // explicit feedback) — HOWTO_ADVANCE_DELAY_MS then adds the same beat
-  // every other step gets on top of that settle.
+  // Requires 4 clicks, not 1, before advancing (per explicit request) — one
+  // click alone only ever shows whichever style the player didn't already
+  // have, never both; several clicks make the alternation itself the thing
+  // being demonstrated rather than a single glance.
+  let howToLaserToggleCount = 0;
+  // Set by onValidate()'s howTo branch for the two steps that fire a real
+  // shot (Play/Slide the ice) — the actual advance is then deferred to
+  // onHowToAimPhase(), which only ever runs once the shot has fully settled
+  // (see beginStraighten/tryAdvanceAfterManche), so the stone is always done
+  // moving before the next step's spotlight shows — and only then does
+  // scheduleHowToAdvance's own HOWTO_ADVANCE_DELAY_MS beat start (per
+  // explicit feedback: never chain into the next step while something is
+  // still visibly sliding). "je veux pas de timer" turned out to be about a
+  // different, since-removed central timer — this one stays.
   let howToShotAdvancePending = false;
+  // Guards scheduleHowToAdvance's trackedTimeout below against being armed
+  // twice (e.g. a step's case still running one extra frame before
+  // howToStepDone/phase suppress it).
+  let howToAdvancePending = false;
   // True the instant any step's completion is first detected (a tap, a
-  // release, a toggle, the wall bounce) — per explicit feedback, the
-  // spotlight itself must disappear right at that click, not linger through
-  // the HOWTO_ADVANCE_DELAY_MS wait; it only comes back once the next step's
-  // own case in syncHowTo starts computing its own target fresh. Reset in
+  // release, a toggle) — per explicit feedback, the spotlight itself must
+  // disappear right at that click, not linger through a shot still
+  // settling; it only comes back once the next step's own case in
+  // syncHowTo starts computing its own target fresh. Reset in
   // advanceHowTo() (mid-round step changes, e.g. select -> aim, never see
-  // another onHowToAimPhase() call) and again in onHowToAimPhase() (belt and
-  // suspenders for the very first step).
+  // another onHowToAimPhase() call) and, conditionally, in onHowToAimPhase()
+  // (see that function's own comment on why it's conditional there).
   let howToStepDone = false;
   const howToOverlayEl = document.getElementById('howToOverlay');
   const howToHoleEl = document.getElementById('howToHole');
@@ -4022,6 +4057,7 @@ export function startGame(opts = {}) {
   const howToCorridorBarEl = document.getElementById('howToCorridorBar');
   const howToCorridorGradEl = document.getElementById('howToCorridorGrad');
   const howToCorridorBlurEl = document.getElementById('howToCorridorBlurPrimitive');
+  const howToCorridorSpotEl = document.getElementById('howToCorridorSpot');
   const howToTileEl = document.getElementById('howToTile');
   const howToTileCountEl = document.getElementById('howToTileCount');
   const howToTileTitleEl = document.getElementById('howToTileTitle');
@@ -4035,11 +4071,22 @@ export function startGame(opts = {}) {
   // per-frame state to track. STONE_HITS_PER_LED apart per stage: 0 hits (4
   // lit) -> ... -> STONE_MAX_HITS-1 (last LED, pulsing) -> back to 0.
   const HOWTO_LED_STAGE_MS = 1000;
-  const HOWTO_LED_CYCLE_MS = HOWTO_LED_STAGE_MS * 5; // 4 stages to knock out LEDs 1-3 + hold the last one's pulse
+  const HOWTO_LED_CYCLE_MS = HOWTO_LED_STAGE_MS * 6; // 4 stages to knock out LEDs 1-3, hold the last one's pulse, then a held "dead" (all 4 out) stage before looping
   function howToUpdateLedDemo(stone) {
     const t = performance.now() % HOWTO_LED_CYCLE_MS;
-    const stage = Math.min(4, Math.floor(t / HOWTO_LED_STAGE_MS));
-    stone.hits = stage === 4 ? STONE_MAX_HITS - 1 : stage * STONE_HITS_PER_LED;
+    const stage = Math.min(5, Math.floor(t / HOWTO_LED_STAGE_MS));
+    if (stage === 5) {
+      // Dead stage: all 4 LEDs out, same real g.dead/deadMix the physics
+      // side sets on an actual knockout (see registerStoneHit) — reuses the
+      // existing desaturated "dead" sprite blend rather than faking a look.
+      stone.hits = STONE_MAX_HITS;
+      stone.dead = true;
+      stone.deadMix = 1;
+    } else {
+      stone.dead = false;
+      stone.deadMix = 0;
+      stone.hits = stage === 4 ? STONE_MAX_HITS - 1 : stage * STONE_HITS_PER_LED;
+    }
   }
   // The one step with no game action gating it — dismissed by this tap
   // alone. Only ever reachable/relevant while howToStep === 0 (the button
@@ -4048,10 +4095,16 @@ export function startGame(opts = {}) {
   // moving on — the LED demo above leaves g.hits wherever its cycle was.
   howToGotItBtnEl.addEventListener('click', () => {
     const stone = entities.A[0];
-    if (stone) stone.hits = 0;
+    if (stone) { stone.hits = 0; stone.dead = false; stone.deadMix = 0; }
     howToStepDone = true;
     scheduleHowToAdvance();
   }, { signal });
+  // See howToJoystickWasDown's own comment — a real listener, not frame
+  // polling, so a very quick tap-and-release on the stick can't slip past
+  // unnoticed. Only ever meaningful during the 'aim' step, but harmless to
+  // leave armed the rest of the time (a stray flip of an already-unused flag).
+  document.getElementById('joystickRing').addEventListener('mousedown', () => { howToJoystickWasDown = true; }, { signal });
+  document.getElementById('joystickRing').addEventListener('touchstart', () => { howToJoystickWasDown = true; }, { passive: true, signal });
   // Canvas-space (x,y) -> real screen px — the exact inverse of getPointerPos
   // above, needed here because the spotlight overlay is real page DOM (fixed
   // positioning, outside #stage-wrap) while the stone/ice-zone targets it
@@ -4074,12 +4127,56 @@ export function startGame(opts = {}) {
     const inner = r * 0.7, outer = r * 1.4;
     howToHoleEl.style.background = `radial-gradient(circle at ${cx}px ${cy}px, rgba(4,10,14,0) 0px, rgba(4,10,14,0) ${inner}px, rgba(4,10,14,0.78) ${outer}px)`;
   }
-  // No spotlight this frame — the whole board stays fully lit (used for the
-  // "bounce off a wall" step, and as the fallback everywhere else once a
-  // step's target isn't currently showable).
+  // No spotlight this frame — the whole board stays fully lit (the fallback
+  // whenever a step's target isn't currently showable, e.g. mid-drag).
   function howToClearHole() {
     howToHoleEl.classList.add('hidden');
     howToCorridorEl.classList.add('hidden');
+    howToCorridorSpotEl.setAttribute('r', 0);
+  }
+  // Circular spot layered inside the corridor's own SVG mask, alongside
+  // howToCorridorBar — see index.html's howToCorridorSpot/howToSpotGrad for
+  // why this lives there instead of reusing howToSetHole's #howToHole div:
+  // the two need to render at once for the "slide on ice" step (persistent
+  // corridor + stick-then-play spot, per explicit request), and a mask's
+  // shapes brighten additively so they don't fight over visibility the way
+  // #howToHole and #howToCorridor otherwise mutually hide each other.
+  // r here is the target's own bounding radius (same convention as
+  // howToSetHole's callers) — scaled up by 1.4 to match its outer/dim edge.
+  function howToShowCorridorSpot(cx, cy, r) {
+    howToCorridorSpotEl.setAttribute('cx', cx);
+    howToCorridorSpotEl.setAttribute('cy', cy);
+    howToCorridorSpotEl.setAttribute('r', r * 1.4);
+  }
+  // Tile follows whatever's currently spotlighted (per explicit feedback —
+  // a fixed corner read as disconnected from what each step was actually
+  // pointing at). Placed beside the target's own screen point: to its right
+  // when there's room for the tile there, its left otherwise (covers both
+  // canvas-space targets, mostly left-of-center on the board, and the
+  // control-section buttons hugging the right edge, which never have room
+  // to their own right). Only ever called from a step actively showing a
+  // target — the "waiting to advance" / no-target states leave the tile
+  // wherever it last was rather than snapping it back to some default.
+  // Measured from the target's own center point, not the spotlight's outer
+  // edge (that radius varies per target — see howToSetHole's callers) — 18
+  // sat well inside most spotlights' own feathered edge, per explicit
+  // feedback ("juste à l'extérieur... trop proches"). 55 clears the
+  // smallest control-button spotlights with a visible gap and doesn't leave
+  // the biggest (the stone's) looking disconnected either.
+  const HOWTO_TARGET_TILE_GAP_PX = 55;
+  const HOWTO_TILE_WIDTH_PX = 190; // was 170, per explicit feedback (kept modest — see style.css's own font bump)
+  function howToPositionTileNear(cx, cy) {
+    howToTileEl.style.transform = 'translateY(-50%)';
+    howToTileEl.style.width = `${HOWTO_TILE_WIDTH_PX}px`;
+    if (window.innerWidth - cx >= HOWTO_TILE_WIDTH_PX + HOWTO_TARGET_TILE_GAP_PX) {
+      howToTileEl.style.right = '';
+      howToTileEl.style.left = `${cx + HOWTO_TARGET_TILE_GAP_PX}px`;
+    } else {
+      howToTileEl.style.left = '';
+      howToTileEl.style.right = `${window.innerWidth - cx + HOWTO_TARGET_TILE_GAP_PX}px`;
+    }
+    const halfH = 55; // rough half-height guess, just to keep it from clipping off the top/bottom edge
+    howToTileEl.style.top = `${Math.min(Math.max(cy, halfH), window.innerHeight - halfH)}px`;
   }
   function howToShowDomTarget(id, show) {
     if (!show) { howToClearHole(); return; }
@@ -4087,18 +4184,22 @@ export function startGame(opts = {}) {
     if (!el) { howToClearHole(); return; }
     const rect = el.getBoundingClientRect();
     if (!rect.width) { howToClearHole(); return; }
-    howToSetHole(rect.left + rect.width / 2, rect.top + rect.height / 2, Math.max(rect.width, rect.height) / 2 + 10);
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    howToSetHole(cx, cy, Math.max(rect.width, rect.height) / 2 + 10);
+    howToPositionTileNear(cx, cy);
   }
   function howToShowEntityTarget(entity, show) {
     if (!show) { howToClearHole(); return; }
     const p = howToCanvasToScreen(entity.x, entity.y);
     howToSetHole(p.x, p.y, entity.r * p.scale + 24);
+    howToPositionTileNear(p.x, p.y);
   }
   function howToShowSweepTarget(show) {
     if (!show) { howToClearHole(); return; }
     const sw = sweep.A;
     const p = howToCanvasToScreen(sw.x, sw.y);
     howToSetHole(p.x, p.y, sw.r * p.scale + 6);
+    howToPositionTileNear(p.x, p.y);
   }
   // "Slide on the ice" step: a light corridor between the stone and the ice
   // zone, fading out at both ends rather than a hard-edged window (per
@@ -4107,12 +4208,35 @@ export function startGame(opts = {}) {
   // box-shadow trick. Positions/rotates the mask's own rect + gradient to
   // the live stone->zone axis every frame (the zone can still be sitting
   // wherever step 4bis left it).
+  // Ray from (ox,oy) in direction (ux,uy), canvas-space, to where it first
+  // crosses the field boundary (FX0/FX1/FY0/FY1) — the standard slab method,
+  // just the one intersection this needs (t is always >= 0 in practice
+  // since the origin is always inside the field). Used to stretch the
+  // "slide on the ice" corridor past the ice zone to the arena edge (see
+  // howToShowCorridor) instead of stopping at the zone itself.
+  function howToRayToArenaEdge(ox, oy, ux, uy) {
+    let t = Infinity;
+    if (ux > 0) t = Math.min(t, (FX1 - ox) / ux);
+    else if (ux < 0) t = Math.min(t, (FX0 - ox) / ux);
+    if (uy > 0) t = Math.min(t, (FY1 - oy) / uy);
+    else if (uy < 0) t = Math.min(t, (FY0 - oy) / uy);
+    if (!isFinite(t) || t < 0) t = 0;
+    return { x: ox + ux * t, y: oy + uy * t };
+  }
   function howToShowCorridor(stone) {
     howToHoleEl.classList.add('hidden');
     howToCorridorEl.classList.remove('hidden');
     const sw = sweep.A;
+    // Extends past the ice zone all the way to the arena edge in the aim
+    // direction (per explicit request — "allonge jusqu'au bout de l'arène
+    // côté visée") — reads as the stone's whole potential path, with the
+    // ice zone just sitting somewhere along it, rather than stopping dead
+    // at the zone.
+    const dirLen = Math.hypot(sw.x - stone.x, sw.y - stone.y) || 1;
+    const ux = (sw.x - stone.x) / dirLen, uy = (sw.y - stone.y) / dirLen;
+    const edge = howToRayToArenaEdge(stone.x, stone.y, ux, uy);
     const p1 = howToCanvasToScreen(stone.x, stone.y);
-    const p2 = howToCanvasToScreen(sw.x, sw.y);
+    const p2 = howToCanvasToScreen(edge.x, edge.y);
     const dx = p2.x - p1.x, dy = p2.y - p1.y;
     const len = Math.hypot(dx, dy) || 1;
     const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
@@ -4134,6 +4258,11 @@ export function startGame(opts = {}) {
     howToCorridorGradEl.setAttribute('y1', midY);
     howToCorridorGradEl.setAttribute('x2', midX + barLen / 2);
     howToCorridorGradEl.setAttribute('y2', midY);
+    // Near the ice zone specifically (what the step's own text is actually
+    // about), not the corridor's own midpoint — that now sits wherever
+    // happens to be halfway to the arena edge, often nowhere near the zone.
+    const zoneP = howToCanvasToScreen(sw.x, sw.y);
+    howToPositionTileNear(zoneP.x, zoneP.y);
   }
   function howToRenderTile() {
     const step = HOWTO_STEPS[howToStep];
@@ -4144,68 +4273,32 @@ export function startGame(opts = {}) {
     // dismissed by this pill alone (see its click handler below).
     howToGotItBtnEl.classList.toggle('hidden', howToStep !== 0);
   }
-  // Fixed at #mobileController's bottom-right, in the identity pill's own
-  // slot (#connectBtn, hidden for the tutorial's duration — see
-  // body.howto-active in style.css) — two earlier layouts (a per-step fixed
-  // position, then dynamic left/right-of-the-stone) were both dropped per
-  // explicit feedback once the tile was small enough to just live in that one
-  // spot permanently. A deliberate small negative gap lets it overlap the
-  // controller's own bottom edge slightly (per explicit feedback — "peut
-  // légèrement déborder sur le control section") rather than leaving a gap.
-  // Read fresh every frame rather than once since the controller's rect can
-  // shift on resize/orientation change.
-  // Step 0 is the one exception — "on met ce panneau sur la glace à côté de
-  // la stone" per explicit request, since it's introducing the stone itself
-  // rather than pointing at a control.
-  const HOWTO_TILE_OVERLAP_PX = 10;
-  const HOWTO_STONE_TILE_GAP_PX = 16;
-  function howToPositionTile() {
-    if (howToStep === 0) {
-      const stone = entities.A[0];
-      if (!stone) return;
-      const p = howToCanvasToScreen(stone.x, stone.y);
-      const r = stone.r * p.scale;
-      howToTileEl.style.transform = 'translateY(-50%)';
-      howToTileEl.style.right = '';
-      howToTileEl.style.left = `${p.x + r + HOWTO_STONE_TILE_GAP_PX}px`;
-      howToTileEl.style.top = `${p.y}px`;
-      howToTileEl.style.width = '170px';
-      return;
-    }
-    howToTileEl.style.transform = 'none';
-    const rect = document.getElementById('mobileController').getBoundingClientRect();
-    if (!rect.width) return;
-    howToTileEl.style.left = '';
-    howToTileEl.style.right = `${window.innerWidth - rect.right}px`;
-    howToTileEl.style.width = `${rect.width}px`;
-    howToTileEl.style.top = `${rect.bottom - HOWTO_TILE_OVERLAP_PX}px`;
-  }
   function advanceHowTo() {
     if (howToStep >= HOWTO_STEPS.length - 1) return;
     howToStep++;
-    // howToAimLocked is deliberately NOT reset here (only onHowToAimPhase()
-    // resets it, once per fresh round) — the wall-bounce step sets it right
-    // as it schedules the advance into "basic laser", and needs it to stay
-    // true THROUGH that advance so the frozen aim keeps showing across both
-    // steps, not just up to the moment the tile flips.
     howToJoystickWasDown = false;
     howToSweepDragSeen = false;
     howToLaserBaseline = null;
+    howToLaserToggleCount = 0;
     howToStepDone = false;
     howToRenderTile();
+    // Stages the 'laser' step's own demo shot the instant we arrive there —
+    // see howToStartLaserDemo's own comment for why this step doesn't wait
+    // on the player to aim anything itself.
+    if (howToStep === 7) howToStartLaserDemo(entities.A[0]);
   }
-  // Every step transition goes through this instead of calling advanceHowTo()
-  // straight away (see howToAdvancePending's own comment for why) — `after`,
-  // when given, runs right after the real advance (e.g. the wall-bounce step
-  // re-asserting howToAimLocked, which advanceHowTo() itself no longer
-  // touches).
-  function scheduleHowToAdvance(after) {
+  // Short beat before the next step's spotlight shows (per explicit
+  // feedback — "il fallait garder le 1s", the earlier "je veux pas de
+  // timer" was about a different, central timer, not this one). Guarded by
+  // howToAdvancePending so a step whose case keeps running for one extra
+  // frame after triggering this can't stack a second timeout on top.
+  const HOWTO_ADVANCE_DELAY_MS = 1000;
+  function scheduleHowToAdvance() {
     if (howToAdvancePending) return;
     howToAdvancePending = true;
     trackedTimeout(() => {
       howToAdvancePending = false;
       advanceHowTo();
-      if (after) after();
     }, HOWTO_ADVANCE_DELAY_MS);
   }
   // Called every time beginAimPhase() re-enters 'aimA' in howTo mode — i.e.
@@ -4219,7 +4312,6 @@ export function startGame(opts = {}) {
     howToJoystickWasDown = false;
     howToSweepDragSeen = false;
     howToLaserBaseline = null;
-    howToStepDone = false;
     // Every round after the very first one starts past step 1 ("select") —
     // onValidate() cleared selectedStone when the previous shot fired, but
     // there's only ever this one stone, and onJoystickDown requires
@@ -4235,44 +4327,68 @@ export function startGame(opts = {}) {
     if (howToShotAdvancePending) {
       howToShotAdvancePending = false;
       scheduleHowToAdvance();
+      // howToStepDone is deliberately left alone here (still true, set back
+      // when Play was originally tapped) — this settle is just the shot
+      // finishing, not a new step starting, so the OLD step's case must
+      // stay suppressed through this final wait too. Without this, it was
+      // popping back up for the whole settle-to-advance window (per
+      // explicit feedback — a real, reproducible gap, not the same one the
+      // onValidate-side fix already covered).
+    } else {
+      howToStepDone = false;
     }
     howToOverlayEl.classList.remove('hidden');
     howToTileEl.classList.remove('hidden');
     howToRenderTile();
-    howToPositionTile();
+    // Tile position itself isn't touched here — the very next syncHowTo()
+    // call positions it fresh, next to whatever this new step's case shows
+    // (see howToPositionTileNear).
   }
-  // Ghost-simulates the stone's current predicted path (same cascade the
-  // real predictive-laser preview already runs, see runAimCascade) and
-  // freezes+advances the instant it shows a real wall bounce. Only ever
-  // called while aiming (see syncHowTo's 'wall' case) — MAX_DRAG*0.12 filters
-  // out a barely-registered touch before it's pulled far enough to mean
-  // anything.
-  // How far past the bounce point the predicted trail must reach before the
-  // bounce counts as "clearly shown" (vs. a corner graze) — canvas-space
-  // px, same space STONE_R/MAX_DRAG live in. Picked by eye, not derived from
-  // anything else (candidates discussed: 20-50).
-  const HOWTO_WALL_BOUNCE_MIN_PX = 40;
-  function checkHowToWallBounce(stone) {
-    if (howToAimLocked) return; // already found + frozen this round, nothing left to check
-    if (!drag || drag.entity !== stone) return;
-    if (Math.hypot(drag.curX - drag.startX, drag.curY - drag.startY) < MAX_DRAG * 0.12) return;
-    const bodies = runAimCascade('A');
-    const body = bodies.find(b => b.kind === 'stone' && b.ref === stone);
-    const bounceLeg = body && body.legs[1];
-    if (bounceLeg && bounceLeg.totalLen >= HOWTO_WALL_BOUNCE_MIN_PX) {
-      howToAimLocked = true;
-      scheduleHowToAdvance(() => { howToAimLocked = true; });
-    }
+  // "Basic laser" step: rather than have the player hunt for a wall bounce
+  // themselves (an earlier version of this step — see conversation, dropped
+  // for reliability reasons), the tutorial now stages one itself — slides
+  // the stone to a fixed spot on the center line just above middle, and
+  // presets its pendingVx/pendingVy to a direction/power already known to
+  // clip the top wall and bounce back across clearly, so both laser styles
+  // have something worth comparing the instant this step starts. Direction
+  // is up-and-slightly-right, normalized; pull length is a fixed fraction of
+  // MAX_DRAG (a full-power-feeling shot, not a token tap). Tuned by eye —
+  // nudge HOWTO_LASER_DEMO_POS/DIR/PULL together if the bounce ever needs to
+  // land somewhere else legible.
+  const HOWTO_LASER_DEMO_POS = { x: CENTER_X, y: CY - 150 };
+  const HOWTO_LASER_DEMO_DIR = (() => {
+    const ux = 0.35, uy = -0.94;
+    const mag = Math.hypot(ux, uy);
+    return { ux: ux / mag, uy: uy / mag };
+  })();
+  const HOWTO_LASER_DEMO_PULL = MAX_DRAG * 0.7;
+  const HOWTO_LASER_DEMO_SLIDE_MS = 700;
+  // { fromX, fromY, toX, toY, start } while the slide-into-place tween is
+  // running, null once it's finished (or before it's ever started).
+  let howToLaserDemoTween = null;
+  function howToStartLaserDemo(stone) {
+    if (!stone) return;
+    howToAimLocked = true; // see onPointerDown/onJoystickDown's own guards — nothing to grab during this step
+    howToLaserDemoTween = { fromX: stone.x, fromY: stone.y, toX: HOWTO_LASER_DEMO_POS.x, toY: HOWTO_LASER_DEMO_POS.y, start: performance.now() };
+    stone.pendingVx = HOWTO_LASER_DEMO_DIR.ux * HOWTO_LASER_DEMO_PULL * POWER_SCALE;
+    stone.pendingVy = HOWTO_LASER_DEMO_DIR.uy * HOWTO_LASER_DEMO_PULL * POWER_SCALE;
+  }
+  function howToUpdateLaserDemoSlide(stone) {
+    if (!howToLaserDemoTween || !stone) return;
+    const t = Math.min(1, (performance.now() - howToLaserDemoTween.start) / HOWTO_LASER_DEMO_SLIDE_MS);
+    const e = easeInOutQuad(t);
+    stone.x = howToLaserDemoTween.fromX + (howToLaserDemoTween.toX - howToLaserDemoTween.fromX) * e;
+    stone.y = howToLaserDemoTween.fromY + (howToLaserDemoTween.toY - howToLaserDemoTween.fromY) * e;
+    if (t >= 1) howToLaserDemoTween = null;
   }
   // Called once per render() frame (see render()'s own call site) — the
   // single dispatcher deciding what the current step spotlights and whether
   // it's done. Every step's actual *input handling* is the real game's own
   // (stone select/drag, joystick, sweep, the power button) — this only
-  // observes that state, never reads/writes pointer events itself (see
-  // onPointerMove/onJoystickMove's howToAimLocked guard for the one
-  // exception, freezing the aim between the 'wall' and 'laser' steps).
+  // observes that state, never reads/writes pointer events itself, with one
+  // exception: the 'laser' step's demo shot, which this closure stages
+  // itself (see howToStartLaserDemo) rather than waiting on the player.
   function syncHowTo() {
-    howToPositionTile();
     const stone = entities.A[0];
     if (!stone) return;
     // Per explicit feedback: the instant any step's action is clicked, the
@@ -4281,6 +4397,21 @@ export function startGame(opts = {}) {
     // step's own case below starts computing its own target. howToStepDone
     // covers instant/released actions; phase !== 'aimA' covers a shot
     // already submitted (Play/Slide/the laser step's auto-fire).
+    // The "Quit tutorial?" confirm dialog (main.js's triggerExit, shown in
+    // the shared #overlay) sits inside #game-card's own stacking context
+    // (z-index:1 there), while #howToOverlay/#howToTile are page-level fixed
+    // siblings at z-index 8/9 — #overlay's own z-index:10 only wins locally,
+    // so without this check the spotlight AND the tile (its own root-level
+    // sibling, not touched by howToClearHole) would both paint over the
+    // dialog instead of the other way around. Simplest fix scoped to howTo:
+    // just go dark and hide the tile whenever that dialog is open, same as
+    // any other paused state.
+    if (!overlay.classList.contains('hidden')) { howToClearHole(); howToTileEl.classList.add('hidden'); return; }
+    // Undoes the hide above once the dialog closes again — nothing else
+    // re-shows the tile on a plain phase-unchanged dismissal (onHowToAimPhase,
+    // the only other place that unhides it, only fires on a real phase
+    // transition, which closing the dialog never causes).
+    howToTileEl.classList.remove('hidden');
     if (howToStepDone || phase !== 'aimA') { howToClearHole(); return; }
     switch (howToStep) {
       case 0: // meet your stone — no game action gates this, only the
@@ -4297,11 +4428,24 @@ export function startGame(opts = {}) {
         break;
       }
       case 2: { // aim — advances on release (the 2s lock is just a bonus
-        // callout, not required — see howToJoystickWasDown's own comment)
-        const active = !!joystickDrag;
-        howToShowDomTarget('joystickRing', !active);
-        if (active) howToJoystickWasDown = true;
-        else if (howToJoystickWasDown) { howToStepDone = true; scheduleHowToAdvance(); }
+        // callout, not required — see howToJoystickWasDown's own comment).
+        // Three distinct states, checked in this order on purpose: showing
+        // the spotlight is only correct for "not touched yet" — checking it
+        // ahead of the "just released" branch (both share active===false)
+        // used to flash the spotlight back on for one frame right at
+        // release, before howToStepDone caught up on the next frame (per
+        // explicit feedback: a stale spotlight must never reappear once
+        // gone).
+        // howToJoystickWasDown is set by a real listener on #joystickRing,
+        // not read/written here (see its own comment on why).
+        if (joystickDrag) {
+          howToShowDomTarget('joystickRing', false);
+        } else if (howToJoystickWasDown) {
+          howToStepDone = true;
+          scheduleHowToAdvance();
+        } else {
+          howToShowDomTarget('joystickRing', true);
+        }
         break;
       }
       case 3: // play — advances on tap, see onValidate's howTo branch
@@ -4312,38 +4456,83 @@ export function startGame(opts = {}) {
         if (sweep.A.active) { howToStepDone = true; scheduleHowToAdvance(); }
         break;
       }
-      case 5: { // position the ice
+      case 5: { // position the ice — same three-states-checked-in-order
+        // reasoning as the 'aim' case above (dragging / just-released /
+        // not-yet-touched all share "not currently dragging" otherwise).
         const dragging = !!sweepDrag;
-        howToShowSweepTarget(sweep.A.active && !dragging);
-        if (dragging) howToSweepDragSeen = true;
-        else if (howToSweepDragSeen) { howToStepDone = true; scheduleHowToAdvance(); }
-        break;
-      }
-      case 6: // slide on the ice — advances on tap, see onValidate's howTo branch
-        howToShowCorridor(stone);
-        break;
-      case 7: // bounce off a wall — freely lit, no spotlight (see comment on howToClearHole)
-        howToClearHole();
-        checkHowToWallBounce(stone);
-        break;
-      case 8: { // basic laser
-        howToShowDomTarget('tbtn-power', true);
-        if (howToLaserBaseline === null) howToLaserBaseline = isBasicLaser();
-        else if (isBasicLaser() !== howToLaserBaseline) {
-          howToLaserBaseline = null;
+        if (dragging) {
+          howToSweepDragSeen = true;
+          howToShowSweepTarget(false);
+        } else if (howToSweepDragSeen) {
           howToStepDone = true;
-          // Small beat so the toggled icon is visible before the frozen shot
-          // auto-fires (nothing else ever submits this last shot — the
-          // player only ever toggled the laser style, never tapped Play).
-          // The step itself only advances once THIS shot has fully settled
-          // too (see onValidate's howTo branch + onHowToAimPhase) — same
-          // "never chain past a shot still moving" rule as Play/Slide.
-          trackedTimeout(() => { if (phase === 'aimA') { howToAimLocked = false; onValidate(); } }, 550);
+          scheduleHowToAdvance();
+        } else {
+          howToShowSweepTarget(sweep.A.active);
         }
         break;
       }
-      case 9: // quit — real exit button, no advance needed (ends the session)
-        howToShowDomTarget('tbtn-exit', true);
+      case 6: { // slide on the ice — advances on tap, see onValidate's howTo
+        // branch. Corridor stays up the whole step (persistent until the
+        // shot fires) AND, at once, a circular spot walks the same
+        // stick-then-play sequence steps 2-3 already taught — spotlighting
+        // the stick until a real aim has been committed (a release with
+        // actual pendingVx/Vy, not just any touch), then Play once one has
+        // — per explicit request that both visuals show together rather
+        // than one replacing the other. The spot lives inside the
+        // corridor's own SVG mask (see howToShowCorridorSpot) so the two
+        // don't fight over #howToHole/#howToCorridor's usual mutual-hide.
+        howToShowCorridor(stone);
+        const aimed = !!(stone.pendingVx || stone.pendingVy);
+        const targetEl = document.getElementById(aimed ? 'tbtn-play' : 'joystickRing');
+        const rect = targetEl && targetEl.getBoundingClientRect();
+        if (rect && rect.width) {
+          const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+          howToShowCorridorSpot(cx, cy, Math.max(rect.width, rect.height) / 2 + 10);
+          howToPositionTileNear(cx, cy); // overrides howToShowCorridor's own (near the ice zone) — the stick/play target is the actionable one here
+        }
+        break;
+      }
+      case 7: { // basic laser — a preset demo shot the tutorial stages
+        // itself (see howToStartLaserDemo, triggered once from
+        // advanceHowTo right as this step starts), not something the player
+        // aims — the slide-into-place tween needs updating every frame
+        // regardless of which branch below runs. Requires 4 clicks (see
+        // howToLaserToggleCount's own comment), checked before the
+        // spotlight call, not after, same reasoning as 'aim'/'position the
+        // ice' above: showing the spotlight unconditionally first would
+        // still paint it for the one frame the last toggle is detected. Per
+        // explicit feedback, toggling is now the ENTIRE action — nothing
+        // ever fires this shot for real (see onValidate's own
+        // howToStep===7 bail-out too), so this advances straight away
+        // instead of waiting on a settle that's never coming. The
+        // spotlight itself only covers the FIRST click though (per
+        // explicit feedback) — it comes off click 1, well before the step
+        // itself is done at click 4.
+        howToUpdateLaserDemoSlide(stone);
+        if (howToLaserBaseline === null) howToLaserBaseline = isBasicLaser();
+        else if (isBasicLaser() !== howToLaserBaseline) {
+          howToLaserBaseline = isBasicLaser();
+          howToLaserToggleCount++;
+        }
+        if (howToLaserToggleCount >= 4) {
+          howToStepDone = true;
+          scheduleHowToAdvance();
+        } else if (howToLaserToggleCount >= 1) {
+          howToClearHole();
+        } else {
+          howToShowDomTarget('tbtn-power', true);
+        }
+        break;
+      }
+      case 8: // quit — real exit button, no advance needed (ends the
+        // session). Tapping it doesn't tear anything down right away — it
+        // opens main.js's own "Quit the match?" Yes/No confirm first (see
+        // triggerExit, shared #overlay) — per explicit feedback, the
+        // spotlight has to disappear the instant that panel is up, not
+        // linger behind it. Reappears if "No" is picked (overlay hides,
+        // still this same step); a page reload/teardown follows immediately
+        // on "Yes" either way, so no special-casing needed for that side.
+        howToShowDomTarget('tbtn-exit', overlay.classList.contains('hidden'));
         break;
     }
   }
@@ -5857,7 +6046,11 @@ export function startGame(opts = {}) {
     const blockers = entities[opponentTeam].filter(g => !g.out && !g.falling);
     const bodies = entities[team].filter(g => !g.out && !g.falling)
       .map(g => makeGhostBody(g, 'stone', STONE_R, STONE_MASS));
-    if (vibe !== 'curling') bodies.push(makeGhostBody(entities.ball, 'ball', BALL_R, BALL_MASS));
+    // howTo: no ball exists (entities.ball sits inert and hidden, see
+    // resetPositions), so its predicted-path ghost trail has nothing real to
+    // predict for — per explicit request ("le laser secondaire de la balle
+    // apparait parfois alors qu'il n'y a pas de balle"), it must never draw.
+    if (vibe !== 'curling' && !howTo) bodies.push(makeGhostBody(entities.ball, 'ball', BALL_R, BALL_MASS));
 
     // Only the aiming team's own not-yet-committed patch can ever apply here
     // (this cascade only ever renders for the currently-aiming team's own

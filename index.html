@@ -131,7 +131,6 @@
           <svg class="nav-label-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         </div>
         <div class="nav-section-items">
-          <button class="nav-item" id="navHowTo" type="button">How to</button>
           <button class="nav-item" id="navAbout" type="button">About</button>
           <button class="nav-item" id="navPartnership" type="button">Partnership</button>
           <button class="nav-item" id="navNimiq" type="button">Nimiq</button>
@@ -230,10 +229,13 @@
     <div id="howToHole" class="hidden"></div>
     <svg id="howToCorridor" class="hidden" aria-hidden="true">
       <defs>
+        <!-- 18%/82% (a fairly quick fade) read as too abrupt once the
+             corridor started reaching all the way to the arena edge (see
+             howToShowCorridor) — widened per explicit feedback. -->
         <linearGradient id="howToCorridorGrad" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stop-color="#fff"/>
-          <stop offset="18%" stop-color="#000"/>
-          <stop offset="82%" stop-color="#000"/>
+          <stop offset="34%" stop-color="#000"/>
+          <stop offset="66%" stop-color="#000"/>
           <stop offset="100%" stop-color="#fff"/>
         </linearGradient>
         <!-- Softens the corridor's long sides (the gradient above only fades
@@ -246,15 +248,35 @@
         <filter id="howToCorridorBlur" x="-50%" y="-50%" width="200%" height="200%">
           <feGaussianBlur id="howToCorridorBlurPrimitive" stdDeviation="6"/>
         </filter>
+        <!-- Circular counterpart to howToCorridorGrad, for the "slide on ice"
+             step's stick/play spot living inside this same mask alongside
+             the corridor bar (see game.js's howToShowCorridorSpot) — both
+             shapes brighten the mask additively, so the two spotlights
+             coexist instead of one hiding the other the way
+             #howToHole/#howToCorridor otherwise do. Default objectBoundingBox
+             scales to howToCorridorSpot's own r attribute automatically.
+             0%/50% clear (matches howToSetHole's inner=r*0.7 of an
+             outer=r*1.4 circle), fading to fully dim by the edge. -->
+        <radialGradient id="howToSpotGrad">
+          <stop offset="0%" stop-color="#000"/>
+          <stop offset="50%" stop-color="#000"/>
+          <stop offset="100%" stop-color="#fff"/>
+        </radialGradient>
         <mask id="howToCorridorMask">
           <rect width="100%" height="100%" fill="#fff"/>
           <rect id="howToCorridorBar" fill="url(#howToCorridorGrad)" filter="url(#howToCorridorBlur)"/>
+          <circle id="howToCorridorSpot" r="0" fill="url(#howToSpotGrad)"/>
         </mask>
       </defs>
       <rect width="100%" height="100%" fill="rgba(4,10,14,0.78)" mask="url(#howToCorridorMask)"/>
     </svg>
   </div>
   <div id="howToTile" class="hidden" aria-hidden="true">
+    <!-- Quick exit, present on every step (not just the dedicated "quit"
+         one) — same confirm dialog as the toolbar's own exit button (see
+         main.js's triggerExit, wired to this id too). pointer-events:auto
+         here specifically, overriding #howToTile's own none. -->
+    <button id="howToTileExitBtn" type="button" aria-label="Exit tutorial">&times;</button>
     <div id="howToTileCount"></div>
     <div id="howToTileTitle"></div>
     <div id="howToTileText"></div>
@@ -599,6 +621,32 @@
       </div>
       <p class="lan-error hidden" id="cgError"></p>
     </div>
+    <!-- First-time "How to?" prompt (see conversation) — shown once, right
+         after the connect gate above resolves, ONLY on a genuine first-ever
+         connection (no identity known before that gate opened —
+         main.js's proceedPastConnectGate tracks this via isFirstConnectGate,
+         since this same gate is reopened later by the identity pill's
+         disconnect action and shouldn't re-prompt then). Same
+         config-panel/mode-connect shell + two-preset-tile layout as the
+         connect gate right above, Learn/Skip instead of Connect/Guest. -->
+    <div id="introHowToOverlay" class="config-panel mode-connect hidden">
+      <div class="config-header">
+        <span class="config-mode-icon">
+          <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.5"/><path d="M12 17.2h.01"/></svg>
+        </span>
+        <span class="config-mode-title">How to?</span>
+      </div>
+      <div class="config-presets">
+        <button class="config-preset-btn" id="ihtLearnBtn" type="button">
+          <div class="config-preset-name">LEARN</div>
+          <div class="config-preset-sub">See the rules and a quick tutorial</div>
+        </button>
+        <button class="config-preset-btn" id="ihtSkipBtn" type="button">
+          <div class="config-preset-name">SKIP</div>
+          <div class="config-preset-sub">Jump straight into the game</div>
+        </button>
+      </div>
+    </div>
     <!-- Classic/Custom + Custom Settings screens (see main.js) — inserted
          between #modeOverlay's tiles (unchanged, see conversation) and the
          3 live-match modes' own entry point (Pass & Play's #startOverlay,
@@ -733,17 +781,15 @@
       </div>
       <div id="joinCodeContent" class="config-lobby-content"></div>
     </div>
-    <!-- "How to?" hub (see conversation — #helpBtn/#navHowTo both open this
-         now instead of launching the tutorial directly) — same
-         config-panel shell as About/Nimiq below, but Nimiq Light Blue
+    <!-- "How to?" hub (see conversation — #helpBtn opens this, the sole
+         entry point now that the sidebar's own "How to" nav item is gone)
+         — same config-panel shell as About/Nimiq below, but Nimiq Light Blue
          (mode-hockey) per explicit request ("comme quand on entre dans un
          mode"), with a visible title (this one breaks from the icon-only
          convention the vibe-nested screens use, per explicit request too).
          Three pills in a pyramid: "How to play" alone on top launches the
-         existing interactive tutorial (main.js — still mobile-only, same
-         gate as before this feature, just moved from #navHowTo's own click
-         handler onto this pill's), the pair below opens one of the two
-         rules panels further down. -->
+         existing interactive tutorial (main.js — still mobile-only), the
+         pair below opens one of the two rules panels further down. -->
     <div id="howToHubOverlay" class="config-panel mode-hockey hidden">
       <button class="config-back" id="htBackBtn" type="button" aria-label="Back">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
@@ -795,12 +841,14 @@
            viewport math needed since it isn't nested inside the scrolling
            element itself. -->
       <div class="rules-scroll" id="ncrScroll">
-        <div class="rules-arena-slot" id="ncrArenaSlot" aria-hidden="true"></div>
-        <p class="rules-objective"><strong>Objective —</strong> slide your stones to score in the goal.</p>
-        <div class="config-rows rules-rows">
-          <div class="config-row"><span class="config-label">POINTS TO WIN</span><span class="rules-value">3</span></div>
-          <div class="config-row"><span class="config-label">TURN TIMER</span><span class="rules-value">30s</span></div>
-          <div class="config-row"><span class="config-label">ICE BOOST</span><span class="rules-value">1 per point</span></div>
+        <img class="rules-arena-slot" id="ncrArenaSlot" src="%BASE_URL%rules/nimicurl-tuto.webp" alt="NimiCurl arena diagram">
+
+        <div class="rules-sentences">
+          <p class="rules-sentence"><strong>Objective —</strong> slide your stones to score in the goal.</p>
+          <p class="rules-sentence"><strong>Win —</strong> first team to 3 points takes the match.</p>
+          <p class="rules-sentence"><strong>Timer —</strong> 30 seconds to aim each turn.</p>
+          <p class="rules-sentence"><strong>Stones —</strong> each one survives 8 hits before it's knocked out.</p>
+          <p class="rules-sentence"><strong>Ice —</strong> one boost per point to help a stone glide further.</p>
         </div>
         <p class="rules-note">These are the default Classic rules — customize them anytime in Custom mode.</p>
       </div>
@@ -815,12 +863,14 @@
         <span class="config-mode-title">Pure Curling Rules</span>
       </div>
       <div class="rules-scroll" id="pcrScroll">
-        <div class="rules-arena-slot" id="pcrArenaSlot" aria-hidden="true"></div>
-        <p class="rules-objective"><strong>Objective —</strong> slide your stones closest to the center.</p>
-        <div class="config-rows rules-rows">
-          <div class="config-row"><span class="config-label">POINTS TO WIN</span><span class="rules-value">3</span></div>
-          <div class="config-row"><span class="config-label">TURN TIMER</span><span class="rules-value">30s</span></div>
-          <div class="config-row"><span class="config-label">ICE BOOST</span><span class="rules-value">1 per point</span></div>
+        <img class="rules-arena-slot" id="pcrArenaSlot" src="%BASE_URL%rules/pure-curling-tuto.webp" alt="Pure Curling arena diagram">
+
+        <div class="rules-sentences">
+          <p class="rules-sentence"><strong>Objective —</strong> slide your stones closest to the center.</p>
+          <p class="rules-sentence"><strong>Win —</strong> first team to 3 points takes the match.</p>
+          <p class="rules-sentence"><strong>Timer —</strong> 30 seconds to aim each turn.</p>
+          <p class="rules-sentence"><strong>Stones —</strong> each one survives 4 hits before it's knocked out.</p>
+          <p class="rules-sentence"><strong>Ice —</strong> one boost per point to help a stone glide further.</p>
         </div>
         <p class="rules-note">These are the default Classic rules — customize them anytime in Custom mode.</p>
       </div>
