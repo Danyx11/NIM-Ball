@@ -4866,6 +4866,15 @@ export function startGame(opts = {}) {
     howToTileEl.classList.add('hidden');
     howToHoleEl.classList.add('hidden');
     howToCorridorEl.classList.add('hidden');
+    // Clears the tile's own content too, not just its visibility — #howToTile
+    // is a static DOM element reused by every session, not recreated per
+    // startGame() call, so without this a fresh tutorial run could still
+    // find the PREVIOUS run's last step ("Done !") sitting in there — per
+    // explicit feedback, that lingered on a relaunch after finishing the
+    // tutorial once already.
+    howToTileCountEl.textContent = '';
+    howToTileTitleEl.textContent = '';
+    howToTileTextEl.textContent = '';
   }
 
   // ---------- Render: arena background is the user's original artwork, used as-is ----------
