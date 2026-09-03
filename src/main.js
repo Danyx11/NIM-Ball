@@ -10,7 +10,8 @@ import '@fontsource/mulish/800.css';
 // identity pill's address line (see style.css's #connectBtnLabel).
 import '@fontsource/fira-mono/500.css';
 import { startGame, preloadCoreAssets } from './game.js';
-import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, getHandle, setHandle } from './nimiq.js';
+import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendClaimTransaction } from './nimiq.js';
+import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets } from './background.js';
 import { connectLan, connectMatch } from './net.js';
@@ -218,7 +219,7 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
   // Mobile keeps its existing behavior untouched (still #game-card children)
   // — #menuStage isn't part of mobile's layout yet.
   const menuHost = IS_MOBILE ? gameCard : document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -563,17 +564,34 @@ let hubAddress = getIdentity()?.address || null;
 function identiconOverride(team) {
   return hubAddress ? { [team]: hubAddress } : {};
 }
+// address -> NimConnect DisplayIdentity | null (fetch in flight) — populated
+// lazily by refreshHandleCache() below, read synchronously here and by
+// applyIdentityPillState() since neither can await a network round trip.
+// getDisplayIdentity() never rejects to "not found" (see nimconnect.js), so
+// `null` unambiguously means "still fetching", not "resolved, no handle".
+const handleCache = new Map();
+function refreshHandleCache(address) {
+  if (handleCache.has(address)) return;
+  handleCache.set(address, null);
+  resolveIdentity(address).then((identity) => {
+    handleCache.set(address, identity);
+    syncIdentityPill();
+  }).catch(() => handleCache.delete(address)); // allow a retry on the next render
+}
 // Same priority as the sidebar identity pill below (syncIdentityPill): a
 // claimed handle beats everything, "Guest" if that's this device's decided
 // identity, otherwise no override at all — game.js falls back to a shortened
 // address on its own in that last case (see its formatAddressShort). Only
 // ever populated for `team`, i.e. whichever side this device's own identity
 // controls (see identiconOverride's own comment above) — the opponent/AI
-// side never gets a label override here.
+// side never gets a label override here. If the handle lookup hasn't
+// resolved yet by the time a match actually starts, this just falls through
+// to no override, same as never having claimed one — resolution normally
+// finishes well before "Jouer" is pressed (see applyIdentityPillState).
 function identityLabelOverride(team) {
   if (hubAddress) {
-    const handle = getHandle(hubAddress);
-    return handle ? { [team]: handle } : {};
+    const handle = handleCache.get(hubAddress)?.handle;
+    return handle ? { [team]: `@${handle}` } : {};
   }
   if (getIdentity()?.type === 'guest') return { [team]: 'Guest' };
   return {};
@@ -736,11 +754,12 @@ function applyIdentityPillState() {
   getIdenticonPngDataUrl(hubAddress).then((url) => {
     if (hubAddress) connectAvatar.style.backgroundImage = `url(${url})`;
   });
-  const handle = getHandle(hubAddress);
+  refreshHandleCache(hubAddress);
+  const handle = handleCache.get(hubAddress)?.handle;
   connectBtnStatus.textContent = shortenAddressCompact(hubAddress);
   connectBtnStatus.classList.add('mono');
   if (handle) {
-    connectBtnLabel.textContent = handle;
+    connectBtnLabel.textContent = `@${handle}`;
   } else if (inMatch) {
     connectBtnLabel.textContent = '';
     connectBtnLabel.classList.add('hidden');
@@ -768,6 +787,28 @@ function syncIdentityPill() {
   }
 }
 syncIdentityPill();
+// EXPERIMENT (reversible — see conversation): pill shows the same fixed halo
+// glow as a stone's own aim halo (style.css's .team-a/.team-b, HALO_RGB's
+// blue/gold) for whichever team is currently up during a live match. Kept
+// fully separate from applyIdentityPillState()/syncIdentityPill() above
+// (which run on every identity change, not just match/turn changes) — just a
+// class toggle, independent and easy to rip out if this doesn't stick.
+// - Pass & Play: game.js's own onTurnChange callback flips this at each real
+//   turn start (completeHandoff(), phase -> aimA/aimB) and clears it again
+//   the instant that turn ends (onValidate(), phase -> handoffB/handoffWatch)
+//   — so the halo only ever shows during an actual aimA/aimB turn, off
+//   through intro/hand-off/reveal, not "whichever team is up next".
+// - Remote Match / vs AI: set once, to the local player's own fixed team,
+//   right when that match starts, and never cleared mid-match — these modes
+//   have no single "team whose turn it is" the sidebar should track (Remote's
+//   two sides aim at once; vs AI's B turn isn't really the local player's
+//   turn at all).
+// - Replay: left alone entirely for now, per explicit request.
+function setProfilePillTeam(team) {
+  connectBtn.classList.remove('team-a', 'team-b');
+  if (team === 'A') connectBtn.classList.add('team-a');
+  else if (team === 'B') connectBtn.classList.add('team-b');
+}
 connectBtn.addEventListener('click', () => {
   if (activeStopGame) return;
   audio.play('button');
@@ -793,28 +834,139 @@ connectBtnLabel.addEventListener('click', (e) => {
   audio.play('button');
   openClaimHandleDialog();
 });
+// Real on-chain claim, in steps: form (validate + let the player retype) ->
+// checking (resolveHandle, is it actually free right now) -> pending (build
+// the payload, sign+send via whichever wallet is live, then poll the
+// registry until it resolves) -> confirmed / raceLost (someone else's claim
+// landed first) / timeout / error. `?fakeHandles` (see nimconnect.js) swaps
+// checkHandleAvailable/waitForClaimOutcome for in-memory fakes and this skips
+// sendClaimTransaction entirely, so no wallet popup ever opens in fake mode.
+//
+// Its own #claimHandleOverlay/.config-panel (index.html), not #overlay/
+// showLobby() — #overlay lives inside #game-card, which desktop's menuHost
+// move (above) deliberately keeps behind #menuStage (see #menuStage's own
+// comment in style.css), so it can never paint over #modeOverlay's still-
+// visible arena backdrop no matter what we do to #overlay/#modeOverlay's own
+// classes. #claimHandleOverlay joins the #menuStage set instead (same as
+// Classic/Custom/"Join with a code"), so it naturally stacks above the menu
+// art. .config-lobby-content (index.html) already gives it the flex column +
+// gap + centering every other menu panel's content gets, and mode-connect
+// the same Nimiq-Blue "wallet/identity" tint #connectGateOverlay uses.
+const claimHandleOverlay = document.getElementById('claimHandleOverlay');
+const claimHandleContent = document.getElementById('claimHandleContent');
+function showClaimLobby(html) {
+  claimHandleContent.innerHTML = html;
+  claimHandleOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden'); // tile grid stays unclickable underneath
+}
+function closeClaimDialog() {
+  claimHandleOverlay.classList.add('hidden');
+  modeDrawer.classList.remove('hidden');
+}
 function openClaimHandleDialog() {
   if (!hubAddress) return;
-  showLobby(`
-    <h2>Claim a handle</h2>
-    <p>Pick a public display name for ${shortenAddressCompact(hubAddress)}. You'll be able to change it later.</p>
-    <input type="text" id="handleInput" maxlength="20" placeholder="Your handle">
-    <div style="display:flex; gap:12px;">
-      <button class="bigbtn" id="handleConfirmBtn">Claim</button>
-      <button class="bigbtn" id="handleCancelBtn">Cancel</button>
-    </div>
-  `);
-  const handleInput = document.getElementById('handleInput');
-  handleInput.focus();
-  document.getElementById('handleConfirmBtn').onclick = () => {
-    const value = handleInput.value.trim();
-    if (!value) return;
-    audio.play('button');
-    setHandle(hubAddress, value);
-    hideLobby();
+  renderClaimStep('form', { value: '' });
+}
+function renderClaimStep(step, ctx) {
+  if (step === 'form') {
+    showClaimLobby(`
+      <h2>Claim a handle</h2>
+      <p>Choisis un nom public pour ${shortenAddressCompact(hubAddress)}. Une fois confirmé sur la chaîne, il est permanent.</p>
+      <input type="text" id="handleInput" maxlength="31" placeholder="ton_handle" value="${ctx.value}">
+      ${ctx.error ? `<p class="lan-error">${ctx.error}</p>` : ''}
+      <div style="display:flex; gap:12px;">
+        <button class="bigbtn" id="handleConfirmBtn">Claim</button>
+        <button class="bigbtn" id="handleCancelBtn">Cancel</button>
+      </div>
+    `);
+    const handleInput = document.getElementById('handleInput');
+    handleInput.focus();
+    document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    document.getElementById('handleConfirmBtn').onclick = () => {
+      const value = handleInput.value.trim().toLowerCase();
+      if (!isValidHandle(value)) {
+        renderClaimStep('form', { value, error: '3-31 caractères, a-z 0-9 _ uniquement' });
+        return;
+      }
+      audio.play('button');
+      renderClaimStep('checking', { value });
+    };
+    return;
+  }
+  if (step === 'checking') {
+    showClaimLobby(`<h2>Vérification…</h2><p>On vérifie que personne n'a déjà @${ctx.value}.</p>`);
+    checkHandleAvailable(ctx.value)
+      .then((available) => renderClaimStep(available ? 'pending' : 'taken', ctx))
+      .catch(() => renderClaimStep('error', ctx));
+    return;
+  }
+  if (step === 'taken') {
+    showClaimLobby(`
+      <h2>Handle déjà pris</h2>
+      <p>@${ctx.value} est déjà réclamé par quelqu'un d'autre. Essaie un autre nom.</p>
+      <div style="display:flex; gap:12px;">
+        <button class="bigbtn" id="handleRetryBtn">Réessayer</button>
+        <button class="bigbtn" id="handleCancelBtn">Annuler</button>
+      </div>
+    `);
+    document.getElementById('handleRetryBtn').onclick = () => renderClaimStep('form', { value: ctx.value });
+    document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    return;
+  }
+  if (step === 'pending') {
+    showClaimLobby(`<h2>Confirme dans ton wallet</h2><p>Une transaction vers le registre partagé s'ouvre dans ton wallet. Valeur 0, juste les frais réseau.</p>`);
+    const payload = buildClaimPayload(ctx.value);
+    (FAKE_HANDLES ? Promise.resolve() : sendClaimTransaction(payload))
+      .then(() => waitForClaimOutcome(ctx.value, hubAddress))
+      .then((outcome) => renderClaimStep(outcome, ctx))
+      .catch(() => renderClaimStep('error', ctx));
+    return;
+  }
+  if (step === 'confirmed') {
+    handleCache.set(hubAddress, { address: hubAddress, handle: ctx.value });
     syncIdentityPill();
-  };
-  document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); hideLobby(); };
+    showClaimLobby(`
+      <h2>Handle confirmé ✓</h2>
+      <p>@${ctx.value} est maintenant à toi, visible dans NIM-Ball, NimFeed et Nimiq Pay.</p>
+      <button class="bigbtn" id="handleDoneBtn">Fermer</button>
+    `);
+    document.getElementById('handleDoneBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    return;
+  }
+  if (step === 'raceLost') {
+    showClaimLobby(`
+      <h2>Handle perdu de justesse</h2>
+      <p>Quelqu'un d'autre a réclamé @${ctx.value} dans un bloc antérieur pendant ta confirmation. Essaie un autre nom.</p>
+      <div style="display:flex; gap:12px;">
+        <button class="bigbtn" id="handleRetryBtn">Réessayer</button>
+        <button class="bigbtn" id="handleCancelBtn">Annuler</button>
+      </div>
+    `);
+    document.getElementById('handleRetryBtn').onclick = () => renderClaimStep('form', { value: '' });
+    document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    return;
+  }
+  if (step === 'timeout') {
+    showClaimLobby(`
+      <h2>Toujours en attente</h2>
+      <p>La transaction n'est pas encore confirmée sur la chaîne. Tu peux fermer et revenir plus tard — la pill se mettra à jour dès que c'est prêt.</p>
+      <button class="bigbtn" id="handleCloseBtn">Fermer</button>
+    `);
+    document.getElementById('handleCloseBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    return;
+  }
+  if (step === 'error') {
+    showClaimLobby(`
+      <h2>Échec</h2>
+      <p>La transaction n'a pas pu être envoyée. Réessaie.</p>
+      <div style="display:flex; gap:12px;">
+        <button class="bigbtn" id="handleRetryBtn">Réessayer</button>
+        <button class="bigbtn" id="handleCancelBtn">Annuler</button>
+      </div>
+    `);
+    document.getElementById('handleRetryBtn').onclick = () => renderClaimStep('form', { value: ctx.value || '' });
+    document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+  }
 }
 
 // ---- Mode select: Pass & Play / Remote Match / AI Training / Replay ----
@@ -1036,6 +1188,7 @@ function hideMatchChrome() {
   startOverlay.classList.add('hidden');
   document.body.classList.remove('howto-active');
   if (IS_MOBILE) sidebar.classList.remove('in-match');
+  setProfilePillTeam(null); // EXPERIMENT (reversible, see conversation) — back to the neutral white pill outside a match
   positionHelpBtn(); // re-sync now that the match is over (see showToolbar's own comment) — stays hidden if this lands on a submenu (e.g. Custom Settings) rather than the tile grid itself
 }
 
@@ -1380,7 +1533,12 @@ modeLocal.addEventListener('click', () => {
     activeStopGame = startGame({
       ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config, vibe: activeVibe,
       onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('passplay', config); },
+      onTurnChange: setProfilePillTeam, // EXPERIMENT, see setProfilePillTeam's own comment
     });
+    // No proactive setProfilePillTeam('A') here (unlike vs AI/Remote below) —
+    // per explicit request the halo should stay off through the very first
+    // hand-off/intro too, only appearing once completeHandoff() fires its own
+    // first onTurnChange('A') as aimA actually begins.
     syncIdentityPill();
   }, () => showVibeDrawer(activeVibe));
 });
@@ -1399,6 +1557,7 @@ modeSolo.addEventListener('click', () => {
   showToolbar();
   activeMatchMode = 'solo';
   activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE });
+  setProfilePillTeam('A'); // EXPERIMENT — human is always team A vs AI, fixed for the whole match (see setProfilePillTeam's own comment)
   syncIdentityPill();
 });
 
@@ -1639,7 +1798,7 @@ helpBtn.addEventListener('click', () => {
 // the tutorial's opening frame never draws with sprites still mid-download.
 let howToLoading = false;
 htPlayBtn.addEventListener('click', async () => {
-  if (!IS_MOBILE || activeStopGame || howToLoading) return;
+  if (activeStopGame || howToLoading) return;
   audio.play('button');
   howToLoading = true;
   showLoadingOverlay();
@@ -1981,6 +2140,7 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
       // don't carry over past a match's end.
       onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('remote', matchConfig || DEFAULT_MATCH_CONFIG); },
     });
+    setProfilePillTeam(net.myTeam); // EXPERIMENT — fixed to the local player's own team for the whole match (see setProfilePillTeam's own comment)
     syncIdentityPill();
   });
   net.onDisconnect(() => onLost('The other player disconnected.'));

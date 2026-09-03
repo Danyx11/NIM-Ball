@@ -348,7 +348,14 @@ html, body {
   font-family: 'Mulish', -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   text-align: left;
   cursor: pointer;
-  transition: background .12s ease;
+  /* Zero-alpha baseline matching .team-a/.team-b's own two-layer shape below
+     (same blur/spread each, hue doesn't matter at 0 alpha) — box-shadow can't
+     smoothly cross-fade from a bare `none` to a real shadow list in every
+     browser, but two lists of the same shape interpolate cleanly, which is
+     what turns the halo's on/off into an actual fade (transition below)
+     instead of a hard cut, per explicit request. */
+  box-shadow: 0 0 14px 3px rgba(0,0,0,0), 0 0 34px 10px rgba(0,0,0,0);
+  transition: background .12s ease, box-shadow .3s ease;
 }
 .nq-connect-btn:hover { background: var(--nb-12); }
 .nq-connect-btn.hidden { display: none; }
@@ -454,6 +461,19 @@ html, body {
   color: var(--nb-60);
 }
 .connect-status.mono { font-family: 'Fira Mono', ui-monospace, SFMono-Regular, monospace; letter-spacing: .01em; }
+/* EXPERIMENT (reversible — see main.js's setProfilePillTeam): the pill keeps
+   its normal white surface, and signals whichever team is up during a live
+   match with a fixed halo, not a ring — literally the same glow the stones'
+   own aim halo uses (game.js's drawAimHalo/HALO_RGB): a radial gradient with
+   stops at 0%/0.55 alpha, 60%/0.24 alpha, 100%/0 alpha, per explicit request
+   to match that look. box-shadow can't do a true radial gradient, but two
+   blurred/spread shadows at those same two alpha stops approximate its
+   falloff closely enough. HALO_RGB's own triples (94,203,245 / 255,201,77),
+   not --teamA/--teamB's flatter UI tint — the halo uses a distinct, more
+   saturated blue. No pulse here (game.js's haloMode('pulse') breathing) —
+   "fixed" was explicit, same as the halo's own 'on'/'retract' modes. */
+.nq-connect-btn.team-a { box-shadow: 0 0 14px 3px rgba(94,203,245,0.55), 0 0 34px 10px rgba(94,203,245,0.24); }
+.nq-connect-btn.team-b { box-shadow: 0 0 14px 3px rgba(255,201,77,0.55), 0 0 34px 10px rgba(255,201,77,0.24); }
 
 /* Mobile layout (see src/main.js's coarse-pointer detection, which toggles
    this class on <body>): the sidebar becomes a real column here too, same
@@ -755,19 +775,20 @@ html, body {
 .mobile-layout #toolbar-bottom { display: none; }
 
 /* How To tutorial overlay (see index.html + src/game.js's howTo mode):
-   mobile-only, spotlight + instruction tile living outside #stage-wrap (see
-   index.html's own comment on why) so `position: fixed` resolves against the
-   real viewport regardless of #stage-wrap's mobile transform. Both pieces
-   are pointer-events:none — purely visual, real taps land on the actual
+   spotlight + instruction tile living outside #stage-wrap (see index.html's
+   own comment on why) so `position: fixed` resolves against the real
+   viewport regardless of #stage-wrap's mobile transform. Both pieces are
+   pointer-events:none — purely visual, real taps land on the actual
    canvas/button underneath; game.js reads live game state to gate/advance
-   steps and repositions #howToHole/#howToCorridorBar every frame in JS.
-   Scoped to .mobile-layout throughout (never shown on desktop — this
-   tutorial is mobile-only per explicit request, and its geometry assumes
-   #mobileController/the mobile canvas crop exist). This file has no bare
-   `.hidden{display:none}` utility (see .mc-icon-overlay.hidden's own
-   comment above) — every piece here needs its own scoped .hidden rule. */
+   steps and repositions #howToHole/#howToCorridorBar every frame in JS. Now
+   shown on desktop too (see game.js's howToSyncStepDesktop/HOWTO_STEPS_DESKTOP)
+   — used to be scoped to .mobile-layout, since the tutorial itself was
+   mobile-only; that's no longer true, so this no longer gates on it either.
+   This file has no bare `.hidden{display:none}` utility (see
+   .mc-icon-overlay.hidden's own comment above) — every piece here needs its
+   own scoped .hidden rule. */
 #howToOverlay { display: none; }
-.mobile-layout #howToOverlay:not(.hidden) {
+#howToOverlay:not(.hidden) {
   display: block;
   position: fixed;
   inset: 0;
@@ -809,7 +830,7 @@ html, body {
    kept small (compact padding/font) so it covers as little as possible;
    Mulish via the inherited body font. */
 #howToTile { display: none; }
-.mobile-layout #howToTile:not(.hidden) {
+#howToTile:not(.hidden) {
   display: block;
   position: fixed;
   z-index: 9;
@@ -842,6 +863,13 @@ html, body {
 #howToTileCount { font-size: 11px; font-weight: 700; letter-spacing: .04em; color: rgba(255,255,255,0.65); }
 #howToTileTitle { font-size: 15.5px; font-weight: 700; line-height: 1.2; margin-top: 1px; }
 #howToTileText { font-size: 12.5px; font-weight: 400; line-height: 1.3; color: rgba(255,255,255,0.88); margin-top: 2px; }
+/* Desktop HUD-rock spotlight targets (see index.html's own comment on these
+   4 elements) — deliberately NOT scoped to .mobile-layout like #howToOverlay
+   above: unlike that whole spotlight/dim system, these are just positioned
+   rects for getBoundingClientRect() to read, so they need to lay out
+   correctly regardless of platform. No visible styling at all — position/
+   size are set entirely inline, per frame, by game.js's howToSyncRockTarget. */
+.howto-rock-target { position: fixed; pointer-events: none; }
 /* The one real button in the whole overlay (see index.html's own comment on
    it) — Nimiq Gold, same accent already used for other CTAs (e.g. the
    "Claim a handle" pill), so it reads as the one thing here worth tapping. */
@@ -1706,6 +1734,13 @@ button:disabled { opacity: 0.35; cursor: default; }
   transition: background .15s ease, border-color .15s ease;
 }
 #overlay.overlay-boxed .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
+/* Same dark-ink swap as every other translucent-white .bigbtn on a gold
+   tint (#matchNetworkOverlay.mode-curling/.mode-replay's own .bigbtn below)
+   — white text on this pill read as near-invisible against Pure Curling's
+   gold overlay-boxed scrim (see conversation: spotted on the exit-confirm
+   dialog specifically, but this rule covers every showLobby() dialog). */
+#overlay.overlay-boxed.mode-curling .bigbtn,
+#overlay.overlay-boxed.mode-replay .bigbtn { color: var(--bg-deep); }
 /* Mobile: the goal (+1) and end-of-match ticket panel — by far the most
    frequently-seen DOM overlay in a live match — should read as centered on
    the visible arena, not the full screen: #game-card (this panel's
@@ -1805,6 +1840,14 @@ button:disabled { opacity: 0.35; cursor: default; }
   transition: background .15s ease, border-color .15s ease;
 }
 #joinCodeOverlay .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
+/* Same translucent-white treatment, mode-connect's own Nimiq Light Blue
+   (see .config-panel.mode-connect above) needs it same as every other tint
+   here — solid gold .bigbtn reads fine nowhere on this panel family. */
+#claimHandleOverlay .bigbtn {
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
+  transition: background .15s ease, border-color .15s ease;
+}
+#claimHandleOverlay .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
 /* Remote Match's 3 sub-screens (see main.js's showNetPanel) rebuild
    #matchNetworkContent's innerHTML from scratch on every screen change, so a
    fresh entrance for its button(s) needs no JS bookkeeping — new DOM nodes

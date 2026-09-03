@@ -120,16 +120,36 @@ export function clearIdentity() {
   localStorage.removeItem(GUEST_KEY);
 }
 
-// ---- NimConnect handle (placeholder) ----------------------------------
-// No real handle registry exists yet — this is local-only scaffolding for
-// the sidebar identity pill's "Claim a handle" flow (see main.js's
-// openClaimHandleDialog()) so that UI/data flow already works end to end and
-// only this storage layer needs swapping for the real NimConnect lookup/
-// claim API once it exists, not the call sites.
-const HANDLE_KEY_PREFIX = 'nimball-handle-';
-export function getHandle(address) {
-  return localStorage.getItem(HANDLE_KEY_PREFIX + address) || null;
-}
-export function setHandle(address, handle) {
-  localStorage.setItem(HANDLE_KEY_PREFIX + address, handle);
+// ---- NimConnect @handle claim (see src/nimconnect.js for read/lookup) --
+// buildClaimPayload() (nimconnect.js) only builds {recipient, extraData,
+// extraDataBytes} — signing and broadcasting is our job, via whichever
+// wallet integration is actually live. Mirrors connectIdentity()'s own
+// Pay-first-then-Hub-popup order: try the Nimiq Pay provider (only resolves
+// inside Nimiq Pay), and only fall back to the Hub's checkout popup if we're
+// not running inside Pay at all — a real error from *within* Pay (rejected,
+// insufficient balance) is surfaced as-is, not silently retried via Hub.
+export async function sendClaimTransaction({ recipient, extraData, extraDataBytes }) {
+  let provider = null;
+  try {
+    provider = await connectNimiq();
+    await provider.connect();
+  } catch {
+    provider = null;
+  }
+  if (provider) {
+    const result = await provider.sendBasicTransactionWithData({ recipient, value: 0, data: extraData });
+    if (result && typeof result === 'object' && result.error) {
+      throw new Error(result.error.message || 'Transaction failed.');
+    }
+    return { hash: result };
+  }
+  const signed = await getHubApi().checkout({
+    appName: 'NimiCurl',
+    sender: getStoredAddress(),
+    forceSender: true,
+    recipient,
+    value: 0,
+    extraData: extraDataBytes,
+  });
+  return { hash: signed?.hash };
 }
