@@ -287,6 +287,21 @@
          one real button anywhere in the overlay. -->
     <button id="howToGotItBtn" class="hidden" type="button">Got it?</button>
   </div>
+  <!-- Desktop-only spotlight targets for the HUD rocks baked into the arena
+       art (game.js's ROCK_ZONES/rockZoneAt — "play"/"ice"/"laser"/"exit" are
+       hit-tested canvas regions, not real DOM buttons the way mobile's
+       #tbtn-play etc. are). Each one is repositioned/resized every frame to
+       match its rock's live on-screen rect (see game.js's
+       howToSyncRockTarget) right before it's targeted, so the exact same
+       howToShowDomTarget()/getBoundingClientRect() path already used for
+       mobile's real buttons works for these too — no separate desktop
+       codepath needed in the spotlight functions themselves. No visible
+       styling on purpose (no background/border/content) — purely a
+       positioned rect for getBoundingClientRect() to read. -->
+  <div id="howToRockPlay" class="howto-rock-target"></div>
+  <div id="howToRockIce" class="howto-rock-target"></div>
+  <div id="howToRockLaser" class="howto-rock-target"></div>
+  <div id="howToRockExit" class="howto-rock-target"></div>
   <!-- "Rotate to landscape" intro gate, mobile-only (see main.js) — the whole
        mobile layout (right-margin joystick column) only works in landscape,
        so this is the very first thing a phone player in portrait sees,
@@ -780,6 +795,19 @@
         <span class="config-mode-icon" id="joinCodeModeIcon"></span>
       </div>
       <div id="joinCodeContent" class="config-lobby-content"></div>
+    </div>
+    <!-- "Claim a handle" (see main.js's openClaimHandleDialog/renderClaimStep,
+         reached from the sidebar identity pill, never a mode tile — no back
+         arrow/mode icon needed, every step already has its own Cancel/Fermer
+         button). Its own .config-panel/#menuStage element rather than
+         #overlay/showLobby(), same reasoning as #comingSoonOverlay's own
+         comment above: #overlay lives inside #game-card, which desktop's
+         menuHost move deliberately keeps behind #menuStage, so it can never
+         paint over #modeOverlay's still-visible arena backdrop — this panel
+         needs to, so it joins the #menuStage set instead. mode-connect: the
+         same "wallet/identity" tint #connectGateOverlay's own panel uses. -->
+    <div id="claimHandleOverlay" class="config-panel mode-connect hidden">
+      <div id="claimHandleContent" class="config-lobby-content"></div>
     </div>
     <!-- "How to?" hub (see conversation — #helpBtn opens this, the sole
          entry point now that the sidebar's own "How to" nav item is gone)
