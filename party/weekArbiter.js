@@ -188,7 +188,12 @@ export class WeekArbiter extends Server {
     let msg; try { msg = JSON.parse(message); } catch { return; }
 
     if (msg.type === 'shot') {
-      if (this.match.status !== 'active' || this.match.pendingShots[team]) return;
+      // 'pending' allowed too, not just 'active' — lets the creator (team A)
+      // play their own first shot before B has even joined (see main.js's
+      // hostWeekMatch/showWeekFirstShotScreen). Safe: team can only ever be
+      // 'B' once status is already 'active' (onConnect sets both together,
+      // see above), so a 'pending' shot can only ever come from A.
+      if ((this.match.status !== 'active' && this.match.status !== 'pending') || this.match.pendingShots[team]) return;
       const text = typeof msg.message === 'string'
         ? Array.from(msg.message.replace(/[\r\n\t]+/g, ' ').trim()).slice(0, 60).join('')
         : '';
