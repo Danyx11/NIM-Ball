@@ -250,11 +250,18 @@ initBackground();
 // forever — after this, the game just proceeds and lets the normal
 // per-frame .complete checks in game.js fill sprites in as they arrive.
 const ASSET_PRELOAD_TIMEOUT_MS = 8000;
+// Set synchronously further down, before this promise can realistically
+// resolve, by the ?replay=/?duel magic-link handling: when either fires it
+// takes over showLoadingOverlay()/hideLoadingOverlay() for its own
+// preloadCoreAssets+startGame wait (same pattern every mode entry point now
+// uses, see CLAUDE.md), so this unrelated background-asset chain must not
+// race it and hide the overlay out from under it mid-wait.
+let magicLinkOwnsLoadingOverlay = false;
 Promise.race([
   preloadBackgroundAssets(),
   new Promise((resolve) => setTimeout(resolve, ASSET_PRELOAD_TIMEOUT_MS)),
 ]).then(() => {
-  hideLoadingOverlay();
+  if (!magicLinkOwnsLoadingOverlay) hideLoadingOverlay();
   preloadCoreAssets(IS_MOBILE); // not awaited: warms the match assets in the background from here on
 });
 
@@ -1525,16 +1532,26 @@ cgGuestBtn.addEventListener('click', () => {
 
 modeLocal.addEventListener('click', () => {
   audio.play('button');
-  showClassicCustomScreen('passplay', (config) => {
+  showClassicCustomScreen('passplay', async (config) => {
     modeOverlay.classList.add('hidden');
     startOverlay.classList.remove('hidden');
     showToolbar();
     activeMatchMode = 'passplay';
-    activeStopGame = startGame({
-      ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config, vibe: activeVibe,
-      onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('passplay', config); },
-      onTurnChange: setProfilePillTeam, // EXPERIMENT, see setProfilePillTeam's own comment
+    // Same loading-overlay/onMatchReady wait howTo pioneered (see htPlayBtn's
+    // own comment) — #startOverlay's ready-tap screen sits underneath the
+    // loading overlay until assets are actually baked, so neither player can
+    // tap ready onto a board still showing flat fallback bubble colors.
+    showLoadingOverlay();
+    await preloadCoreAssets(IS_MOBILE);
+    await new Promise((resolve) => {
+      activeStopGame = startGame({
+        ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config, vibe: activeVibe,
+        onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('passplay', config); },
+        onTurnChange: setProfilePillTeam, // EXPERIMENT, see setProfilePillTeam's own comment
+        onMatchReady: resolve,
+      });
     });
+    hideLoadingOverlay();
     // No proactive setProfilePillTeam('A') here (unlike vs AI/Remote below) —
     // per explicit request the halo should stay off through the very first
     // hand-off/intro too, only appearing once completeHandoff() fires its own
@@ -1551,12 +1568,20 @@ modeMatch.addEventListener('click', () => {
 
 // Solo vs IA: only one human, controlling team A — no ready-tap lobby needed
 // (game.js's aiTeam branch skips #startOverlay itself), straight into aimA.
-modeSolo.addEventListener('click', () => {
+// Same loading-overlay/onMatchReady wait howTo pioneered (see htPlayBtn's
+// own comment) — without it this mode's board could appear mid-bake, flat
+// fallback bubble colors visible under the huddle slide-in.
+modeSolo.addEventListener('click', async () => {
   audio.play('button');
   modeOverlay.classList.add('hidden');
   showToolbar();
   activeMatchMode = 'solo';
-  activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE });
+  showLoadingOverlay();
+  await preloadCoreAssets(IS_MOBILE);
+  await new Promise((resolve) => {
+    activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, onMatchReady: resolve });
+  });
+  hideLoadingOverlay();
   setProfilePillTeam('A'); // EXPERIMENT — human is always team A vs AI, fixed for the whole match (see setProfilePillTeam's own comment)
   syncIdentityPill();
 });
@@ -1811,11 +1836,12 @@ htPlayBtn.addEventListener('click', async () => {
   // Loading stays up through the rest of startGame()'s own async work too —
   // the identicon/bubble sprite bake (tryBakeBubble) plus the huddle
   // slide-in beat — not just through preloadCoreAssets above. game.js's
-  // onHowToReady fires exactly once, the instant the tutorial's first real
-  // frame is actually ready to show (see onHowToAimPhase), so this resolves
+  // onMatchReady fires exactly once, the instant the tutorial's first real
+  // frame is actually ready to show (see tryBakeBubble), so this resolves
   // only then rather than the moment startGame() has merely been called.
+  // (Every other mode below now awaits the same signal — see CLAUDE.md.)
   await new Promise((resolve) => {
-    activeStopGame = startGame({ ...rockHandlers, howTo: true, mobile: IS_MOBILE, onHowToReady: resolve });
+    activeStopGame = startGame({ ...rockHandlers, howTo: true, mobile: IS_MOBILE, onMatchReady: resolve });
   });
   hideLoadingOverlay();
   howToLoading = false;
@@ -2021,15 +2047,22 @@ async function handleReplayFile(file) {
   showLoadingOverlay();
   try {
     const points = await decodePointsFromTicketImage(file);
-    hideLoadingOverlay();
     if (points.length === 0) {
+      hideLoadingOverlay();
       replayUploadStatus.textContent = 'No points found on this ticket.';
       return;
     }
     replayUploadOverlay.classList.add('hidden');
     beginAmbience();
     activeMatchMode = 'replay';
-    activeStopGame = startGame({ ...rockHandlers, replayPoints: points, mobile: IS_MOBILE });
+    // Loading overlay stays up (already showing from the decode above) through
+    // the same asset-warm/bubble-bake wait every other mode now gets — a
+    // replay leans just as hard on the identicon bubbles as a live match.
+    await preloadCoreAssets(IS_MOBILE);
+    await new Promise((resolve) => {
+      activeStopGame = startGame({ ...rockHandlers, replayPoints: points, mobile: IS_MOBILE, onMatchReady: resolve });
+    });
+    hideLoadingOverlay();
     syncIdentityPill();
   } catch (err) {
     hideLoadingOverlay();
@@ -2124,7 +2157,7 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
       <h2>Waiting for the other player…</h2>
     `);
   };
-  net.onBothReady(() => {
+  net.onBothReady(async () => {
     hideLobby();
     showToolbar();
     activeMatchMode = 'remote';
@@ -2132,14 +2165,24 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
     // creator's own local pick, or (Remote Match joiner only) overridden to
     // the creator's actual vibe as soon as the room was joined — see
     // joinMatch's net.vibe handling above.
-    activeStopGame = startGame({
-      ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), identiconLabel: identityLabelOverride(net.myTeam), mobile: IS_MOBILE, matchConfig, vibe: activeVibe,
-      // Remote Match only in practice (Duel LAN's magic link never goes
-      // through Classic/Custom, see conversation) — either player is free to
-      // reconfigure a fresh room after the match ends, creator/joiner roles
-      // don't carry over past a match's end.
-      onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('remote', matchConfig || DEFAULT_MATCH_CONFIG); },
+    // Same loading-overlay/onMatchReady wait every other mode now gets (see
+    // htPlayBtn's own comment) — reusing showLoadingOverlay here rather than
+    // introducing a second visual, one show/hide pair covering both the
+    // asset warm-up and the identicon bake before either side's board appears.
+    showLoadingOverlay();
+    await preloadCoreAssets(IS_MOBILE);
+    await new Promise((resolve) => {
+      activeStopGame = startGame({
+        ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), identiconLabel: identityLabelOverride(net.myTeam), mobile: IS_MOBILE, matchConfig, vibe: activeVibe,
+        // Remote Match only in practice (Duel LAN's magic link never goes
+        // through Classic/Custom, see conversation) — either player is free to
+        // reconfigure a fresh room after the match ends, creator/joiner roles
+        // don't carry over past a match's end.
+        onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('remote', matchConfig || DEFAULT_MATCH_CONFIG); },
+        onMatchReady: resolve,
+      });
     });
+    hideLoadingOverlay();
     setProfilePillTeam(net.myTeam); // EXPERIMENT — fixed to the local player's own team for the whole match (see setProfilePillTeam's own comment)
     syncIdentityPill();
   });
@@ -2300,12 +2343,31 @@ homeOverlay.addEventListener('click', () => {
 // "no menu detour" idea as ?duel, now also skipping the splash screen.
 const replayFromLink = parseReplayFromLocation();
 if (replayFromLink) {
+  // This runs at module load, ahead of any user gesture, so the branded
+  // #loadingOverlay may still legitimately be up from index.html's own
+  // static default — claim it (see magicLinkOwnsLoadingOverlay above) and
+  // keep it up through the same preloadCoreAssets+onMatchReady wait every
+  // other mode entry point now goes through, instead of the previous
+  // "startGame() called synchronously, board fills in mid-flight" behavior.
+  magicLinkOwnsLoadingOverlay = true;
+  showLoadingOverlay();
   homeOverlay.classList.add('hidden');
   beginAmbience();
   activeMatchMode = 'replay';
-  activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], mobile: IS_MOBILE });
-  syncIdentityPill();
+  (async () => {
+    await preloadCoreAssets(IS_MOBILE);
+    await new Promise((resolve) => {
+      activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], mobile: IS_MOBILE, onMatchReady: resolve });
+    });
+    hideLoadingOverlay();
+    syncIdentityPill();
+  })();
 } else if (new URLSearchParams(location.search).has('duel')) {
+  // joinLan() below calls showLoadingOverlay() itself practically the same
+  // tick (it's the very first line of its async body) — claim the overlay
+  // here too so the unrelated background-asset chain above can't sneak in
+  // and hide it between now and then (see magicLinkOwnsLoadingOverlay).
+  magicLinkOwnsLoadingOverlay = true;
   homeOverlay.classList.add('hidden');
   joinLan(defaultLanAddress(), null);
 }
