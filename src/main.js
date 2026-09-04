@@ -994,6 +994,29 @@ const modeOverlay = document.getElementById('modeOverlay');
 // Classic/Custom's back arrow, returnToModeSelect, the connect gate, etc.
 function showModeDrawer() {
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
+  // Belt-and-suspenders full reset (reported: classicCustomOverlay left
+  // showing on top after quitting a match) — this function's whole purpose
+  // (per its own header comment) is "go all the way back to the top", so
+  // every deeper screen in the Remote Match stack gets hidden here
+  // regardless of which one a caller happened to leave open. Each of these
+  // is normally hidden by its own successor screen already (see e.g.
+  // showNetPanel's own classicCustomOverlay.hidden) — this is the fallback
+  // for paths that skip that (returnToModeSelect() mid-match, an error
+  // retry, etc.) rather than the primary mechanism.
+  classicCustomOverlay.classList.add('hidden');
+  customSettingsOverlay.classList.add('hidden');
+  matchNetworkOverlay.classList.add('hidden');
+  joinCodeOverlay.classList.add('hidden');
   modeDrawer.classList.remove('hidden');
   modeOverlay.classList.remove('hidden');
 }
@@ -1064,6 +1087,16 @@ function showRemoteModeDrawer() {
   remoteModeOverlay.classList.remove('mode-hockey', 'mode-curling');
   remoteModeOverlay.classList.add(vibeTintClass());
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   remoteModeOverlay.classList.remove('hidden');
   // Re-checked every time this screen opens (not just once) — connecting a
@@ -1337,6 +1370,16 @@ function showNetPanel(html) {
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   matchNetworkOverlay.classList.remove('hidden');
 }
 function hideNetPanel() { matchNetworkOverlay.classList.add('hidden'); }
@@ -1391,6 +1434,16 @@ function showClassicCustomScreen(mode, launch, goBack, errorMsg) {
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   customSettingsOverlay.classList.add('hidden');
   classicCustomOverlay.classList.remove('hidden');
   classicBtn.onclick = () => {
@@ -1452,6 +1505,16 @@ function showCustomSettingsScreen(mode, initialConfig) {
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   classicCustomOverlay.classList.add('hidden');
   customSettingsOverlay.classList.remove('hidden');
 }
@@ -1518,6 +1581,16 @@ function showConnectGate() {
   replayUploadOverlay.classList.add('hidden');
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   connectGateOverlay.classList.remove('hidden');
 }
@@ -1670,6 +1743,16 @@ function showReplayUpload() {
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   replayUploadStatus.textContent = '';
   replayUploadOverlay.classList.remove('hidden');
 }
@@ -1702,6 +1785,16 @@ function showJoinCodeScreen(errorMsg) {
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   joinCodeContent.innerHTML = `
     <h2>Join with a code</h2>
     <input id="joinCodeInput" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="XXXX" />
@@ -1734,6 +1827,16 @@ function showAboutScreen() {
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   aboutOverlay.classList.remove('hidden');
 }
 function hideAboutScreen() {
@@ -1768,6 +1871,16 @@ function showConstructionScreen(label) {
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   constructionTitle.textContent = label;
   constructionOverlay.classList.remove('hidden');
   activeConstructionLabel = label;
@@ -1802,6 +1915,16 @@ function showNimiqScreen() {
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   nimiqOverlay.classList.remove('hidden');
 }
 function hideNimiqScreen() {
@@ -1851,6 +1974,16 @@ function showHowToScreen() {
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.add('hidden');
+  // Same bug/fix as joinCodeOverlay/modeOverlay above (see showLobby's own
+  // comment) — #remoteModeOverlay (the LIVE/WEEK picker) is one level deeper
+  // than #vibeSubOverlay and was added after that pattern was established,
+  // so every place that already hides vibeSubOverlay to move elsewhere
+  // needs to hide this sibling too, or it's left stuck on top of whatever
+  // comes next (reported: still covering the ready screen after creating a
+  // LIVE match). Harmless where this is immediately followed by actually
+  // showing #remoteModeOverlay again (showRemoteModeDrawer) — hidden then
+  // un-hidden on the very next line there.
+  remoteModeOverlay.classList.add('hidden');
   howToHubOverlay.classList.remove('hidden');
 }
 function hideHowToScreen() {
