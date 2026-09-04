@@ -152,7 +152,7 @@ export function preloadCoreAssets(mobile = false, howTo = false) {
 }
 
 export function startGame(opts = {}) {
-  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, onTurnChange = null, matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onHowToReady = null } = opts;
+  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, onTurnChange = null, matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null } = opts;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
   // default preset; Custom is the same shape with different values. Every
   // caller not yet wired to the Classic/Custom flow (vs AI, replay) simply
@@ -462,6 +462,9 @@ export function startGame(opts = {}) {
   // of the LEDs every frame). The extra 'dead' sprite (LEDs-at-zero art,
   // desaturated) is what a killed stone crossfades to — see DEAD_SATURATION
   // and drawStone.
+  // Guards onMatchReady (see tryBakeBubble below) so it only ever fires
+  // once, on this match's very first real frame, not again every round.
+  let matchReadyFired = false;
   function tryBakeBubble(team) {
     const id = identiconSources[team];
     const imgs = moduleImages[team];
@@ -470,15 +473,17 @@ export function startGame(opts = {}) {
     bubbleSprites[team] = {};
     for (const key of LED_STATE_KEYS) bubbleSprites[team][key] = bakeBubble(imgs[key], id, STONE_R * 2, identiconBgColors[team]);
     bubbleSprites[team].dead = desaturateSprite(bubbleSprites[team]['0'], DEAD_SATURATION, DEAD_LIGHTEN);
-    // howTo's only stone (team A) has everything it needs to draw correctly
-    // from this point on — fires main.js's onHowToReady, if given, so its
-    // loading overlay can lift right as this resolves rather than the
-    // instant startGame() was merely called (per explicit feedback: assets
-    // were still visibly finishing underneath the overlay before this).
-    // Deliberately NOT tied to onHowToAimPhase/the intro animation finishing
-    // — the whole point is to still catch the huddle slide-in playing live
-    // once the overlay lifts, not have it already over underneath it.
-    if (howTo && team === 'A' && onHowToReady && !howToReadyFired) { howToReadyFired = true; onHowToReady(); }
+    // Team A's stone has everything it needs to draw correctly from this
+    // point on — fires main.js's onMatchReady, if given, so its loading
+    // overlay can lift right as this resolves rather than the instant
+    // startGame() was merely called (per explicit feedback, originally for
+    // howTo alone: assets were still visibly finishing underneath the
+    // overlay before this; now every mode's entry point in main.js awaits
+    // the same signal, see CLAUDE.md). Deliberately NOT tied to
+    // onHowToAimPhase/the intro animation finishing — the whole point is to
+    // still catch the huddle slide-in playing live once the overlay lifts,
+    // not have it already over underneath it.
+    if (team === 'A' && onMatchReady && !matchReadyFired) { matchReadyFired = true; onMatchReady(); }
   }
   for (const team of ['A', 'B']) {
     Promise.all([
@@ -4033,15 +4038,18 @@ export function startGame(opts = {}) {
       g._resetToX = target.x; g._resetToY = target.y;
       g.x = g._resetFromX; g.y = g._resetFromY;
     }
-    // howTo: the stones above are already parked at their huddle start
-    // point — hold there a beat before the glide actually starts moving
-    // (per explicit feedback: the tutorial's own loading overlay lifts as
-    // soon as assets are ready, see tryBakeBubble's onHowToReady, which can
-    // land well before this point — starting the clock immediately meant
-    // the glide could already be mid-flight, or even over, by the time the
-    // overlay actually lifted, so only its tail end ever showed). This
-    // guarantees a clean start once the overlay is gone, so the whole glide
-    // plays out on screen.
+    // The stones above are already parked at their huddle start point —
+    // hold there a beat before the glide actually starts moving (per
+    // explicit feedback, originally for howTo alone: main.js's own loading
+    // overlay lifts as soon as assets are ready, see tryBakeBubble's
+    // onMatchReady, which can land well before this point — starting the
+    // clock immediately meant the glide could already be mid-flight, or
+    // even over, by the time the overlay actually lifted, so only its tail
+    // end ever showed). This guarantees a clean start once the overlay is
+    // gone, so the whole glide plays out on screen — now shared by every
+    // mode's entry branch above (maybeStart/net/aiTeam/howTo), since
+    // main.js now wraps all of them behind the same onMatchReady await
+    // instead of just howTo's.
     const startClock = () => {
       matchIntroStart = performance.now();
       phase = 'matchIntro';
@@ -4070,8 +4078,7 @@ export function startGame(opts = {}) {
       // that redundant call a no-op instead of corrupting positions.
       trackedTimeout(() => { if (phase === 'matchIntro') updateMatchIntro(); }, MATCH_INTRO_MOVE_MS + 150);
     };
-    if (howTo) trackedTimeout(startClock, 700);
-    else startClock();
+    trackedTimeout(startClock, 700);
   }
   function updateMatchIntro() {
     // Without this guard, a call after the tween already finalized (its
@@ -4115,9 +4122,6 @@ export function startGame(opts = {}) {
   // of current parent.
   const HOWTO_STEPS = mobile ? HOWTO_STEPS_MOBILE : HOWTO_STEPS_DESKTOP;
   let howToStep = 0;
-  // Guards onHowToReady (see onHowToAimPhase below) so it only ever fires
-  // once, on the tutorial's very first real frame, not again every round.
-  let howToReadyFired = false;
   // True while the "basic laser" step's preset demo shot is up (see
   // howToStartLaserDemo) — blocks the player from grabbing the stone/stick
   // at all (see onPointerDown/onJoystickDown's own guards), since there's
