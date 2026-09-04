@@ -13,12 +13,20 @@ export const DEFAULT_MATCH_CONFIG = Object.freeze({
   stonesPerTeam: 3,
   pointsToWin: 3,
   turnTime: 30,
+  // Curling only (see game.js's CURLING_CYCLES_PER_POINT/curlingCycle) — how
+  // many manches a point lasts before whichever stone sits closest to center
+  // wins it. Meaningless for hockey (goal/wipeout scoring instead), so
+  // Classic pins this at 2 for every vibe and Custom Settings only surfaces
+  // the row while the curling vibe is active (see index.html's
+  // #csCurlingCyclesRow) — per explicit request, 2 everywhere except Custom.
+  curlingCycles: 2,
 });
 
 export const SKIN_OPTIONS = ['summer', 'winter'];
 export const STONES_OPTIONS = [1, 2, 3];
 export const POINTS_OPTIONS = [1, 2, 3];
 export const TURN_TIME_OPTIONS = [10, 20, 30];
+export const CURLING_CYCLES_OPTIONS = [1, 2, 3];
 
 // Which of the 3 hand-measured rack slots (see game.js's startPositions —
 // index 0/2 are the two outer spots, 1 is the center one, see conversation)
@@ -43,6 +51,7 @@ export function sanitizeMatchConfig(cfg) {
     stonesPerTeam: STONES_OPTIONS.includes(cfg.stonesPerTeam) ? cfg.stonesPerTeam : DEFAULT_MATCH_CONFIG.stonesPerTeam,
     pointsToWin: POINTS_OPTIONS.includes(cfg.pointsToWin) ? cfg.pointsToWin : DEFAULT_MATCH_CONFIG.pointsToWin,
     turnTime: TURN_TIME_OPTIONS.includes(cfg.turnTime) ? cfg.turnTime : DEFAULT_MATCH_CONFIG.turnTime,
+    curlingCycles: CURLING_CYCLES_OPTIONS.includes(cfg.curlingCycles) ? cfg.curlingCycles : DEFAULT_MATCH_CONFIG.curlingCycles,
   };
 }
 

@@ -117,7 +117,20 @@ const ICON_SOUND_OFF = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="
 // `howTo`: skips the score-digit URLs below — the tutorial has no score to
 // show and, per explicit request, doesn't even load those images (see
 // scoreDigitImages in startGame(), also skipped there for howTo).
+//
+// Memoized per (mobile, howTo) pair — main.js now calls this a second time
+// right before every mode's own match-ready wait (see CLAUDE.md), on top of
+// the one-off warm call at page boot. Without caching, that second call
+// built a whole new batch of Image() objects and re-awaited their onload —
+// the network fetch itself was HTTP-cache-instant, but the decode/onload
+// round trip for ~40 images was not, and stacked on top of a Remote Match
+// joiner's already-fresh connect step, it read as the loading screen
+// restarting from scratch. Reusing the same (already-resolved, once the
+// boot call finished) promise makes every later call a no-op.
+const corePreloadCache = new Map();
 export function preloadCoreAssets(mobile = false, howTo = false) {
+  const cacheKey = `${mobile}|${howTo}`;
+  if (corePreloadCache.has(cacheKey)) return corePreloadCache.get(cacheKey);
   const urls = [
     LIGHT_LAYER_SRC,
     mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC,
@@ -148,11 +161,54 @@ export function preloadCoreAssets(mobile = false, howTo = false) {
     getIdenticonCanvasStoneBust(DEFAULT_IDENTICON_ADDRESS.A),
     getIdenticonCanvasStoneBust(DEFAULT_IDENTICON_ADDRESS.B),
   ]).catch(() => {});
-  return Promise.all([loadImages(urls), preloadTicketAssets(), identiconWarmup]);
+  const promise = Promise.all([loadImages(urls), preloadTicketAssets(), identiconWarmup]);
+  corePreloadCache.set(cacheKey, promise);
+  return promise;
 }
 
 export function startGame(opts = {}) {
-  const { net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false, onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, onTurnChange = null, matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null } = opts;
+  // ---- WEEK's own entry points (see src/weekController.js) ----
+  // Five small, mode-agnostic hooks rather than a `weekNet`-shaped object —
+  // game.js never learns "this is WEEK", it only sees "one team aims once"
+  // or "replay these two already-known shots", the same primitives a future
+  // caller other than WEEK could reuse. See weekController.js's own header
+  // for the full design rationale (game.js stays the single engine; WEEK is
+  // pure orchestration on top).
+  //
+  // singleShotTeam ('A'|'B'): restricts aiming to just this team, no
+  // opponent visible — reuses the exact 'lanAim' phase/gating LAN already
+  // has (see firstAimPhase/aimingTeam below), just without a live net
+  // object backing it. No timer semantics change: matchConfig.turnTime
+  // still drives the (purely visual, see matchConfig.js) ring, WEEK simply
+  // passes a value that reads as "never expires".
+  // onShotCommitted(stones, sweep): fired once, from onValidate's new
+  // branch, the moment that team's shot is locked in — game.js does nothing
+  // further afterward (no 'lanWait'-style waiting phase); the caller is
+  // expected to tear the session down (stopGame()) right after receiving
+  // this and continue on its own (message step, send to server, etc).
+  // externalManche {stonesA, sweepA, stonesB, sweepB}: both teams' shots
+  // are already known (a WEEK reveal) — beginAimPhase()'s very first call
+  // skips aiming entirely and applies them via the exact same
+  // pendingVx/Vy + launchSimulation() path the AI branch already uses, so
+  // the manche plays out with completely normal pacing/physics/rendering.
+  // onMancheSettled({scoreA, scoreB, matchOver}): fired once this one
+  // externally-supplied manche has fully resolved AND, if it scored, the
+  // player has dismissed the result panel — see beginAimPhase's own early
+  // return and resolveGoal's isMatchWin branch for the two paths that both
+  // lead here. Never fires more than once per session (externalManche is
+  // only ever a single manche); the caller tears the session down here too.
+  // resumeManches [{stonesA, sweepA, stonesB, sweepB}, ...]: manches
+  // already played earlier in the current (not yet scored) point — silently
+  // fast-forwarded via fastForwardManche() (see the replay engine's own use
+  // of that same function) right after the board's initial reset, so the
+  // very first aim/reveal above starts from the board's real current state
+  // instead of a fresh rack.
+  const {
+    net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false,
+    onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, onTurnChange = null,
+    matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null,
+    singleShotTeam = null, onShotCommitted = null, externalManche = null, onMancheSettled = null, resumeManches = null,
+  } = opts;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
   // default preset; Custom is the same shape with different values. Every
   // caller not yet wired to the Classic/Custom flow (vs AI, replay) simply
@@ -1092,12 +1148,21 @@ export function startGame(opts = {}) {
 
   let scoreA = 0, scoreB = 0;
   let round = 1;
-  // Curling only: a point is 2 full aimA/aimB/reveal cycles (not "however
-  // many until a goal/wipeout", like classic) — bumped in beginStraighten()
-  // each time a manche settles without a goalResult, reset to 0 in
-  // beginRoundReset() (a new point starting). See resolveCurlingPoint below.
-  const CURLING_CYCLES_PER_POINT = 2;
-  let curlingCycle = 0;
+  // Curling only: a point is matchConfig.curlingCycles full aimA/aimB/reveal
+  // cycles (not "however many until a goal/wipeout", like classic) — bumped
+  // in beginStraighten() each time a manche settles without a goalResult,
+  // reset to 0 in beginRoundReset() (a new point starting). See
+  // resolveCurlingPoint below. Classic pins this at 2 (src/matchConfig.js's
+  // own default); Custom Settings can raise it (see conversation — "2
+  // everywhere except Custom").
+  const CURLING_CYCLES_PER_POINT = matchConfig.curlingCycles;
+  // WEEK (see startGame's own resumeManches comment): a fresh session never
+  // starts curlingCycle at 0 by assumption — resumeManches already tells us
+  // how many manches of the current point were already played (possibly in
+  // an earlier session entirely), so the counter picks up from there instead
+  // of silently restarting every point at manche 1. LIVE/Pass&Play/AI/Replay
+  // never pass resumeManches, so this is 0 for them exactly as before.
+  let curlingCycle = resumeManches ? resumeManches.length : 0;
   // Match-ticket stats (see src/ticket.js) — not gameplay state, just tallies
   // for the shareable end-of-match ticket. Reset alongside score/round on Rejouer.
   let matchStartTime = performance.now();
@@ -1120,6 +1185,21 @@ export function startGame(opts = {}) {
   let retractTeam = null;
   let retractStart = 0;
   preloadTicketAssets();
+  // WEEK reveal (see startGame's own externalManche comment) — a session
+  // with externalManche only ever plays that one manche; this distinguishes
+  // beginAimPhase()'s first call (apply + launch it) from its second (the
+  // manche has now settled, report out) without needing a new phase name.
+  let externalMancheConsumed = false;
+  // WEEK reconnect (see startGame's own resumeManches comment) — applied on
+  // beginAimPhase()'s first real call, not eagerly right after
+  // resetPositions() above: fastForwardManche() calls physicsStep(), which
+  // reads module-level consts (e.g. CORNERS) declared further down in this
+  // closure — calling it this early throws a temporal-dead-zone
+  // ReferenceError. beginAimPhase() is always reached later, via
+  // beginMatchIntro()'s own deferred callback, by which point the whole
+  // closure has finished its synchronous setup — same reason net/aiTeam's
+  // own beginMatchIntro() call sites never hit this.
+  let resumeManchesApplied = false;
   let phase = 'start';
   // Visual-only 30s turn timer for the score panel LED bar — resets whenever aiming
   // starts for either team, has no effect on the phase state machine (see turnTimerProgress).
@@ -1222,14 +1302,17 @@ export function startGame(opts = {}) {
   let sweepDrag = null;
   // LAN mode: both teams aim simultaneously ('lanAim'), each client only
   // controls entities[myTeam]; 'lanWait' shows once the local shot is sent,
-  // until the arbiter relays both sides' shots (see src/net.js).
+  // until the arbiter relays both sides' shots (see src/net.js). WEEK's
+  // singleShotTeam reuses this exact same 'lanAim' phase/gating — see
+  // startGame's own singleShotTeam comment — hence the `net || singleShotTeam`
+  // checks below rather than a separate phase name.
   function isAimingPhase(p) { return p === 'aimA' || p === 'aimB' || p === 'lanAim'; }
-  function firstAimPhase() { return net ? 'lanAim' : 'aimA'; }
+  function firstAimPhase() { return (net || singleShotTeam) ? 'lanAim' : 'aimA'; }
   // Which team can currently drag stones/their own sweep patch — null once
   // committed (lanWait/pending/sim/etc.), unlike sweepViewTeam below which
   // stays truthy a bit longer purely for rendering continuity.
   function aimingTeam() {
-    if (net) return phase === 'lanAim' ? myTeam : null;
+    if (net || singleShotTeam) return phase === 'lanAim' ? (myTeam || singleShotTeam) : null;
     if (phase === 'aimA') return 'A';
     if (phase === 'aimB') return 'B';
     return null;
@@ -1237,9 +1320,12 @@ export function startGame(opts = {}) {
   // Same idea, but stays truthy through 'lanWait' too (own screen only, shot
   // already sent) — mirrors exactly which phases renderAimCascade's own laser
   // stays visible through, so the sweep patch disappears at the same moment
-  // the laser does.
+  // the laser does. WEEK's singleShotTeam never actually reaches 'lanWait'
+  // (see onValidate's own singleShotTeam branch — the session ends right at
+  // commit, no waiting phase inside game.js), so checking for it here is
+  // harmless dead weight, not incorrect.
   function sweepViewTeam() {
-    if (net) return (phase === 'lanAim' || phase === 'lanWait') ? myTeam : null;
+    if (net || singleShotTeam) return (phase === 'lanAim' || phase === 'lanWait') ? (myTeam || singleShotTeam) : null;
     return aimingTeam();
   }
   // Solo vs IA: the AI's shots for the coming turn are computed the instant
@@ -1256,6 +1342,29 @@ export function startGame(opts = {}) {
     // is untouched here, it only clears on a real round reset.
     sweep.A.active = false; sweep.A.committed = false;
     sweep.B.active = false; sweep.B.committed = false;
+    // WEEK reconnect — see resumeManchesApplied's own comment above for why
+    // this can't run any earlier than here.
+    if (resumeManches && !resumeManchesApplied) {
+      resumeManchesApplied = true;
+      resumeManches.forEach(fastForwardManche);
+    }
+    // WEEK reveal (see startGame's own externalManche/onMancheSettled
+    // comments) — first call applies the one already-known manche and
+    // launches it with completely normal pacing; the second call (this
+    // manche has now fully settled: either a plain no-goal settle via
+    // tryAdvanceAfterManche, or a scoring settle via resolveGoal's
+    // isMatchWin branch — both funnel back to beginAimPhase() same as every
+    // other mode) reports the outcome instead of continuing to a live aim
+    // phase, which the session has nothing left to play.
+    if (externalManche) {
+      if (!externalMancheConsumed) {
+        externalMancheConsumed = true;
+        applyExternalManche(externalManche);
+      } else {
+        onMancheSettled?.({ scoreA, scoreB, matchOver: scoreA >= WIN_SCORE || scoreB >= WIN_SCORE });
+      }
+      return;
+    }
     if (isReplay) {
       // This is the actual "point N+1 starts here" moment (see onGoal) —
       // the repositioning animation that just finished belonged to the
@@ -1280,11 +1389,14 @@ export function startGame(opts = {}) {
       onHowToAimPhase();
       return;
     }
-    // Pass & Play (two humans sharing one screen, no net/aiTeam): mask the
-    // ice before either team's aim starts — see startHandoff/completeHandoff
-    // above. The whistle/turn-timer-start that used to happen right here now
-    // fire once the mask actually lifts into 'aimA', not at this point.
-    if (!net && !aiTeam) {
+    // Pass & Play (two humans sharing one screen, no net/aiTeam/singleShotTeam):
+    // mask the ice before either team's aim starts — see startHandoff/
+    // completeHandoff above. The whistle/turn-timer-start that used to happen
+    // right here now fire once the mask actually lifts into 'aimA', not at
+    // this point. WEEK's singleShotTeam also has no net/aiTeam but must skip
+    // this — there's only one device/one team here, a hand-off mask makes no
+    // sense (see firstAimPhase(), which already sends it straight to 'lanAim').
+    if (!net && !aiTeam && !singleShotTeam) {
       phase = 'handoffA';
       startHandoff(fromMatchIntro);
       return;
@@ -1307,6 +1419,30 @@ export function startGame(opts = {}) {
     turnTimerStart = performance.now();
     turnTimerPhase = phase;
     if (aiTeam) prepareAiShots();
+  }
+  // WEEK reveal (see beginAimPhase's own externalManche branch) — applies
+  // both teams' already-known shots and launches them, same shape as the AI
+  // branch of onValidate() (pendingVx/Vy + phase='pending' + launchSimulation
+  // after PRE_SIM_DELAY) plus the sweep-application from net.onLaunch, minus
+  // everything network-specific from either (no mancheValidated/sync-check —
+  // there's no second live client here to validate against).
+  function applyExternalManche(manche) {
+    entities.A.forEach((g, i) => {
+      const s = manche.stonesA[i];
+      g.pendingVx = s ? s.vx : 0; g.pendingVy = s ? s.vy : 0; g.used = !!(s && s.used);
+    });
+    entities.B.forEach((g, i) => {
+      const s = manche.stonesB[i];
+      g.pendingVx = s ? s.vx : 0; g.pendingVy = s ? s.vy : 0; g.used = !!(s && s.used);
+    });
+    sweep.A.active = !!manche.sweepA; sweep.A.committed = !!manche.sweepA;
+    if (manche.sweepA) { sweep.A.x = manche.sweepA.x; sweep.A.y = manche.sweepA.y; sweep.A.r = manche.sweepA.r; sweep.A.used = true; }
+    sweep.B.active = !!manche.sweepB; sweep.B.committed = !!manche.sweepB;
+    if (manche.sweepB) { sweep.B.x = manche.sweepB.x; sweep.B.y = manche.sweepB.y; sweep.B.r = manche.sweepB.r; sweep.B.used = true; }
+    phase = 'pending';
+    playLaunchEngine();
+    scheduleGlideLeadIn(PRE_SIM_DELAY);
+    trackedTimeout(launchSimulation, PRE_SIM_DELAY);
   }
   // ---------- Replay playback (auto-feeds recorded shots, see src/recorder.js
   // and src/replay.js) ----------
@@ -2348,6 +2484,19 @@ export function startGame(opts = {}) {
       }, LAN_WAIT_TIMEOUT_MS);
       return;
     }
+    // WEEK (see startGame's own singleShotTeam comment): same commit shape
+    // as the LAN branch just above, minus everything network-specific
+    // (sendShots, 'lanWait', the dead-end watchdog) — the session simply
+    // ends here, the caller (weekController.js) is expected to tear it down
+    // right after receiving onShotCommitted and continue on its own.
+    if (singleShotTeam) {
+      if (phase !== 'lanAim') return;
+      const stones = entities[singleShotTeam].map(g => ({ vx: g.pendingVx || 0, vy: g.pendingVy || 0, used: g.used }));
+      commitSweep(singleShotTeam);
+      const sw = sweep[singleShotTeam];
+      onShotCommitted?.(stones, sw.active ? { x: sw.x, y: sw.y, r: sw.r } : null);
+      return;
+    }
     if (aiTeam) {
       if (phase !== 'aimA') return;
       // Reveal: the AI's shots were already decided in prepareAiShots() at
@@ -2669,6 +2818,13 @@ export function startGame(opts = {}) {
       showReplayBar();
       beginAimPhase();
     };
+  } else if (singleShotTeam || externalManche) {
+    // WEEK (see startGame's own singleShotTeam/externalManche comments): no
+    // ready-tap lobby needed, same reasoning as the aiTeam branch above —
+    // there's only ever one viewer for a WEEK session, nothing to wait on.
+    startOverlay.classList.add('hidden');
+    controlsEnabled = true;
+    beginMatchIntro();
   }
 
   // ---------- Physics ----------
@@ -3524,10 +3680,21 @@ export function startGame(opts = {}) {
         return;
       }
       const isMatchWin = scoreA >= WIN_SCORE || scoreB >= WIN_SCORE;
-      if (isMatchWin) {
+      // WEEK reveal (see beginAimPhase's own externalManche branch): the
+      // shareable ticket showVictory() builds assumes one continuous match
+      // session recording every point (src/recorder.js) — a WEEK session
+      // only ever plays the one manche it was given, so there's no match
+      // history here for a ticket to summarize. Falls through to the exact
+      // same +1-panel path a non-winning goal already takes instead: the
+      // player still sees the goal settle and dismisses a result panel (see
+      // showGoalPanel — round++ skipped since the match is actually over),
+      // which is what lets beginAimPhase()'s own externalManche branch (via
+      // maybeAdvanceRound() below) report the final score back out once
+      // they've dismissed it, same as any other WEEK manche outcome.
+      if (isMatchWin && !externalManche) {
         showVictory();
       } else {
-        round++;
+        if (!isMatchWin) round++;
         // Both fire at once and run independently: beginRoundReset() keeps its
         // existing timing/animation untouched, the panel just sits on top of it
         // (mostly hiding it, same #overlay backdrop as any other dialog here).
@@ -6617,8 +6784,10 @@ export function startGame(opts = {}) {
     else if (phase === 'aimB') drawAimLaser('B');
     // lanWait too: local shot is locked in but stays visible as feedback
     // while waiting on the opponent, instead of vanishing the instant PLAY
-    // is pressed.
-    else if (phase === 'lanAim' || phase === 'lanWait') drawAimLaser(myTeam);
+    // is pressed. sweepViewTeam() (not raw myTeam) — see that function's own
+    // comment, it was built to mirror exactly this phase set; myTeam alone
+    // breaks WEEK's singleShotTeam sessions, which have no myTeam at all.
+    else if (phase === 'lanAim' || phase === 'lanWait') drawAimLaser(sweepViewTeam());
     // Reveal just started: keep drawing the just-committed team's laser
     // while it retracts into its stones (see playLaunchEngine/retractTeam) —
     // renderAimCascade/renderBasicLaser themselves shrink it frame by frame.

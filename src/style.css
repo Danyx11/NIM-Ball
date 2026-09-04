@@ -2222,6 +2222,60 @@ button:disabled { opacity: 0.35; cursor: default; }
 #vibeSubOverlay.mode-curling .half.a .mode-icon,
 #vibeSubOverlay.mode-curling .half.e .mode-icon { color: var(--bg-deep); }
 
+/* LIVE/WEEK picker (#remoteModeOverlay, see index.html/main.js) — one level
+   deeper than #vibeSubOverlay, same .mode-drawer/.half markup and the exact
+   same "retint both tiles to the active vibe" treatment as #vibeSubOverlay
+   above, just duplicated onto this element (its own class, not merged into
+   the #vibeSubOverlay selectors) since the two overlays are shown/hidden
+   independently. Base positioning/sizing copied verbatim from #vibeSubOverlay
+   above (same sibling-of-#modeOverlay/z-index-4 reasoning — see that rule's
+   own comment) since it's a plain block element otherwise, sized to its
+   content instead of filling the shared quadrant footprint. */
+#remoteModeOverlay {
+  position: absolute; inset: 6%;
+  display: flex; flex-direction: column;
+  z-index: 4;
+}
+#remoteModeOverlay.hidden { display: none; }
+.mobile-layout #remoteModeOverlay { left: 3%; right: calc(var(--controller-reserved-w) + 3%); }
+#remoteModeOverlay .mode-drawer {
+  position: relative; inset: auto; flex: 1; min-height: 0;
+  grid-template-rows: 1fr;
+}
+#remoteModeLive, #remoteModeWeek { position: relative; }
+#remoteModeWeek .config-back { top: 14px; right: 14px; }
+#remoteModeOverlay.mode-hockey .half.a,
+#remoteModeOverlay.mode-hockey .half.e {
+  background: rgba(5, 130, 202, 0.72);
+  color: var(--ink);
+}
+#remoteModeOverlay.mode-hockey .half.e .sub { color: rgba(255,255,255,0.85); }
+#remoteModeOverlay.mode-hockey .half.e .mode-icon { color: rgba(255,255,255,0.92); }
+#remoteModeOverlay.mode-curling .half.a,
+#remoteModeOverlay.mode-curling .half.e {
+  background: rgba(233, 178, 19, 0.72);
+  color: var(--bg-deep);
+}
+#remoteModeOverlay.mode-curling .half.a .sub,
+#remoteModeOverlay.mode-curling .half.e .sub { color: rgba(11,31,42,0.75); }
+#remoteModeOverlay.mode-curling .half.a .mode-icon,
+#remoteModeOverlay.mode-curling .half.e .mode-icon { color: var(--bg-deep); }
+#remoteModeOverlay.mode-curling #remoteModeWeek .config-back { color: var(--bg-deep); }
+/* Wallet gate note (index.html's #weekWalletGate) replaces the WEEK tile's
+   normal .sub line when getIdentity().type === 'guest' (main.js) — same
+   type treatment as .sub, just its own id so JS can toggle the two without
+   fighting a shared class. Clickable (main.js wires it to the same connect
+   flow as the sidebar identity pill) — cursor/underline hint at that. */
+#weekWalletGate { cursor: pointer; }
+#weekWalletGate .sub { text-decoration: underline; text-underline-offset: 2px; }
+/* This file has no global `.hidden{display:none}` utility — every hideable
+   element gets its own explicit rule (see e.g. #howToOverlay.hidden above,
+   or the git-history comment at .mc-icon-overlay.hidden: toggling the class
+   alone does nothing without one). These two are new elements, so they need
+   their own pair, same as every other one here. */
+#weekWalletGate.hidden { display: none; }
+#remoteModeWeekSub.hidden { display: none; }
+
 /* ---- Classic/Custom + Custom Settings screens (see main.js) — shown after
    Pass & Play / Remote Match is picked from #modeOverlay above, never for
    vs AI. Left 3/4 of #game-card, same reasoning/technique as #overlay and
@@ -2292,6 +2346,11 @@ button:disabled { opacity: 0.35; cursor: default; }
    own fixed tint instead, the same Nimiq Green as its own tile
    (#modeOverlay .half.d above). */
 .config-panel.mode-joincode { background: rgba(33, 188, 165, 0.55); }
+/* "My Matches" (#myMatchesOverlay, see index.html/main.js) isn't tied to a
+   vibe either (it lists WEEK matches across both games) — Nimiq Blue, the
+   one brand color not already used by another .config-panel tint, reading
+   as neutral/profile rather than a specific game mode. */
+.config-panel.mode-week { background: rgba(31, 35, 72, 0.55); }
 /* Small entrance every time ANY of these menu panels opens (Classic/Custom,
    Custom Settings, Remote Match's 3 sub-screens, the connect gate) — one
    shared rule/keyframe rather than one per screen, since they're all the
@@ -2427,6 +2486,12 @@ button:disabled { opacity: 0.35; cursor: default; }
 #customSettingsOverlay:not(.hidden) .config-row:nth-child(2) { animation-delay: 135ms; }
 #customSettingsOverlay:not(.hidden) .config-row:nth-child(3) { animation-delay: 180ms; }
 #customSettingsOverlay:not(.hidden) .config-row:nth-child(4) { animation-delay: 225ms; }
+#customSettingsOverlay:not(.hidden) .config-row:nth-child(5) { animation-delay: 270ms; }
+/* Curling-only rows (see index.html's #csCurlingCyclesRow) — hidden while
+   the panel isn't tinted for curling (fillModeHeader sets mode-hockey/
+   mode-curling on this same element based on activeVibe), so hockey's
+   Custom Settings never shows a control for a rule hockey doesn't have. */
+.config-panel:not(.mode-curling) .curling-only { display: none; }
 
 /* Dedicated, much bigger gabarit for the whole How-to flow (Hub + both
    rules panels, see conversation — "quasi tout l'espace de l'arène") —

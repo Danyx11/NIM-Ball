@@ -10,11 +10,12 @@ import '@fontsource/mulish/800.css';
 // identity pill's address line (see style.css's #connectBtnLabel).
 import '@fontsource/fira-mono/500.css';
 import { startGame, preloadCoreAssets } from './game.js';
+import { playSingleShot, playReveal } from './weekController.js';
 import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendClaimTransaction } from './nimiq.js';
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets } from './background.js';
-import { connectLan, connectMatch } from './net.js';
+import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, fetchMyWeekMatches } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
@@ -219,7 +220,7 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
   // Mobile keeps its existing behavior untouched (still #game-card children)
   // — #menuStage isn't part of mobile's layout yet.
   const menuHost = IS_MOBILE ? gameCard : document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'remoteModeOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'myMatchesOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -1047,6 +1048,60 @@ modeCurling.addEventListener('click', () => { audio.play('button'); showVibeDraw
 // back.
 vibeBackBtn.addEventListener('click', (e) => { e.stopPropagation(); audio.play('button'); showModeDrawer(); });
 
+// ---- LIVE/WEEK picker (see WEEK design conversation) — one level deeper
+// than the vibe sub-drawer above, reached by tapping REMOTE MATCH there
+// instead of going straight to Classic/Custom (see modeMatch's own click
+// handler further down). Same tile-drawer language/tinting as
+// #vibeSubOverlay, just its own element (index.html's #remoteModeOverlay) so
+// the two can be shown/hidden independently.
+const remoteModeOverlay = document.getElementById('remoteModeOverlay');
+const remoteModeLive = document.getElementById('remoteModeLive');
+const remoteModeWeek = document.getElementById('remoteModeWeek');
+const remoteModeBackBtn = document.getElementById('remoteModeBackBtn');
+const weekWalletGate = document.getElementById('weekWalletGate');
+const remoteModeWeekSub = document.getElementById('remoteModeWeekSub');
+function showRemoteModeDrawer() {
+  remoteModeOverlay.classList.remove('mode-hockey', 'mode-curling');
+  remoteModeOverlay.classList.add(vibeTintClass());
+  vibeSubOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  remoteModeOverlay.classList.remove('hidden');
+  // Re-checked every time this screen opens (not just once) — connecting a
+  // wallet elsewhere (the sidebar identity pill, the earlier connect gate)
+  // shouldn't leave a stale gate note showing here.
+  const isGuest = !hubAddress;
+  weekWalletGate.classList.toggle('hidden', !isGuest);
+  remoteModeWeekSub.classList.toggle('hidden', isGuest);
+}
+remoteModeLive.addEventListener('click', () => { audio.play('button'); showCreateMatchScreen(); });
+remoteModeWeek.addEventListener('click', () => {
+  audio.play('button');
+  if (!hubAddress) return; // wallet gate note is already showing — see showRemoteModeDrawer
+  showCreateWeekMatchScreen();
+});
+// Tapping the gate note itself connects (same flow as the sidebar identity
+// pill / connect gate's own CONNECT button, see connectIdentity() below) —
+// stopPropagation so it doesn't also trigger #remoteModeWeek's own "enter
+// WEEK" click right after connecting succeeds.
+weekWalletGate.addEventListener('click', (e) => {
+  e.stopPropagation();
+  audio.play('button');
+  connectIdentity()
+    .then((address) => {
+      hubAddress = address;
+      syncIdentityPill();
+      weekWalletGate.classList.add('hidden');
+      remoteModeWeekSub.classList.remove('hidden');
+    })
+    .catch(() => {}); // cancelled/failed — stay on this screen, gate note still showing
+});
+remoteModeBackBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  audio.play('button');
+  remoteModeOverlay.classList.add('hidden');
+  showVibeDrawer(activeVibe);
+});
+
 // ---- Curling: tiles/menus are live (see conversation), the actual match
 // engine isn't plugged in yet — every path that would otherwise call
 // startGame()/hostMatch() lands here instead. Its own small .config-panel
@@ -1348,13 +1403,20 @@ function showClassicCustomScreen(mode, launch, goBack, errorMsg) {
     showCustomSettingsScreen(mode, getCustomConfig(mode));
   };
 }
-// Remote Match's own entry point (see conversation): straight into Classic/
-// Custom now, no Create/Join choice in between — this screen IS "create"
-// for Remote (Join lives entirely on the separate #modeJoinCode tile).
-// Reused as the retry target on a connection failure too (hostMatch's catch,
-// showMatchHostWaitingScreen's onDisconnect/onLost below).
+// Remote Match / LIVE's own entry point: straight into Classic/Custom, no
+// Create/Join choice in between — this screen IS "create" for LIVE (Join
+// lives entirely on the separate #modeJoinCode tile). Reused as the retry
+// target on a connection failure too (hostMatch's catch,
+// showMatchHostWaitingScreen's onDisconnect/onLost below). Back now returns
+// to the LIVE/WEEK picker (one more step was inserted above it, see
+// showRemoteModeDrawer) instead of straight to the vibe drawer.
 function showCreateMatchScreen(errorMsg) {
-  showClassicCustomScreen('remote', (config) => hostMatch(config), () => showVibeDrawer(activeVibe), errorMsg);
+  showClassicCustomScreen('remote', (config) => hostMatch(config), () => showRemoteModeDrawer(), errorMsg);
+}
+// WEEK's own entry point — same Classic/Custom screen, routed to
+// hostWeekMatch() instead of hostMatch(), Back also to the LIVE/WEEK picker.
+function showCreateWeekMatchScreen(errorMsg) {
+  showClassicCustomScreen('remote', (config) => hostWeekMatch(config), () => showRemoteModeDrawer(), errorMsg);
 }
 
 ccBackBtn.addEventListener('click', () => {
@@ -1563,7 +1625,7 @@ modeLocal.addEventListener('click', () => {
 modeMatch.addEventListener('click', () => {
   audio.play('button');
   modeOverlay.classList.add('hidden');
-  showCreateMatchScreen();
+  showRemoteModeDrawer();
 });
 
 // Solo vs IA: only one human, controlling team A — no ready-tap lobby needed
@@ -1651,7 +1713,7 @@ function showJoinCodeScreen(errorMsg) {
   input.addEventListener('input', () => {
     input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
   });
-  joinBtn.onclick = () => { audio.play('button'); joinMatch(input.value, joinBtn, showJoinCodeScreen); };
+  joinBtn.onclick = () => { audio.play('button'); joinWithCode(input.value, joinBtn, showJoinCodeScreen); };
   joinCodeOverlay.classList.remove('hidden');
 }
 modeJoinCode.addEventListener('click', () => { audio.play('button'); showJoinCodeScreen(); });
@@ -2266,11 +2328,87 @@ function showMatchHostWaitingScreen(net, code, matchConfig) {
   net.onDisconnect(() => { hostedRoomNet = null; showCreateMatchScreen('The other player disconnected.'); });
 }
 
+// WEEK's own creation flow (party/weekArbiter.js) — no "waiting for
+// opponent" live screen the way LIVE's showMatchHostWaitingScreen has: WEEK
+// never holds a connection open hoping for a push (see the WEEK design
+// conversation), so once the code exists there is nothing left to wait for
+// here — the player can share it and leave immediately, and reconnecting
+// later (Join with a code, or My Matches once B has joined) is exactly the
+// same "connect, get current state" path a fresh join would take.
+async function hostWeekMatch(matchConfig) {
+  let code = generateMatchCode();
+  showLoadingOverlay();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const week = await createWeekMatch(code, hubAddress, activeVibe, matchConfig);
+      hideLoadingOverlay();
+      showWeekCreatedScreen(week);
+      return;
+    } catch (err) {
+      if (err.reason === 'occupied' && attempt < 4) { code = generateMatchCode(); continue; }
+      hideLoadingOverlay();
+      showCreateWeekMatchScreen(err.message);
+      return;
+    }
+  }
+}
+
+function showWeekCreatedScreen(week) {
+  const cls = week.team === 'A' ? 'a' : 'b';
+  const teamLabel = week.team === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
+  showNetPanel(`
+    <span class="team-pill ${cls}">${teamLabel}</span>
+    <h2>Challenge created</h2>
+    <div class="match-code">${week.code}</div>
+    <p>Share this code. Your opponent has 24h to join — once they do, you'll both have 7 days to finish the match.</p>
+    <button class="bigbtn" id="weekCreatedDoneBtn">Done</button>
+  `);
+  week.close();
+  document.getElementById('weekCreatedDoneBtn').addEventListener('click', () => {
+    audio.play('button');
+    hideNetPanel();
+    showVibeDrawer(activeVibe);
+  });
+}
+
 // retryScreen: where an error (bad code, connect failure) or a later
 // disconnect sends the player back to re-enter a code — "Join with a code"
 // (see conversation) is the only caller left now that Remote Match's own
 // in-flow Join screen is gone, so it always passes its own
 // showJoinCodeScreen to retry in place.
+// "Join with a code" (index.html's #modeJoinCode/#joinCodeOverlay) now
+// covers both LIVE and WEEK from the one code field (see the WEEK design
+// conversation, point 18 of the brief) — tries WEEK first (only when a
+// wallet is connected, since WEEK has no guests) and falls through to the
+// existing LIVE joinMatch() below on a genuine "no such WEEK match" miss.
+// This order, not the reverse, is required: LIVE's own Arbiter has no
+// concept of "this room doesn't exist yet" (see party/arbiter.js's
+// onConnect — literally any code silently becomes a brand new empty LIVE
+// room on first connect), so trying LIVE first on a WEEK-only code would
+// "succeed" into a bogus empty room instead of ever reaching WEEK.
+// WEEK-specific failures (expired/full/limit reached) are shown as-is, not
+// silently retried against LIVE — the code IS a WEEK code in that case,
+// just currently unusable.
+async function joinWithCode(code, joinBtn, retryScreen) {
+  if (code.length !== 4) return;
+  if (hubAddress) {
+    if (joinBtn) joinBtn.disabled = true;
+    showLoadingOverlay();
+    try {
+      const week = await joinWeekMatch(code, hubAddress);
+      hideLoadingOverlay();
+      enterWeekMatch(week);
+      return;
+    } catch (err) {
+      hideLoadingOverlay();
+      if (joinBtn) joinBtn.disabled = false;
+      if (err.reason !== 'notFound') { retryScreen(err.message); return; }
+      // fall through to LIVE below
+    }
+  }
+  return joinMatch(code, joinBtn, retryScreen);
+}
+
 async function joinMatch(code, joinBtn, retryScreen) {
   if (code.length !== 4) return;
   if (joinBtn) joinBtn.disabled = true;
@@ -2302,6 +2440,247 @@ async function joinMatch(code, joinBtn, retryScreen) {
     retryScreen(err.message);
   }
 }
+
+// ---- WEEK in-match hand-off (party/weekArbiter.js) — routes a freshly
+// connected/reconnected `week` handle (see net.js's createWeekMatch/
+// joinWeekMatch) to whichever screen matches its current state. Called both
+// right after joining/creating and from My Matches (showMyMatchesScreen) —
+// same entry point either way, since a WEEK connection is always "connect,
+// then render whatever the snapshot says" (see the WEEK design conversation
+// — no live push to react to instead).
+function formatTimeLeft(ts) {
+  const ms = ts - Date.now();
+  if (ms <= 0) return 'less than a minute';
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours < 1) return `${Math.max(1, Math.floor(ms / 60_000))}m`;
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+function enterWeekMatch(week) {
+  hideLobby();
+  // Same bug/fix as showLobby()'s own joinCodeOverlay.classList.add('hidden')
+  // above: reachable from "Join with a code" (joinWithCode -> joinWeekMatch)
+  // just like LIVE's joinMatch() is, and this panel never hides itself
+  // before handing off — without this it sits on top of every WEEK screen
+  // below, fully obscuring them, exactly the historic LIVE bug documented
+  // on showLobby(). Only needs doing once, here, since nothing downstream in
+  // the WEEK flow ever re-shows it.
+  joinCodeOverlay.classList.add('hidden');
+  if (week.status === 'expired') {
+    week.close();
+    showNetPanel(`<h2>Challenge expired</h2><p>This WEEK match is no longer active.</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
+    document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
+    return;
+  }
+  if (week.status === 'completed') {
+    week.close();
+    showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${week.scoreA} · Team Yellow ${week.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
+    document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
+    return;
+  }
+  if (week.status === 'pending') {
+    // Only reachable by reconnecting as A while B hasn't joined yet (e.g.
+    // via My Matches) — same code screen as creation, still nothing to wait
+    // on live for.
+    week.close();
+    const cls = week.team === 'A' ? 'a' : 'b';
+    const teamLabel = week.team === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
+    showNetPanel(`
+      <span class="team-pill ${cls}">${teamLabel}</span>
+      <h2>Waiting for opponent</h2>
+      <div class="match-code">${week.code}</div>
+      <p>They have ${formatTimeLeft(week.joinDeadline)} left to join.</p>
+      <button class="bigbtn" id="weekDoneBtn">OK</button>
+    `);
+    document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); showVibeDrawer(activeVibe); });
+    return;
+  }
+  // status === 'active'
+  if (week.reveal) { showWeekRevealScreen(week); return; }
+  if (week.mySubmitted) {
+    week.close();
+    showNetPanel(`<h2>Your shot is on the ice.</h2><p>Wait for your opponent.</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
+    document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
+    return;
+  }
+  showWeekAimScreen(week);
+}
+
+// Merges a fresh server reply (WeekArbiter's 'connected'/'shotAccepted'/
+// 'roundCompleted', all built from the same snapshotFor()) onto an existing
+// `week` handle — the reply carries every match-state field but not the
+// handle's own methods (sendShot/completeRound/close), so a plain spread
+// keeps those while replacing the state with what the server just sent.
+function mergeWeek(week, snapshot) { return { ...week, ...snapshot }; }
+
+// "Your turn" — game.js's own aim UI (see src/weekController.js's
+// playSingleShot, which reuses the exact 'lanAim' phase LAN already has, no
+// timer, no phase-machine changes beyond the 5 hooks documented in
+// startGame()) runs until the local player commits a shot, then this hands
+// straight to the message/skip step — never a separate confirmation screen
+// in between, matching the brief's "shot validé -> LEAVE A MESSAGE" flow.
+async function showWeekAimScreen(week) {
+  hideNetPanel();
+  // Same bug/fix as showLobby()'s own modeOverlay.classList.add('hidden')
+  // (see that function's own comment) — #modeOverlay's arena-illustration
+  // backdrop sits at z-index 3, above #game-card's z-index 1, so without
+  // this the actual match renders correctly underneath but stays fully
+  // hidden behind it. Every other startGame() call site in this file
+  // already does this right before showToolbar(); this one just needs the
+  // same explicit call.
+  modeOverlay.classList.add('hidden');
+  showLoadingOverlay();
+  showToolbar();
+  activeMatchMode = 'week';
+  await preloadCoreAssets(IS_MOBILE);
+  const { stones, sweep } = await playSingleShot(week, {
+    ...rockHandlers, mobile: IS_MOBILE,
+    identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
+    onMatchReady: hideLoadingOverlay,
+  });
+  hideMatchChrome();
+  showWeekMessageScreen(week, stones, sweep);
+}
+
+// "Leave a message / Skip" — optional, short, attached to this one shot
+// (not a running chat, see the WEEK design conversation). Either action
+// submits the same way; SKIP just sends an empty string.
+function showWeekMessageScreen(week, stones, sweep) {
+  showNetPanel(`
+    <h2>Leave a message</h2>
+    <p>Optional — shown to your opponent alongside the reveal.</p>
+    <input id="weekMessageInput" type="text" maxlength="60" placeholder="Good luck…" autocomplete="off" />
+    <button class="bigbtn" id="weekMessageSendBtn">Send</button>
+    <button class="bigbtn" id="weekMessageSkipBtn">Skip</button>
+  `);
+  const submit = async (message) => {
+    hideNetPanel();
+    showLoadingOverlay();
+    try {
+      const snapshot = await week.sendShot(stones, sweep, message);
+      hideLoadingOverlay();
+      enterWeekMatch(mergeWeek(week, snapshot));
+    } catch (err) {
+      hideLoadingOverlay();
+      week.close();
+      showWeekErrorScreen(err.message);
+    }
+  };
+  document.getElementById('weekMessageSendBtn').addEventListener('click', () => {
+    audio.play('button');
+    submit(document.getElementById('weekMessageInput').value.trim());
+  });
+  document.getElementById('weekMessageSkipBtn').addEventListener('click', () => { audio.play('button'); submit(''); });
+}
+
+// "Watch the reveal" — both shots (and messages) are already in. Shows them
+// up front (per the brief: tension/anticipation before the reveal itself),
+// then a manual tap hands off into src/weekController.js's playReveal
+// (reuses launchSimulation() exactly as the AI branch does — completely
+// normal pacing, no auto-play on arrival, see the WEEK design conversation
+// on why this is never pushed live even if both players happen to be
+// online at once).
+function showWeekRevealScreen(week) {
+  showNetPanel(`
+    <h2>Watch the reveal</h2>
+    ${week.reveal.mine.message ? `<p>You: ${escapeHtml(week.reveal.mine.message)}</p>` : ''}
+    ${week.reveal.opponent.message ? `<p>Opponent: ${escapeHtml(week.reveal.opponent.message)}</p>` : ''}
+    <button class="bigbtn" id="weekRevealBtn">Watch the reveal</button>
+  `);
+  document.getElementById('weekRevealBtn').addEventListener('click', async () => {
+    audio.play('button');
+    hideNetPanel();
+    // See showWeekAimScreen's own comment on this same line.
+    modeOverlay.classList.add('hidden');
+    showLoadingOverlay();
+    showToolbar();
+    activeMatchMode = 'week';
+    await preloadCoreAssets(IS_MOBILE);
+    const result = await playReveal(week, {
+      ...rockHandlers, mobile: IS_MOBILE,
+      identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
+      onMatchReady: hideLoadingOverlay,
+    });
+    hideMatchChrome();
+    showLoadingOverlay();
+    try {
+      const snapshot = await week.completeRound(result.scoreA, result.scoreB, result.manche);
+      hideLoadingOverlay();
+      if (result.matchOver) {
+        week.close();
+        showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${result.scoreA} · Team Yellow ${result.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
+        document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
+      } else {
+        // Brief result beat before chaining into whatever's next (almost
+        // always this same player's next aim, see enterWeekMatch — both
+        // pendingShots were just cleared server-side) rather than jumping
+        // straight back into another live aim session with no transition.
+        showNetPanel(`<h2>Round complete</h2><p>Score — Team Blue ${result.scoreA} · Team Yellow ${result.scoreB}</p><button class="bigbtn" id="weekContinueBtn">Continue</button>`);
+        document.getElementById('weekContinueBtn').addEventListener('click', () => {
+          audio.play('button');
+          enterWeekMatch(mergeWeek(week, snapshot));
+        });
+      }
+    } catch (err) {
+      hideLoadingOverlay();
+      week.close();
+      showWeekErrorScreen(err.message);
+    }
+  });
+}
+
+function showWeekErrorScreen(message) {
+  showNetPanel(`<p class="lan-error">${escapeHtml(message)}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
+  document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
+}
+
+function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+// ---- My Matches (party/playerIndex.js) — a UX shortcut back into an
+// existing WEEK match, reached from the sidebar (#navMyMatches), never a
+// substitute for the code itself (see conversation, point 12 of the brief).
+const myMatchesOverlay = document.getElementById('myMatchesOverlay');
+const myMatchesBackBtn = document.getElementById('myMatchesBackBtn');
+const myMatchesContent = document.getElementById('myMatchesContent');
+const TURN_LABELS = { yourTurn: 'Your turn', waiting: 'Waiting for opponent', revealReady: 'Reveal ready', pending: 'Waiting for opponent to join', expired: 'Expired', completed: 'Finished' };
+async function showMyMatchesScreen() {
+  hideMatchChrome();
+  modeOverlay.classList.add('hidden');
+  myMatchesContent.innerHTML = '<p>Loading…</p>';
+  myMatchesOverlay.classList.remove('hidden');
+  if (!hubAddress) {
+    myMatchesContent.innerHTML = '<p>Connect your Nimiq wallet to see your WEEK matches.</p>';
+    return;
+  }
+  const matches = await fetchMyWeekMatches(hubAddress);
+  const codes = Object.keys(matches);
+  if (!codes.length) {
+    myMatchesContent.innerHTML = '<p>No WEEK matches in progress.</p>';
+    return;
+  }
+  myMatchesContent.innerHTML = codes.map((code) => {
+    const m = matches[code];
+    const opp = m.opponentAddress ? shortenAddressCompact(m.opponentAddress) : 'opponent';
+    return `<button class="config-preset-btn" data-code="${code}"><div class="config-preset-name">vs ${opp}</div><div class="config-preset-sub">${TURN_LABELS[m.turnLabel] || m.turnLabel || ''}</div></button>`;
+  }).join('');
+  myMatchesContent.querySelectorAll('[data-code]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      audio.play('button');
+      showLoadingOverlay();
+      try {
+        const week = await joinWeekMatch(btn.dataset.code, hubAddress);
+        hideLoadingOverlay();
+        myMatchesOverlay.classList.add('hidden');
+        enterWeekMatch(week);
+      } catch (err) {
+        hideLoadingOverlay();
+        myMatchesContent.innerHTML = `<p class="lan-error">${err.message}</p>`;
+      }
+    });
+  });
+}
+document.getElementById('navMyMatches').addEventListener('click', () => { audio.play('button'); showMyMatchesScreen(); });
+myMatchesBackBtn.addEventListener('click', () => { audio.play('button'); myMatchesOverlay.classList.add('hidden'); returnToModeSelect(); });
 
 // ---- Title/splash screen (see index.html's #homeOverlay comment) — the
 // very first thing a normal (non-magic-link) entry sees, above even the
