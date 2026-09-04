@@ -15,7 +15,7 @@ import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, se
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets } from './background.js';
-import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, fetchMyWeekMatches } from './net.js';
+import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, fetchMyWeekMatches, dismissWeekMatch } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
@@ -2704,14 +2704,23 @@ async function showMyMatchesScreen() {
   // plain wrapper div holds the resume button (.config-preset-btn, existing
   // behavior) and the trash icon (abandon, see conversation: added once the
   // 2-active-matches cap started blocking testing with no way out of a
-  // stuck/unwanted match) side by side.
+  // stuck/unwanted match) side by side. An 'abandoned' row (the OTHER
+  // player left, see party/weekArbiter.js's own abandon handler) renders
+  // that same resume slot as a plain grayed-out div instead — no data-code
+  // on it, so it never picks up the resume click handler below, and nothing
+  // to resume anyway (the match is already terminal) — only the trash icon
+  // stays live, to dismiss the notification.
   myMatchesContent.innerHTML = codes.map((code) => {
     const m = matches[code];
     const opp = m.opponentAddress ? shortenAddressCompact(m.opponentAddress) : 'opponent';
+    const left = m.status === 'abandoned';
+    const resumeEl = left
+      ? `<div class="config-preset-btn week-match-gone"><div class="config-preset-name">vs ${opp}</div><div class="config-preset-sub">Your opponent has left this game</div></div>`
+      : `<button class="config-preset-btn" data-code="${code}"><div class="config-preset-name">vs ${opp}</div><div class="config-preset-sub">${TURN_LABELS[m.turnLabel] || m.turnLabel || ''}</div></button>`;
     return `
       <div class="week-match-row">
-        <button class="config-preset-btn" data-code="${code}"><div class="config-preset-name">vs ${opp}</div><div class="config-preset-sub">${TURN_LABELS[m.turnLabel] || m.turnLabel || ''}</div></button>
-        <button class="week-match-abandon" data-code="${code}" type="button" aria-label="Abandon match">
+        ${resumeEl}
+        <button class="week-match-abandon" data-code="${code}" data-left="${left}" type="button" aria-label="${left ? 'Dismiss' : 'Abandon match'}">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
         </button>
       </div>`;
@@ -2734,17 +2743,27 @@ async function showMyMatchesScreen() {
   myMatchesContent.querySelectorAll('.week-match-abandon[data-code]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       audio.play('button');
+      const code = btn.dataset.code;
+      // Already gone from this player's own side (the opponent left first,
+      // see the resumeEl branch above) — nothing to coordinate with the
+      // match itself anymore, just clear this player's own notification
+      // (party/playerIndex.js's DELETE, see net.js's dismissWeekMatch).
+      if (btn.dataset.left === 'true') {
+        await dismissWeekMatch(hubAddress, code);
+        showMyMatchesScreen();
+        return;
+      }
       if (!confirm('Abandon this match? This cannot be undone.')) return;
       showLoadingOverlay();
       try {
-        const week = await joinWeekMatch(btn.dataset.code, hubAddress);
+        const week = await joinWeekMatch(code, hubAddress);
         await week.abandon();
         week.close();
       } catch (err) {
-        // Already gone (expired/completed/abandoned elsewhere) reads the
-        // same as a successful abandon here — either way it shouldn't show
-        // in the list anymore, so just refresh rather than surfacing an
-        // error for what the player was trying to do anyway.
+        // Already gone (expired/completed elsewhere) reads the same as a
+        // successful abandon here — either way it shouldn't show in the
+        // list anymore, so just refresh rather than surfacing an error for
+        // what the player was trying to do anyway.
       }
       hideLoadingOverlay();
       showMyMatchesScreen();

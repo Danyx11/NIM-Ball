@@ -2469,6 +2469,10 @@ button:disabled { opacity: 0.35; cursor: default; }
   transition: background .15s ease, border-color .15s ease, color .15s ease;
 }
 .week-match-abandon:hover { background: rgba(220,70,70,0.3); border-color: rgba(220,70,70,0.55); color: #ff8080; }
+/* "Your opponent has left this game" (see main.js's showMyMatchesScreen) —
+   same shell as a normal resume row, just a plain div (nothing to resume)
+   and visibly inert so it doesn't read as a live, clickable match. */
+.config-preset-btn.week-match-gone { opacity: 0.5; cursor: default; }
 /* Staggered right after the panel itself (panel-in above), not from the
    very start — a beat behind its own container reads as "the panel arrived,
    then its choices settled in", not two unrelated things animating at once.

@@ -256,7 +256,17 @@ export class WeekArbiter extends Server {
       this.match.status = 'abandoned';
       await this.ctx.storage.deleteAlarm();
       await this.persist();
-      await Promise.all([this.removeFromIndex(this.match.playerA), this.removeFromIndex(this.match.playerB)]);
+      // Only the abandoning side's own slot frees immediately — the other
+      // side (if they'd already joined) isn't silently dropped from their
+      // own list, they get told (see conversation: "your opponent has left
+      // this game", a grayed row in My Matches) and dismisses it themselves
+      // (src/net.js's dismissWeekMatch, a direct PlayerIndex removal — no
+      // reconnecting to this now-terminal room needed for that). Their slot
+      // stays counted against their own cap until they do.
+      const myAddress = team === 'A' ? this.match.playerA : this.match.playerB;
+      await this.removeFromIndex(myAddress);
+      const oppTeam = otherTeam(team);
+      if (this.match[oppTeam === 'A' ? 'playerA' : 'playerB']) await this.pushIndexUpdate(oppTeam);
       this.send(connection, { type: 'abandoned' });
     }
   }

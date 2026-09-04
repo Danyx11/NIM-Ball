@@ -71,8 +71,32 @@ export class PlayerIndex extends Server {
   // non-sensitive data (match/status labels only, no secrets) — a wildcard
   // origin is fine here, same trust level as everything else this arbiter
   // already hands back to any client that knows a room's address.
+  // DELETE ?code=XXXX — self-service dismiss (see src/net.js's
+  // dismissWeekMatch): a player clearing an "opponent abandoned" row from
+  // their own My Matches list. Deliberately a direct write here rather than
+  // reconnecting to the (already terminal) WeekArbiter room to ask it to do
+  // this on their behalf — there's nothing left there to coordinate, this
+  // player's own index is the only thing being changed. Same trust model as
+  // everywhere else in WEEK (see onRequest's own GET comment) — no auth
+  // beyond "you know this address", since this room only ever holds cached
+  // display labels, never anything authoritative about the match itself.
   async onRequest(request) {
-    if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
-    return Response.json(await this.list(), { headers: { 'Access-Control-Allow-Origin': '*' } });
+    const cors = { 'Access-Control-Allow-Origin': '*' };
+    // DELETE (unlike the plain GET this class started with) isn't a
+    // CORS-"simple" method — the browser sends a preflight OPTIONS request
+    // first and silently aborts the real one if this doesn't answer it, no
+    // error surfaced to fetch() at all (see conversation: dismiss looked
+    // like a no-op — curl "worked" because it never sends/checks a
+    // preflight, only a real browser does).
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: { ...cors, 'Access-Control-Allow-Methods': 'GET, DELETE', 'Access-Control-Allow-Headers': 'Content-Type' } });
+    }
+    if (request.method === 'GET') return Response.json(await this.list(), { headers: cors });
+    if (request.method === 'DELETE') {
+      const code = new URL(request.url).searchParams.get('code');
+      if (code) await this.remove(code);
+      return Response.json({ ok: true }, { headers: cors });
+    }
+    return new Response('Method not allowed', { status: 405, headers: cors });
   }
 }

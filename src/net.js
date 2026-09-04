@@ -184,6 +184,21 @@ export async function fetchMyWeekMatches(address) {
   }
 }
 
+// Clears one row from this address's own My Matches list — used for a match
+// this player didn't abandon themselves but was told about ("your opponent
+// has left this game", see party/weekArbiter.js's own abandon handler): a
+// direct PlayerIndex write, not a reconnect to the match itself (already
+// terminal, nothing left to coordinate there). Best-effort like
+// fetchMyWeekMatches above — a failure here just means the row reappears
+// next time the list loads, not a broken match.
+export async function dismissWeekMatch(address, code) {
+  try {
+    await fetch(`${weekHttpHost()}/parties/player-index/${normalizeAddress(address)}?code=${encodeURIComponent(code)}`, { method: 'DELETE' });
+  } catch {
+    // best-effort, see comment above
+  }
+}
+
 function connectSocket(url) {
   return new Promise((resolve, reject) => {
     let ws;
