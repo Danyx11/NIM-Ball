@@ -148,6 +148,13 @@ function weekMatchHandle(socket, snapshot) {
     async completeRound(scoreA, scoreB, manche) {
       return socket.request({ type: 'completeRound', scoreA, scoreB, ...manche });
     },
+    // Either side can abandon at any point before the match is already over
+    // (see party/weekArbiter.js's own 'abandon' handler) — frees this
+    // player's PlayerIndex slot immediately, used by the trash icon on each
+    // My Matches row (main.js).
+    async abandon() {
+      return socket.request({ type: 'abandon' });
+    },
     close() { socket.close(); },
   };
 }

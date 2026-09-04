@@ -149,7 +149,12 @@ export class WeekArbiter extends Server {
     // intent === 'join' — also covers a returning A or B (a reconnect looks
     // identical to a fresh join attempt: same address-match branches below).
     if (!this.match) { this.send(connection, { type: 'notFound' }); connection.close(); return; }
-    if (this.match.status === 'expired') { this.send(connection, { type: 'expired' }); connection.close(); return; }
+    // Abandoned reads the same as a natural expiry to a reconnecting client
+    // (see msg.type === 'abandon' below) — either way the match is over and
+    // the code no longer leads anywhere. In practice this case is rare:
+    // abandoning already removed both players' PlayerIndex entries, so
+    // nothing points back at this code anymore except someone re-typing it.
+    if (this.match.status === 'expired' || this.match.status === 'abandoned') { this.send(connection, { type: 'expired' }); connection.close(); return; }
     if (this.match.status === 'completed') { this.send(connection, { type: 'notFound' }); connection.close(); return; }
 
     if (address === this.match.playerA) {
@@ -237,6 +242,22 @@ export class WeekArbiter extends Server {
         await Promise.all([this.pushIndexUpdate('A'), this.pushIndexUpdate('B')]);
       }
       this.send(connection, { type: 'roundCompleted', ...this.snapshotFor(team) });
+      return;
+    }
+
+    // Either side can abandon at any point before the match is already
+    // over — frees this player's PlayerIndex slot immediately (see
+    // conversation: the 2-active-matches cap was blocking testing with no
+    // way to bail out of a stuck/unwanted match). A deliberate abandon, not
+    // the same thing as the natural 24h/7-day expiry (see onAlarm below),
+    // but terminal the same way — same alarm/index cleanup either path.
+    if (msg.type === 'abandon') {
+      if (this.match.status !== 'pending' && this.match.status !== 'active') return;
+      this.match.status = 'abandoned';
+      await this.ctx.storage.deleteAlarm();
+      await this.persist();
+      await Promise.all([this.removeFromIndex(this.match.playerA), this.removeFromIndex(this.match.playerB)]);
+      this.send(connection, { type: 'abandoned' });
     }
   }
 
