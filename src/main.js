@@ -2464,10 +2464,16 @@ function showMatchHostWaitingScreen(net, code, matchConfig) {
 // WEEK's own creation flow (party/weekArbiter.js) — no "waiting for
 // opponent" live screen the way LIVE's showMatchHostWaitingScreen has: WEEK
 // never holds a connection open hoping for a push (see the WEEK design
-// conversation), so once the code exists there is nothing left to wait for
-// here — the player can share it and leave immediately, and reconnecting
-// later (Join with a code, or My Matches once B has joined) is exactly the
-// same "connect, get current state" path a fresh join would take.
+// conversation). Once the code exists, the creator plays their own first
+// shot right away (showWeekFirstShotScreen -> showWeekAimScreen, same path
+// a normal turn already takes — party/weekArbiter.js accepts a 'pending'
+// shot from A specifically for this) rather than just sitting on the code
+// with nothing left to do — the match-code/"share this"/join-deadline
+// screen still shows, just afterward, once sendShot's own snapshot lands on
+// enterWeekMatch's 'pending' branch below. Reconnecting later while still
+// pending (Join with a code, or My Matches before B has joined) goes
+// straight to that same 'pending' branch instead, exactly the same
+// "connect, get current state" path a fresh join would take.
 async function hostWeekMatch(matchConfig) {
   let code = generateMatchCode();
   showLoadingOverlay();
@@ -2475,7 +2481,7 @@ async function hostWeekMatch(matchConfig) {
     try {
       const week = await createWeekMatch(code, hubAddress, activeVibe, matchConfig);
       hideLoadingOverlay();
-      showWeekCreatedScreen(week);
+      showWeekFirstShotScreen(week);
       return;
     } catch (err) {
       if (err.reason === 'occupied' && attempt < 4) { code = generateMatchCode(); continue; }
@@ -2486,21 +2492,27 @@ async function hostWeekMatch(matchConfig) {
   }
 }
 
-function showWeekCreatedScreen(week) {
+// Deliberately does NOT week.close() here (unlike every other terminal
+// showNetPanel screen in this file) — showWeekAimScreen below still needs
+// this same live socket for its eventual sendShot() (net.js's weekMatchHandle
+// methods all reuse the one socket from creation/join, not a fresh
+// connection per call), so closing it here would make that call fail
+// silently. Whichever branch of enterWeekMatch the post-shot snapshot lands
+// on (see showWeekMessageScreen's submit()) owns closing it instead, same as
+// every other point this flow can end at.
+function showWeekFirstShotScreen(week) {
   const cls = week.team === 'A' ? 'a' : 'b';
   const teamLabel = week.team === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
   showNetPanel(`
     <span class="team-pill ${cls}">${teamLabel}</span>
-    <h2>Challenge created</h2>
-    <div class="match-code">${week.code}</div>
-    <p>Share this code. Your opponent has 24h to join — once they do, you'll both have 7 days to finish the match.</p>
-    <button class="bigbtn" id="weekCreatedDoneBtn">Done</button>
+    <h2>Play your first shot</h2>
+    <p>Take your shot now — your opponent will see it once they join with your code.</p>
+    <button class="bigbtn" id="weekFirstShotGoBtn">Go</button>
   `);
-  week.close();
-  document.getElementById('weekCreatedDoneBtn').addEventListener('click', () => {
+  document.getElementById('weekFirstShotGoBtn').addEventListener('click', () => {
     audio.play('button');
     hideNetPanel();
-    showVibeDrawer(activeVibe);
+    showWeekAimScreen(week);
   });
 }
 
@@ -2625,7 +2637,7 @@ function enterWeekMatch(week) {
       <p>They have ${formatTimeLeft(week.joinDeadline)} left to join.</p>
       <button class="bigbtn" id="weekDoneBtn">OK</button>
     `);
-    document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); showVibeDrawer(activeVibe); });
+    document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
     return;
   }
   // status === 'active'
