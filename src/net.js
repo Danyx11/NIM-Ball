@@ -148,6 +148,13 @@ function weekMatchHandle(socket, snapshot) {
     async completeRound(scoreA, scoreB, manche) {
       return socket.request({ type: 'completeRound', scoreA, scoreB, ...manche });
     },
+    // Either side can abandon at any point before the match is already over
+    // (see party/weekArbiter.js's own 'abandon' handler) — frees this
+    // player's PlayerIndex slot immediately, used by the trash icon on each
+    // My Matches row (main.js).
+    async abandon() {
+      return socket.request({ type: 'abandon' });
+    },
     close() { socket.close(); },
   };
 }
@@ -174,6 +181,21 @@ export async function fetchMyWeekMatches(address) {
     return await res.json();
   } catch {
     return {};
+  }
+}
+
+// Clears one row from this address's own My Matches list — used for a match
+// this player didn't abandon themselves but was told about ("your opponent
+// has left this game", see party/weekArbiter.js's own abandon handler): a
+// direct PlayerIndex write, not a reconnect to the match itself (already
+// terminal, nothing left to coordinate there). Best-effort like
+// fetchMyWeekMatches above — a failure here just means the row reappears
+// next time the list loads, not a broken match.
+export async function dismissWeekMatch(address, code) {
+  try {
+    await fetch(`${weekHttpHost()}/parties/player-index/${normalizeAddress(address)}?code=${encodeURIComponent(code)}`, { method: 'DELETE' });
+  } catch {
+    // best-effort, see comment above
   }
 }
 
