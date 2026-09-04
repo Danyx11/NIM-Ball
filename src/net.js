@@ -43,6 +43,140 @@ export function connectMatch(code) {
   return connectSocket(`${PARTY_HOST}/parties/arbiter/${code}`);
 }
 
+// ---------------------------------------------------------------------
+// WEEK (party/weekArbiter.js) — a different transport shape from the LIVE/
+// LAN relay above: no held-open "wait for a push" connection anywhere. Every
+// call here opens a fresh WebSocket, sends one request, waits for its one
+// reply, and the caller decides whether to keep the socket or close it (see
+// the WEEK design conversation — always connect/fetch/act/disconnect, even
+// when both players happen to be online at once). Requires a connected
+// Nimiq wallet address (no guest, see main.js's WEEK wallet gate) — that
+// address IS the reconnection credential, no separate claim token.
+function weekHttpHost() { return PARTY_HOST.replace(/^ws/, 'http'); }
+// Nimiq's own user-friendly address format is space-separated ("NQ07 XXXX
+// YYYY …") — fine as a URLSearchParams value (auto-encoded) but breaks a
+// plain template-literal URL path segment (fetchMyWeekMatches below) and is
+// an unnecessary footgun as a Durable Object room name either way. Every
+// WEEK function below normalizes to this same spaceless form before using
+// an address as an identifier, so a match created from one and looked up
+// from the other still land on the same PlayerIndex/WeekArbiter room.
+function normalizeAddress(address) { return address.replace(/\s+/g, ''); }
+
+// Opens the connection for a WEEK match, either creating one fresh (`intent:
+// 'create'`, needs `game`/`config`) or joining/resuming an existing one
+// (`intent: 'join'` — a returning A or B looks identical to a fresh join to
+// the arbiter, see party/weekArbiter.js's onConnect). Resolves once the
+// server's first reply ('connected') arrives, same "first message settles
+// the promise" shape as connectSocket() above.
+function openWeekSocket(code, address, intent, extra = {}) {
+  return new Promise((resolve, reject) => {
+    const params = new URLSearchParams({ address, intent });
+    if (extra.game) params.set('game', extra.game);
+    if (extra.config) params.set('config', JSON.stringify(extra.config));
+    const url = `${PARTY_HOST}/parties/week-arbiter/${code}?${params.toString()}`;
+    let ws;
+    try { ws = new WebSocket(url); } catch (err) { reject(err); return; }
+    let settled = false;
+    // WEEK's protocol is strictly one-request/one-reply, so a simple FIFO
+    // queue (rather than matching replies by an id) is enough: onMessage
+    // below always hands the next frame to the oldest still-waiting request.
+    const pending = [];
+    const socket = {
+      code,
+      request(msg) {
+        return new Promise((res, rej) => {
+          pending.push({ res, rej });
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+          else rej(new Error('Not connected.'));
+        });
+      },
+      close() { ws.close(); },
+    };
+    ws.addEventListener('error', () => {
+      if (!settled) { settled = true; reject(new Error('Could not connect to the server.')); }
+    });
+    ws.addEventListener('close', () => {
+      if (!settled) { settled = true; reject(new Error('Could not connect to the server.')); }
+      while (pending.length) pending.shift().rej(new Error('Connection closed.'));
+    });
+    ws.addEventListener('message', (evt) => {
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      if (!settled) {
+        settled = true;
+        if (msg.type === 'connected') { resolve({ socket, snapshot: msg }); return; }
+        const errors = {
+          occupied: 'This code is already in use — try again.',
+          limitReached: 'You already have 2 active WEEK matches.',
+          notFound: 'This match code is no longer valid.',
+          expired: 'This challenge has expired.',
+          full: 'This match already has two players.',
+        };
+        // `.reason` (the raw server code, e.g. 'notFound') lets a caller
+        // branch on the exact failure instead of string-matching the human
+        // message above — main.js's "Join with a code" uses this to decide
+        // whether a WEEK lookup miss should fall through to trying LIVE.
+        const err = new Error(errors[msg.type] || 'Could not join this match.');
+        err.reason = msg.type;
+        reject(err);
+        return;
+      }
+      const waiter = pending.shift();
+      if (waiter) waiter.res(msg);
+    });
+  });
+}
+
+function weekMatchHandle(socket, snapshot) {
+  const { type: _type, ...rest } = snapshot;
+  return {
+    code: socket.code,
+    ...rest,
+    // { stones, sweep, message } in, resolves with the fresh snapshot (see
+    // WeekArbiter's 'shotAccepted' reply) — including the opponent's shot
+    // and message once both sides have submitted for this round.
+    async sendShot(stones, sweep, message) {
+      return socket.request({ type: 'shot', stones, sweep, message });
+    },
+    // Reports the locally-computed outcome of a revealed manche (this game
+    // never runs physics server-side, see CLAUDE.md) so the persisted match
+    // state (score/round) advances for whoever reconnects next. `manche`
+    // ({stonesA, sweepA, stonesB, sweepB} — the shot data just revealed) is
+    // appended server-side to pointManches unless this manche just scored a
+    // point, see party/weekArbiter.js's own completeRound handler — needed
+    // so the *next* manche of the same point (could be seconds or days
+    // later) can reconstruct the board via resumeManches.
+    async completeRound(scoreA, scoreB, manche) {
+      return socket.request({ type: 'completeRound', scoreA, scoreB, ...manche });
+    },
+    close() { socket.close(); },
+  };
+}
+
+export async function createWeekMatch(code, address, game, config) {
+  const { socket, snapshot } = await openWeekSocket(code, normalizeAddress(address), 'create', { game, config });
+  return weekMatchHandle(socket, snapshot);
+}
+
+export async function joinWeekMatch(code, address) {
+  const { socket, snapshot } = await openWeekSocket(code, normalizeAddress(address), 'join');
+  return weekMatchHandle(socket, snapshot);
+}
+
+// "My Matches" (main.js) — a plain GET against this address's PlayerIndex
+// room, not a WebSocket: a one-off read, nothing to hold open (see
+// party/playerIndex.js). Returns {} on any failure so the UI can render an
+// empty list instead of an error for what's a non-critical convenience
+// feature — the match code itself is always the real way back in.
+export async function fetchMyWeekMatches(address) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/player-index/${normalizeAddress(address)}`);
+    if (!res.ok) return {};
+    return await res.json();
+  } catch {
+    return {};
+  }
+}
+
 function connectSocket(url) {
   return new Promise((resolve, reject) => {
     let ws;

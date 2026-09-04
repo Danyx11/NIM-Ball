@@ -3,11 +3,25 @@
   "main": "party/index.js",
   "compatibility_date": "2026-08-13",
   "durable_objects": {
-    "bindings": [{ "name": "Arbiter", "class_name": "Arbiter" }],
+    "bindings": [
+      { "name": "Arbiter", "class_name": "Arbiter" },
+      // WEEK's two classes (see party/weekArbiter.js / party/playerIndex.js)
+      // — added alongside Arbiter, not folded into it, so this config change
+      // can't affect the existing LIVE binding above.
+      { "name": "WeekArbiter", "class_name": "WeekArbiter" },
+      { "name": "PlayerIndex", "class_name": "PlayerIndex" },
+    ],
   },
   // new_sqlite_classes (not new_classes) — required for Durable Objects on
   // Cloudflare's free Workers plan, see git history: the old `partykit` CLI
   // only knew how to generate the classic (paid-plan-only) migration type,
   // which is what made this rewrite necessary in the first place.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Arbiter"] }],
+  //
+  // v1 (Arbiter) is untouched, on purpose — a migrations entry is a one-time
+  // deploy record, not something to edit after the fact. v2 adds the two new
+  // WEEK classes as their own migration step.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Arbiter"] },
+    { "tag": "v2", "new_sqlite_classes": ["WeekArbiter", "PlayerIndex"] },
+  ],
 }
