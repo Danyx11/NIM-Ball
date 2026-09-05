@@ -37,6 +37,17 @@ function revealToManche(week) {
 // isn't team-relative).
 function resumeManchesFor(week) { return week.pointManches || null; }
 
+// True only for the actual opening of the match — no point has been scored
+// yet AND this point itself has no manches yet either. A later point
+// starting fresh (after the last one scored) also has an empty
+// resumeManchesFor(week), which is why that alone isn't enough here — see
+// game.js's own weekMatchStart comment for why this distinction matters
+// (per explicit feedback, the match-intro replay is scoped to this moment
+// only, nothing else).
+function isMatchStart(week) {
+  return week.scoreA === 0 && week.scoreB === 0 && !(week.pointManches && week.pointManches.length);
+}
+
 // "Your turn" — runs a single-team aim session (no timer, no opponent
 // visible, same 'lanAim' gating LAN already uses) and resolves once that
 // shot is committed. Tears the session down itself before resolving —
@@ -47,6 +58,7 @@ export function playSingleShot(week, engineOpts) {
       ...engineOpts,
       singleShotTeam: week.team,
       resumeManches: resumeManchesFor(week),
+      weekMatchStart: isMatchStart(week),
       matchConfig: week.config,
       vibe: week.game,
       onShotCommitted: (stones, sweep) => { stopGame(); resolve({ stones, sweep }); },
@@ -67,6 +79,7 @@ export function playReveal(week, engineOpts) {
       ...engineOpts,
       externalManche: manche,
       resumeManches: resumeManchesFor(week),
+      weekMatchStart: isMatchStart(week),
       matchConfig: week.config,
       vibe: week.game,
       // `manche` rides along on the resolved result (not just

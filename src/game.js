@@ -203,11 +203,20 @@ export function startGame(opts = {}) {
   // of that same function) right after the board's initial reset, so the
   // very first aim/reveal above starts from the board's real current state
   // instead of a fresh rack.
+  // weekMatchStart: true only for the actual opening of the match — team
+  // A's very first shot, or team B's very first reveal (see
+  // weekController.js's isMatchStart, computed off the match's real
+  // scoreA/scoreB/pointManches, not derivable from resumeManches alone: a
+  // later point starting fresh also has an empty resumeManches). Per
+  // explicit feedback this is the ONLY WEEK moment that replays
+  // beginMatchIntro()'s huddle-slide-in + sting — every other WEEK entry
+  // (a later point, or a mid-point reconnect) goes straight to
+  // beginAimPhase(), same as before.
   const {
     net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false,
     onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, onTurnChange = null,
     matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null,
-    singleShotTeam = null, onShotCommitted = null, externalManche = null, onMancheSettled = null, resumeManches = null,
+    singleShotTeam = null, onShotCommitted = null, externalManche = null, onMancheSettled = null, resumeManches = null, weekMatchStart = false,
   } = opts;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
   // default preset; Custom is the same shape with different values. Every
@@ -2824,18 +2833,35 @@ export function startGame(opts = {}) {
     // there's only ever one viewer for a WEEK session, nothing to wait on.
     startOverlay.classList.add('hidden');
     controlsEnabled = true;
-    if (resumeManches && resumeManches.length) {
-      // Mid-point reconnect: this point already has manches to fast-forward
-      // through (applied at the top of beginAimPhase(), see its own
-      // comment), so the board is about to jump straight to wherever this
-      // point actually left it. beginMatchIntro() unconditionally snaps
-      // every stone back to its starting-rack position and slides them in
-      // first — stacked in front of the fast-forward, that reads as "the
-      // board just got reset" only to immediately reposition itself, a
-      // flash with nothing behind it. Straight to beginAimPhase() instead:
-      // whatever resetPositions() set up at the very start of this closure
-      // (rack, same as always) is exactly what the fast-forward needs to
-      // start from, no intro in between.
+    if (weekMatchStart) {
+      // The actual opening of the match — team A's very first shot, or team
+      // B's very first reveal — and only that (see weekController.js's own
+      // isMatchStart, computed off the match's real scoreA/scoreB/
+      // pointManches, not just this session's resumeManches: a later POINT
+      // starting fresh has an empty resumeManches too, exactly like the
+      // match's first point does, but per explicit feedback only the
+      // match's actual opening gets this, nothing more). Same huddle-
+      // slide-in + 'matchStart' sting every other mode's entry branch gets.
+      // Safe to call synchronously same as those branches: it defers its
+      // own beginAimPhase() call to the 'matchStart' clip's onEnded
+      // callback, well past this closure's own setup (see
+      // beginMatchIntro's own comment).
+      beginMatchIntro();
+    } else {
+      // Every other WEEK entry — a later point starting fresh, or a
+      // mid-point reconnect with manches to fast-forward through (applied
+      // at the top of beginAimPhase(), see its own comment). Straight to
+      // beginAimPhase(), deliberately NOT beginMatchIntro() here: it
+      // unconditionally snaps every stone back to its starting-rack
+      // position and slides them in first, which — stacked in front of a
+      // resumeManches fast-forward — reads as "the board just got reset"
+      // only to immediately reposition itself, a flash with nothing behind
+      // it (see conversation). Whatever resetPositions() set up at the very
+      // start of this closure (rack, same as always) is exactly what a
+      // fast-forward needs to start from, no intro in between; and a fresh
+      // point with nothing to fast-forward just starts right there too,
+      // same as every other mode's own point-to-point transition
+      // (beginRoundReset), which never replays the match intro either.
       //
       // Deferred one tick (trackedTimeout(...,0), not a direct call) —
       // beginAimPhase() (via resumeManches/fastForwardManche/physicsStep)
@@ -2850,16 +2876,6 @@ export function startGame(opts = {}) {
       // onEnded callback, well after setup finished — this is the same
       // deferral, minus the animation.
       trackedTimeout(beginAimPhase, 0);
-    } else {
-      // Fresh point (nothing to fast-forward: either the very first manche
-      // of the whole match, or a new point right after the last one scored
-      // — resetPositions() already left the rack exactly where this intro
-      // wants to animate it from either way) — same huddle-slide-in +
-      // 'matchStart' sting every other mode's entry branch gets. Safe to
-      // call synchronously same as those branches: it defers its own
-      // beginAimPhase() call to the 'matchStart' clip's onEnded callback,
-      // well past this closure's own setup (see beginMatchIntro's comment).
-      beginMatchIntro();
     }
   }
 
