@@ -2498,12 +2498,27 @@ export function startGame(opts = {}) {
     // (sendShots, 'lanWait', the dead-end watchdog) — the session simply
     // ends here, the caller (weekController.js) is expected to tear it down
     // right after receiving onShotCommitted and continue on its own.
+    // Per explicit feedback: don't hand off to onShotCommitted (which the
+    // caller uses to jump straight to its own "shot on the ice" screen) the
+    // instant the shot commits — play the same laser-retract-into-the-
+    // stones beat + 'launchEngine' sound every other reveal gets first (see
+    // playLaunchEngine/retractTeam/PRE_SIM_DELAY above), so the transition
+    // doesn't feel like it's skipping a step just because there's no
+    // opponent shot to reveal alongside it. `phase = 'pending'` is what
+    // actually makes the retract draw (see the render dispatch further down
+    // this file: `phase === 'pending' && retractTeam` is its only trigger) —
+    // nothing else reads 'pending' here since launchSimulation() is never
+    // called, there's no second team's shot yet to actually run physics on.
     if (singleShotTeam) {
       if (phase !== 'lanAim') return;
       const stones = entities[singleShotTeam].map(g => ({ vx: g.pendingVx || 0, vy: g.pendingVy || 0, used: g.used }));
       commitSweep(singleShotTeam);
       const sw = sweep[singleShotTeam];
-      onShotCommitted?.(stones, sw.active ? { x: sw.x, y: sw.y, r: sw.r } : null);
+      phase = 'pending';
+      playLaunchEngine(singleShotTeam);
+      trackedTimeout(() => {
+        onShotCommitted?.(stones, sw.active ? { x: sw.x, y: sw.y, r: sw.r } : null);
+      }, PRE_SIM_DELAY);
       return;
     }
     if (aiTeam) {
