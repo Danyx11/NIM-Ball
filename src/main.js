@@ -2647,11 +2647,16 @@ function showWeekRevealScreen(week) {
         showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${result.scoreA} · Team Yellow ${result.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
         document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
       } else {
-        // Brief result beat before chaining into whatever's next (almost
-        // always this same player's next aim, see enterWeekMatch — both
-        // pendingShots were just cleared server-side) rather than jumping
-        // straight back into another live aim session with no transition.
-        showNetPanel(`<h2>Round complete</h2><p>Score — Team Blue ${result.scoreA} · Team Yellow ${result.scoreB}</p><button class="bigbtn" id="weekContinueBtn">Continue</button>`);
+        // No score recap here (see conversation: this isn't a point being
+        // won, just a manche settling — the board itself already shows
+        // exactly where things stand, nothing to summarize in text). Still
+        // one tap before chaining into whatever's next (almost always this
+        // same player's next aim, see enterWeekMatch — both pendingShots
+        // were just cleared server-side): the previous canvas session
+        // already tore itself down (stopGame(), see playReveal), so
+        // something has to bridge into the next one either way — this is
+        // just that bridge, not a result screen.
+        showNetPanel(`<button class="bigbtn" id="weekContinueBtn">Play</button>`);
         document.getElementById('weekContinueBtn').addEventListener('click', () => {
           audio.play('button');
           enterWeekMatch(mergeWeek(week, snapshot));

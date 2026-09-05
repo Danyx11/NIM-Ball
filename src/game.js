@@ -2822,9 +2822,32 @@ export function startGame(opts = {}) {
     // WEEK (see startGame's own singleShotTeam/externalManche comments): no
     // ready-tap lobby needed, same reasoning as the aiTeam branch above —
     // there's only ever one viewer for a WEEK session, nothing to wait on.
+    // Straight to beginAimPhase(), deliberately NOT beginMatchIntro() —
+    // every WEEK session is a fresh startGame() call (see conversation),
+    // and beginMatchIntro() unconditionally snaps every stone back to its
+    // starting-rack position before animating them into place, which reads
+    // as "the board just got reset" even though resumeManches (applied at
+    // the top of beginAimPhase(), see its own comment) puts them right back
+    // where this point actually left them a moment later — a visible
+    // reset-then-reposition flash for no reason on every single turn.
+    // beginAimPhase() alone has no such reset baked in: whatever
+    // resetPositions() set up at the very start of this closure (rack, same
+    // as always) is exactly what resumeManches then fast-forwards from.
     startOverlay.classList.add('hidden');
     controlsEnabled = true;
-    beginMatchIntro();
+    // Deferred one tick (trackedTimeout(...,0), not a direct call) —
+    // beginAimPhase() (via resumeManches/fastForwardManche/physicsStep)
+    // reads module-level consts declared further down this same closure
+    // (e.g. CORNERS): called synchronously from right here, before this
+    // closure has finished its own top-to-bottom setup, that's a temporal-
+    // dead-zone ReferenceError (already hit and fixed once for
+    // resumeManches's own eager call site — see that fix's comment; calling
+    // beginAimPhase() straight from here reintroduces the exact same
+    // problem one level up). beginMatchIntro() never had this problem only
+    // because it always deferred its own beginAimPhase() call to an audio
+    // onEnded callback, well after setup finished — this is the same
+    // deferral, minus the animation.
+    trackedTimeout(beginAimPhase, 0);
   }
 
   // ---------- Physics ----------
