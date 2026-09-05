@@ -5185,7 +5185,15 @@ export function startGame(opts = {}) {
     if (phase === 'lanWait') drawWaitingLabel();
     // howTo: no turn timer — a single untimed player working through fixed
     // steps has nothing for a countdown to mean (per explicit request).
-    if (!howTo) { if (vibe === 'curling') drawCircleTimer(); else drawHexTimer(); }
+    // WEEK (singleShotTeam/externalManche) same reasoning, for a different
+    // cause: this ring reflects a real 30s auto-submit countdown for LIVE/
+    // Pass&Play/AI (see turnTimerProgress()'s own use further down this
+    // file, `net`/`aiTeam`/local branches) — WEEK never enforces that
+    // timeout at all (see conversation, WEEK has no per-shot timer by
+    // design), so a ticking ring there was just a visual lie with nothing
+    // behind it. Only the drawing is skipped — turnTimerProgress() itself
+    // and the auto-submit check are untouched, both already inert for WEEK.
+    if (!howTo && !singleShotTeam && !externalManche) { if (vibe === 'curling') drawCircleTimer(); else drawHexTimer(); }
   }
 
   // LAN mode, local shot already sent: "waiting" burned under the ice between
