@@ -2456,23 +2456,63 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 .config-preset-btn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
 .config-preset-btn:disabled { opacity: 0.6; pointer-events: none; }
-/* My Matches row (see main.js's showMyMatchesScreen) — the resume button
-   (.config-preset-btn, unchanged) plus a trash icon to abandon, side by
-   side rather than nested (a button can't contain a button). */
-.week-match-row { display: flex; align-items: stretch; gap: 8px; width: 100%; max-width: 280px; }
-.week-match-row .config-preset-btn { flex: 1; max-width: none; }
-.week-match-abandon {
-  flex: 0 0 auto; width: 44px;
+/* My Matches row (see main.js's showMyMatchesScreen) — a bigger card
+   (avatar, name, game+config summary, turn state, expiry) plus a narrow
+   actions column (rename, then trash) beside it, side by side rather than
+   nested (a button can't contain a button). Widened from the old plain
+   resume-button row (280px) to fit all of that — per explicit request, the
+   old row only had room for "vs <address>" + one status line. */
+.week-match-row { display: flex; align-items: stretch; gap: 8px; width: 100%; max-width: 360px; }
+/* Same entrance beat as .config-preset-btn above (item-pop-in) — the old
+   plain resume button got it via that shared selector; this card has its
+   own class now, so it needs its own rule to keep the same feel. */
+.config-panel:not(.hidden) .week-match-row { animation: item-pop-in 260ms cubic-bezier(.16,1,.3,1) both; }
+.week-match-card {
+  flex: 1; display: flex; align-items: center; gap: 12px; text-align: left;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 14px; padding: 14px 16px; color: #fff; min-width: 0;
+  transition: background .15s ease, border-color .15s ease;
+}
+.week-match-card:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
+/* Same shell/sizing convention as the sidebar's own .connect-avatar (see
+   applyIdentityPillState) — a plain tinted circle until the identicon's
+   backgroundImage lands async (main.js's own fire-and-forget
+   getIdenticonPngDataUrl call), and stays that way for a still-'pending'
+   row with no opponent address to render at all yet. */
+.week-match-avatar {
+  flex: none; width: 48px; height: 48px; border-radius: 50%; overflow: hidden;
+  background-color: rgba(255,255,255,0.14); background-size: cover; background-position: center;
+}
+.week-match-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.week-match-name { font-weight: 700; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.week-match-meta, .week-match-sub, .week-match-expiry { font-size: 12px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.week-match-meta { color: rgba(255,255,255,0.75); }
+.week-match-sub { color: rgba(255,255,255,0.6); }
+.week-match-expiry { color: rgba(255,255,255,0.45); }
+/* Rename above trash, splitting the card's own height evenly (flex:1 each)
+   rather than a fixed height that could mismatch the card's real height
+   across different content lengths. */
+.week-match-actions { flex: 0 0 auto; width: 44px; display: flex; flex-direction: column; gap: 8px; }
+.week-match-rename, .week-match-abandon {
+  flex: 1;
   background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18);
   border-radius: 14px; color: #fff;
   display: flex; align-items: center; justify-content: center;
   transition: background .15s ease, border-color .15s ease, color .15s ease;
 }
+.week-match-rename:hover { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.4); }
 .week-match-abandon:hover { background: rgba(220,70,70,0.3); border-color: rgba(220,70,70,0.55); color: #ff8080; }
+/* Without an explicit size, the flex-centered SVG above collapses to a
+   sliver (Chrome computes its flex-basis off the wrong axis when a
+   viewBox'd SVG has no CSS width/height of its own) — same explicit-size
+   fix already used for every other icon-in-a-flex-box here (.config-back
+   svg, .chat-exit-btn svg, the replay bar's own icon buttons). */
+.week-match-rename svg { width: 16px; height: 16px; flex-shrink: 0; }
+.week-match-abandon svg { width: 18px; height: 18px; flex-shrink: 0; }
 /* "Your opponent has left this game" (see main.js's showMyMatchesScreen) —
-   same shell as a normal resume row, just a plain div (nothing to resume)
+   same shell as a normal resume card, just a plain div (nothing to resume)
    and visibly inert so it doesn't read as a live, clickable match. */
-.config-preset-btn.week-match-gone { opacity: 0.5; cursor: default; }
+.week-match-card.week-match-gone { opacity: 0.5; cursor: default; }
 /* Staggered right after the panel itself (panel-in above), not from the
    very start — a beat behind its own container reads as "the panel arrived,
    then its choices settled in", not two unrelated things animating at once.

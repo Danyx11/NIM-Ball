@@ -101,6 +101,13 @@ export class WeekArbiter extends Server {
     await idx.upsert(this.name, {
       game: m.game, opponentAddress: oppAddress, myTeam: team,
       status: m.status, turnLabel: this.turnLabelFor(team),
+      // pointsToWin (config.pointsToWin) + expiresAt: "My Matches" (main.js)
+      // renders these directly on each row card without opening its own
+      // connection to the match — same reasoning as every other field
+      // already cached here. expiresAt is null until B actually joins (see
+      // onConnect's own intent==='join' branch, where it's first set) —
+      // still-'pending' rows show joinDeadline instead (see main.js).
+      pointsToWin: m.config.pointsToWin, expiresAt: m.expiresAt, joinDeadline: m.joinDeadline,
     });
   }
 
@@ -141,7 +148,10 @@ export class WeekArbiter extends Server {
       await this.persist();
       await this.ctx.storage.setAlarm(this.match.joinDeadline);
       connection.setState({ team: 'A' });
-      await idx.upsert(this.name, { game, opponentAddress: null, myTeam: 'A', status: 'pending', turnLabel: 'pending' });
+      await idx.upsert(this.name, {
+        game, opponentAddress: null, myTeam: 'A', status: 'pending', turnLabel: 'pending',
+        pointsToWin: config.pointsToWin, expiresAt: null, joinDeadline: this.match.joinDeadline,
+      });
       this.send(connection, { type: 'connected', ...this.snapshotFor('A') });
       return;
     }

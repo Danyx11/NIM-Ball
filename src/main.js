@@ -723,6 +723,41 @@ window.addEventListener('resize', () => navSections.forEach(updateNavScrollPill)
 function shortenAddressCompact(address) {
   return address.length <= 8 ? address : `${address.slice(0, 3)}…${address.slice(-3)}`;
 }
+// WEEK match custom naming (My Matches, see showMyMatchesScreen) — purely
+// local/per-device, never sent to the opponent or the server: just a
+// personal label to tell matches apart at a glance (e.g. "Lucie match"),
+// per explicit request. Keyed on the match code alone (not the wallet
+// address) since My Matches is already scoped to whichever wallet is
+// currently connected.
+const WEEK_LABEL_PREFIX = 'nimball-week-label:';
+function getWeekMatchLabel(code) {
+  try { return localStorage.getItem(WEEK_LABEL_PREFIX + code) || ''; } catch { return ''; }
+}
+function setWeekMatchLabel(code, label) {
+  try {
+    const key = WEEK_LABEL_PREFIX + code;
+    if (label) localStorage.setItem(key, label); else localStorage.removeItem(key);
+  } catch { /* private-browsing localStorage throw — label just doesn't persist */ }
+}
+// "in 3 days" / "tomorrow" / a plain date once it's far enough out that a
+// relative count stops being the more readable option — same rough idea as
+// every OS's own "notifications" list.
+function formatWeekWhen(ts) {
+  const diffDays = Math.ceil((ts - Date.now()) / (24 * 60 * 60 * 1000));
+  if (diffDays <= 0) return 'soon';
+  if (diffDays === 1) return 'tomorrow';
+  if (diffDays <= 6) return `in ${diffDays} days`;
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+// My Matches row's own expiry line — differs from turnLabel (whose turn it
+// is right now) by describing the match's clock instead: a still-'pending'
+// match (nobody's joined yet) hasn't started its real 7-day lifetime clock
+// at all (see party/weekArbiter.js's own expiresAt comment), it's still
+// just waiting out its 24h join window.
+function formatWeekExpiry(m) {
+  if (m.status === 'pending') return m.joinDeadline ? `Join window closes ${formatWeekWhen(m.joinDeadline)}` : '';
+  return m.expiresAt ? `Expires ${formatWeekWhen(m.expiresAt)}` : '';
+}
 // Shows immediately once the sidebar itself does (both platforms, right
 // after the home-screen animation — see conversation), not gated on the
 // player having been through the connect gate yet: undecided reads the same
@@ -2705,32 +2740,63 @@ async function showMyMatchesScreen() {
     myMatchesContent.innerHTML = '<p>No WEEK matches in progress.</p>';
     return;
   }
-  // Two buttons per row, not one nested in the other (invalid HTML) — a
-  // plain wrapper div holds the resume button (.config-preset-btn, existing
-  // behavior) and the trash icon (abandon, see conversation: added once the
-  // 2-active-matches cap started blocking testing with no way out of a
-  // stuck/unwanted match) side by side. An 'abandoned' row (the OTHER
-  // player left, see party/weekArbiter.js's own abandon handler) renders
-  // that same resume slot as a plain grayed-out div instead — no data-code
-  // on it, so it never picks up the resume click handler below, and nothing
-  // to resume anyway (the match is already terminal) — only the trash icon
-  // stays live, to dismiss the notification.
+  // A bigger card per match (avatar, custom/default name, game+config
+  // summary, turn state, expiry — per explicit request) plus a narrow
+  // actions column (rename, then trash) beside it, rather than one plain
+  // resume button — a plain wrapper div, not buttons nested in each other
+  // (invalid HTML). An 'abandoned' row (the OTHER player left, see
+  // party/weekArbiter.js's own abandon handler) renders the card itself as
+  // a plain inert div instead of a button — no data-code on it, so it never
+  // picks up the resume click handler below, and nothing to resume anyway
+  // (the match is already terminal) — only the trash icon stays live, to
+  // dismiss the notification; rename is hidden too, nothing left worth
+  // labeling.
   myMatchesContent.innerHTML = codes.map((code) => {
     const m = matches[code];
     const opp = m.opponentAddress ? shortenAddressCompact(m.opponentAddress) : 'opponent';
+    const label = getWeekMatchLabel(code);
+    const displayName = label ? escapeHtml(label) : `vs ${opp}`;
+    const gameLabel = VIBE_LABELS[m.game] || m.game || '';
+    const configLine = m.pointsToWin ? `${gameLabel} · First to ${m.pointsToWin}` : gameLabel;
     const left = m.status === 'abandoned';
+    const subLine = left ? 'Your opponent has left this game' : (TURN_LABELS[m.turnLabel] || m.turnLabel || '');
+    const expiryLine = left ? '' : formatWeekExpiry(m);
+    const avatar = `<div class="week-match-avatar" data-address="${m.opponentAddress || ''}"></div>`;
+    const body = `
+      <div class="week-match-body">
+        <div class="week-match-name">${displayName}</div>
+        <div class="week-match-meta">${configLine}</div>
+        <div class="week-match-sub">${subLine}</div>
+        ${expiryLine ? `<div class="week-match-expiry">${expiryLine}</div>` : ''}
+      </div>`;
     const resumeEl = left
-      ? `<div class="config-preset-btn week-match-gone"><div class="config-preset-name">vs ${opp}</div><div class="config-preset-sub">Your opponent has left this game</div></div>`
-      : `<button class="config-preset-btn" data-code="${code}"><div class="config-preset-name">vs ${opp}</div><div class="config-preset-sub">${TURN_LABELS[m.turnLabel] || m.turnLabel || ''}</div></button>`;
+      ? `<div class="week-match-card week-match-gone">${avatar}${body}</div>`
+      : `<button class="week-match-card" data-code="${code}">${avatar}${body}</button>`;
+    const renameBtn = left ? '' : `
+        <button class="week-match-rename" data-code="${code}" type="button" aria-label="Rename match">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        </button>`;
     return `
       <div class="week-match-row">
         ${resumeEl}
-        <button class="week-match-abandon" data-code="${code}" data-left="${left}" type="button" aria-label="${left ? 'Dismiss' : 'Abandon match'}">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-        </button>
+        <div class="week-match-actions">
+          ${renameBtn}
+          <button class="week-match-abandon" data-code="${code}" data-left="${left}" type="button" aria-label="${left ? 'Dismiss' : 'Abandon match'}">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+          </button>
+        </div>
       </div>`;
   }).join('');
-  myMatchesContent.querySelectorAll('.config-preset-btn[data-code]').forEach((btn) => {
+  // Same fire-and-forget backgroundImage pattern as the sidebar's own
+  // .connect-avatar (applyIdentityPillState above) — an opponent-less
+  // 'pending' row (nobody's joined yet) has no address to render at all,
+  // left as the plain placeholder background.
+  myMatchesContent.querySelectorAll('.week-match-avatar[data-address]').forEach((el) => {
+    const address = el.dataset.address;
+    if (!address) return;
+    getIdenticonPngDataUrl(address).then((url) => { el.style.backgroundImage = `url(${url})`; });
+  });
+  myMatchesContent.querySelectorAll('.week-match-card[data-code]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       audio.play('button');
       showLoadingOverlay();
@@ -2745,8 +2811,24 @@ async function showMyMatchesScreen() {
       }
     });
   });
+  myMatchesContent.querySelectorAll('.week-match-rename[data-code]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      audio.play('button');
+      const code = btn.dataset.code;
+      // prompt(), not an inline input — this is a rare, one-off action (per
+      // explicit request, just a way to tell matches apart at a glance), not
+      // worth a dedicated edit-in-place UI. Blank/cancelled input clears any
+      // existing custom label rather than leaving it half-edited.
+      const next = prompt('Name this match', getWeekMatchLabel(code));
+      if (next === null) return;
+      setWeekMatchLabel(code, next.trim());
+      showMyMatchesScreen();
+    });
+  });
   myMatchesContent.querySelectorAll('.week-match-abandon[data-code]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       audio.play('button');
       const code = btn.dataset.code;
       // Already gone from this player's own side (the opponent left first,
@@ -2755,6 +2837,7 @@ async function showMyMatchesScreen() {
       // (party/playerIndex.js's DELETE, see net.js's dismissWeekMatch).
       if (btn.dataset.left === 'true') {
         await dismissWeekMatch(hubAddress, code);
+        setWeekMatchLabel(code, '');
         showMyMatchesScreen();
         return;
       }
@@ -2770,6 +2853,7 @@ async function showMyMatchesScreen() {
         // list anymore, so just refresh rather than surfacing an error for
         // what the player was trying to do anyway.
       }
+      setWeekMatchLabel(code, '');
       hideLoadingOverlay();
       showMyMatchesScreen();
     });
