@@ -203,11 +203,20 @@ export function startGame(opts = {}) {
   // of that same function) right after the board's initial reset, so the
   // very first aim/reveal above starts from the board's real current state
   // instead of a fresh rack.
+  // weekMatchStart: true only for the actual opening of the match — team
+  // A's very first shot, or team B's very first reveal (see
+  // weekController.js's isMatchStart, computed off the match's real
+  // scoreA/scoreB/pointManches, not derivable from resumeManches alone: a
+  // later point starting fresh also has an empty resumeManches). Per
+  // explicit feedback this is the ONLY WEEK moment that replays
+  // beginMatchIntro()'s huddle-slide-in + sting — every other WEEK entry
+  // (a later point, or a mid-point reconnect) goes straight to
+  // beginAimPhase(), same as before.
   const {
     net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false,
     onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, onTurnChange = null,
     matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null,
-    singleShotTeam = null, onShotCommitted = null, externalManche = null, onMancheSettled = null, resumeManches = null,
+    singleShotTeam = null, onShotCommitted = null, externalManche = null, onMancheSettled = null, resumeManches = null, weekMatchStart = false,
   } = opts;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
   // default preset; Custom is the same shape with different values. Every
@@ -1530,6 +1539,24 @@ export function startGame(opts = {}) {
       if (physicsStep()) break;
       if (allSettled()) break;
     }
+    // Every manche this replays (WEEK's resumeManches, and replay's own
+    // thumbnail fast-forward) settled WITHOUT scoring by construction — a
+    // scoring manche ends its point, and neither caller ever includes a
+    // point's final manche here (see snapshotFor's own pointManches comment:
+    // "manches already played earlier in the current, NOT-YET-SCORED
+    // point"). runSimTick's real live loop clears every stone's `used` right
+    // after exactly this same "settled, no goal, on to the next manche"
+    // moment (see its own reset right before beginStraighten()) — mirroring
+    // that reset here is what makes a WEEK reconnect match live play's own
+    // halo behavior instead of leaking a stone's *previous* manche shot
+    // forward as still-lit into a manche it was never actually part of (bug
+    // report: several stones already glowing on returning to a match, when
+    // only ones actually dragged this turn should). Sweep is deliberately
+    // untouched — it's a once-per-POINT resource in live play too (no
+    // equivalent per-manche reset exists for it, only beginRoundReset()'s
+    // real point boundary clears sweep.used).
+    entities.A.forEach((g) => { g.used = false; });
+    entities.B.forEach((g) => { g.used = false; });
   }
 
   // ---------- Replay playback bar (custom, distinct from the arcade toolbar
@@ -2489,12 +2516,27 @@ export function startGame(opts = {}) {
     // (sendShots, 'lanWait', the dead-end watchdog) — the session simply
     // ends here, the caller (weekController.js) is expected to tear it down
     // right after receiving onShotCommitted and continue on its own.
+    // Per explicit feedback: don't hand off to onShotCommitted (which the
+    // caller uses to jump straight to its own "shot on the ice" screen) the
+    // instant the shot commits — play the same laser-retract-into-the-
+    // stones beat + 'launchEngine' sound every other reveal gets first (see
+    // playLaunchEngine/retractTeam/PRE_SIM_DELAY above), so the transition
+    // doesn't feel like it's skipping a step just because there's no
+    // opponent shot to reveal alongside it. `phase = 'pending'` is what
+    // actually makes the retract draw (see the render dispatch further down
+    // this file: `phase === 'pending' && retractTeam` is its only trigger) —
+    // nothing else reads 'pending' here since launchSimulation() is never
+    // called, there's no second team's shot yet to actually run physics on.
     if (singleShotTeam) {
       if (phase !== 'lanAim') return;
       const stones = entities[singleShotTeam].map(g => ({ vx: g.pendingVx || 0, vy: g.pendingVy || 0, used: g.used }));
       commitSweep(singleShotTeam);
       const sw = sweep[singleShotTeam];
-      onShotCommitted?.(stones, sw.active ? { x: sw.x, y: sw.y, r: sw.r } : null);
+      phase = 'pending';
+      playLaunchEngine(singleShotTeam);
+      trackedTimeout(() => {
+        onShotCommitted?.(stones, sw.active ? { x: sw.x, y: sw.y, r: sw.r } : null);
+      }, PRE_SIM_DELAY);
       return;
     }
     if (aiTeam) {
@@ -2822,32 +2864,52 @@ export function startGame(opts = {}) {
     // WEEK (see startGame's own singleShotTeam/externalManche comments): no
     // ready-tap lobby needed, same reasoning as the aiTeam branch above —
     // there's only ever one viewer for a WEEK session, nothing to wait on.
-    // Straight to beginAimPhase(), deliberately NOT beginMatchIntro() —
-    // every WEEK session is a fresh startGame() call (see conversation),
-    // and beginMatchIntro() unconditionally snaps every stone back to its
-    // starting-rack position before animating them into place, which reads
-    // as "the board just got reset" even though resumeManches (applied at
-    // the top of beginAimPhase(), see its own comment) puts them right back
-    // where this point actually left them a moment later — a visible
-    // reset-then-reposition flash for no reason on every single turn.
-    // beginAimPhase() alone has no such reset baked in: whatever
-    // resetPositions() set up at the very start of this closure (rack, same
-    // as always) is exactly what resumeManches then fast-forwards from.
     startOverlay.classList.add('hidden');
     controlsEnabled = true;
-    // Deferred one tick (trackedTimeout(...,0), not a direct call) —
-    // beginAimPhase() (via resumeManches/fastForwardManche/physicsStep)
-    // reads module-level consts declared further down this same closure
-    // (e.g. CORNERS): called synchronously from right here, before this
-    // closure has finished its own top-to-bottom setup, that's a temporal-
-    // dead-zone ReferenceError (already hit and fixed once for
-    // resumeManches's own eager call site — see that fix's comment; calling
-    // beginAimPhase() straight from here reintroduces the exact same
-    // problem one level up). beginMatchIntro() never had this problem only
-    // because it always deferred its own beginAimPhase() call to an audio
-    // onEnded callback, well after setup finished — this is the same
-    // deferral, minus the animation.
-    trackedTimeout(beginAimPhase, 0);
+    if (weekMatchStart) {
+      // The actual opening of the match — team A's very first shot, or team
+      // B's very first reveal — and only that (see weekController.js's own
+      // isMatchStart, computed off the match's real scoreA/scoreB/
+      // pointManches, not just this session's resumeManches: a later POINT
+      // starting fresh has an empty resumeManches too, exactly like the
+      // match's first point does, but per explicit feedback only the
+      // match's actual opening gets this, nothing more). Same huddle-
+      // slide-in + 'matchStart' sting every other mode's entry branch gets.
+      // Safe to call synchronously same as those branches: it defers its
+      // own beginAimPhase() call to the 'matchStart' clip's onEnded
+      // callback, well past this closure's own setup (see
+      // beginMatchIntro's own comment).
+      beginMatchIntro();
+    } else {
+      // Every other WEEK entry — a later point starting fresh, or a
+      // mid-point reconnect with manches to fast-forward through (applied
+      // at the top of beginAimPhase(), see its own comment). Straight to
+      // beginAimPhase(), deliberately NOT beginMatchIntro() here: it
+      // unconditionally snaps every stone back to its starting-rack
+      // position and slides them in first, which — stacked in front of a
+      // resumeManches fast-forward — reads as "the board just got reset"
+      // only to immediately reposition itself, a flash with nothing behind
+      // it (see conversation). Whatever resetPositions() set up at the very
+      // start of this closure (rack, same as always) is exactly what a
+      // fast-forward needs to start from, no intro in between; and a fresh
+      // point with nothing to fast-forward just starts right there too,
+      // same as every other mode's own point-to-point transition
+      // (beginRoundReset), which never replays the match intro either.
+      //
+      // Deferred one tick (trackedTimeout(...,0), not a direct call) —
+      // beginAimPhase() (via resumeManches/fastForwardManche/physicsStep)
+      // reads module-level consts declared further down this same closure
+      // (e.g. CORNERS): called synchronously from right here, before this
+      // closure has finished its own top-to-bottom setup, that's a temporal-
+      // dead-zone ReferenceError (already hit and fixed once for
+      // resumeManches's own eager call site — see that fix's comment; calling
+      // beginAimPhase() straight from here reintroduces the exact same
+      // problem one level up). beginMatchIntro() never had this problem only
+      // because it always deferred its own beginAimPhase() call to an audio
+      // onEnded callback, well after setup finished — this is the same
+      // deferral, minus the animation.
+      trackedTimeout(beginAimPhase, 0);
+    }
   }
 
   // ---------- Physics ----------

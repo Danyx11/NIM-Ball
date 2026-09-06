@@ -131,11 +131,22 @@ function weekMatchHandle(socket, snapshot) {
   return {
     code: socket.code,
     ...rest,
-    // { stones, sweep, message } in, resolves with the fresh snapshot (see
+    // { stones, sweep } in, resolves with the fresh snapshot (see
     // WeekArbiter's 'shotAccepted' reply) — including the opponent's shot
-    // and message once both sides have submitted for this round.
-    async sendShot(stones, sweep, message) {
-      return socket.request({ type: 'shot', stones, sweep, message });
+    // once both sides have submitted for this round. No message anymore —
+    // see sendMessage below, a fully separate, optional, later action (a
+    // message belongs to its recipient, not to this shot — see conversation).
+    async sendShot(stones, sweep) {
+      return socket.request({ type: 'shot', stones, sweep });
+    },
+    // Leaves a message for the opponent — reachable any time after this
+    // team has already submitted its own shot for the current manche (the
+    // "YOUR SHOT IS ON THE ICE" screen, see main.js), not gathered before
+    // sending. Overwrites this recipient's one message slot (see
+    // party/weekArbiter.js's own inbox/consumeInbox — no unread/multi-
+    // message queue for now, per explicit request).
+    async sendMessage(text) {
+      return socket.request({ type: 'message', message: text });
     },
     // Reports the locally-computed outcome of a revealed manche (this game
     // never runs physics server-side, see CLAUDE.md) so the persisted match
