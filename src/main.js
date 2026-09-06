@@ -14,7 +14,7 @@ import { playSingleShot, playReveal } from './weekController.js';
 import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendClaimTransaction } from './nimiq.js';
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
-import { initBackground, preloadBackgroundAssets } from './background.js';
+import { initBackground, preloadBackgroundAssets, setModeSelectVibeBackground } from './background.js';
 import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, fetchMyWeekMatches, dismissWeekMatch } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
@@ -1073,6 +1073,7 @@ function hideRemoteMatchStack() {
 }
 function showModeDrawer() {
   hideRemoteMatchStack();
+  setModeSelectVibeBackground(null);
   modeDrawer.classList.remove('hidden');
   modeOverlay.classList.remove('hidden');
 }
@@ -1110,6 +1111,7 @@ const VIBE_TILES = { hockey: modeHockey, curling: modeCurling };
 function vibeTintClass() { return activeVibe === 'curling' ? 'mode-curling' : 'mode-hockey'; }
 function showVibeDrawer(vibe) {
   activeVibe = vibe;
+  setModeSelectVibeBackground(vibe);
   const vibeIcon = VIBE_TILES[vibe].querySelector('.mode-icon');
   modeLocalVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
   modeMatchVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
