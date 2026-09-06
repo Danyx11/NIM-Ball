@@ -52,6 +52,12 @@ function isMatchStart(week) {
 // visible, same 'lanAim' gating LAN already uses) and resolves once that
 // shot is committed. Tears the session down itself before resolving —
 // callers never need their own stopGame() for this half of WEEK.
+// boardSnapshot: a plain data-URL freeze-frame of the canvas at the exact
+// instant the shot commits (before stopGame() clears it) — main.js's
+// post-commit "YOUR SHOT IS ON THE ICE" screen shows this as its background
+// instead of keeping the whole engine alive just to display a static board,
+// per the WEEK flow-simplification conversation (rink-as-background, not a
+// second live session).
 export function playSingleShot(week, engineOpts) {
   return new Promise((resolve) => {
     const stopGame = startGame({
@@ -61,7 +67,11 @@ export function playSingleShot(week, engineOpts) {
       weekMatchStart: isMatchStart(week),
       matchConfig: week.config,
       vibe: week.game,
-      onShotCommitted: (stones, sweep) => { stopGame(); resolve({ stones, sweep }); },
+      onShotCommitted: (stones, sweep) => {
+        const boardSnapshot = document.getElementById('stage').toDataURL();
+        stopGame();
+        resolve({ stones, sweep, boardSnapshot });
+      },
     });
   });
 }

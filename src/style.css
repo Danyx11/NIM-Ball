@@ -2513,6 +2513,62 @@ button:disabled { opacity: 0.35; cursor: default; }
    same shell as a normal resume card, just a plain div (nothing to resume)
    and visibly inert so it doesn't read as a live, clickable match. */
 .week-match-card.week-match-gone { opacity: 0.5; cursor: default; }
+
+/* WEEK's own board-panel overlay (index.html's own comment on the element,
+   main.js's showWeekBoardPanel) — a small card floating over the rink,
+   either the live canvas (message + PLAY, before aiming) or a frozen
+   boardSnapshot image (the post-shot waiting screen) underneath. Deliberately
+   separate from #overlay (game.js's own goal/victory panel mechanism) —
+   see index.html's comment on why these two never touch each other. */
+#weekBoardPanel {
+  position: absolute; inset: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+}
+#weekBoardPanel.hidden { display: none; }
+#weekBoardPanelBg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; display: none;
+}
+#weekBoardPanel.has-bg #weekBoardPanelBg { display: block; }
+/* Dims whatever's underneath (live canvas or the frozen bg image alike) so
+   the card's own text stays legible regardless of what the ice looks like
+   at that exact moment — same role as #overlay's own --scrim-92 wash. */
+#weekBoardPanel::before { content: ''; position: absolute; inset: 0; background: rgba(15, 20, 35, 0.55); }
+#weekBoardPanelBox {
+  position: relative; z-index: 1;
+  width: fit-content; max-width: calc(100% - 12%);
+  height: fit-content; max-height: 88%;
+  background: var(--scrim-92); border-radius: 24px; padding: 26px 30px;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  text-align: center; color: #fff;
+  box-shadow: 0 4px 14px rgba(31, 35, 72, 0.38);
+  overflow: auto;
+  animation: panel-in 260ms cubic-bezier(.16,1,.3,1);
+}
+#weekBoardPanelBox h2 { margin: 0; font-size: 22px; color: #fff; }
+#weekBoardPanelBox p { margin: 0; color: rgba(255,255,255,0.75); max-width: 320px; font-size: 14px; line-height: 1.5; }
+/* The opponent's own words — set apart from this screen's own copy (h2/p
+   above) so it visibly reads as quoted content, not UI text. */
+#weekBoardPanelBox .week-quote {
+  margin: 0; padding: 12px 16px; border-radius: 12px;
+  background: rgba(255,255,255,0.08); font-style: italic; color: #fff;
+  max-width: 320px; font-size: 15px; line-height: 1.4;
+}
+#weekBoardPanelBox .bigbtn {
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
+  transition: background .15s ease, border-color .15s ease;
+}
+#weekBoardPanelBox .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
+/* Two side-by-side actions (MESSAGE/QUIT, SEND/CANCEL) — .bigbtn stays full-
+   width everywhere else in this app, this is the one spot two sit in a row. */
+#weekBoardPanelBox .week-panel-row { display: flex; flex-direction: row; gap: 10px; width: 100%; }
+#weekBoardPanelBox .week-panel-row .bigbtn { flex: 1; }
+#weekBoardPanelBox input[type="text"] {
+  width: 260px; max-width: 100%; padding: 12px 16px; border-radius: 12px;
+  border: none; font-size: 14px; color: var(--bg-deep); background: #fff;
+}
+#weekBoardPanelBox input[type="text"]::placeholder { color: rgba(31,35,72,0.5); }
+#weekBoardPanelBox .week-sent-note { margin: 0; font-size: 12px; color: rgba(255,255,255,0.55); }
 /* Staggered right after the panel itself (panel-in above), not from the
    very start — a beat behind its own container reads as "the panel arrived,
    then its choices settled in", not two unrelated things animating at once.

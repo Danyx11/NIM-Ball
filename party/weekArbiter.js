@@ -54,11 +54,15 @@ export class WeekArbiter extends Server {
 
   // Compact, redacted view sent to a connecting client. The opponent's shot
   // for the in-progress round is withheld until both sides have submitted —
-  // enough gating to keep "leave a message, then watch the reveal" feeling
-  // like a real reveal, not a proof against a client that inspects its own
-  // network traffic (this arbiter already trusts every client-sent field
-  // exactly like party/arbiter.js does, see that file's own comments — same
-  // posture here, this game has no stakes that would justify more).
+  // enough gating to keep "watch the reveal" feeling like a real reveal, not
+  // a proof against a client that inspects its own network traffic (this
+  // arbiter already trusts every client-sent field exactly like
+  // party/arbiter.js does, see that file's own comments — same posture
+  // here, this game has no stakes that would justify more). Deliberately
+  // does NOT include a message — see this.match.inbox/consumeInbox below,
+  // a message is delivered once, at connect time, to its recipient only,
+  // never bundled into the reveal (see conversation: a message belongs to
+  // its recipient, not to the reveal both sides eventually watch together).
   snapshotFor(team) {
     const m = this.match;
     const opp = otherTeam(team);
@@ -79,6 +83,28 @@ export class WeekArbiter extends Server {
       // manche a minute after the 1st.
       pointManches: m.pointManches,
     };
+  }
+
+  // A message is a single slot per recipient (this.match.inbox.A/.B, see the
+  // 'message' case in onMessage below) — deliberately not an unread-count/
+  // multi-message inbox (per explicit request: keep this simple for now).
+  // Consuming it (reading + clearing + persisting in one step) is what makes
+  // "shown once, at connect time" true: called only from onConnect's three
+  // "this address is actually arriving/returning to the match" branches
+  // below, never from a reply to that team's own shot/message/completeRound
+  // action, so a team is never shown a message as a side effect of their own
+  // move — only of actually opening/reconnecting to the match.
+  async consumeInbox(team) {
+    // Defensive against a match persisted before this field existed (a
+    // pre-existing local/dev match) — reads back as undefined, not a
+    // missing-inbox error.
+    if (!this.match.inbox) return null;
+    const msg = this.match.inbox[team];
+    if (msg) {
+      this.match.inbox[team] = null;
+      await this.persist();
+    }
+    return msg || null;
   }
 
   // 'yourTurn' / 'waiting' / 'revealReady' — differs per team (mirrors
@@ -144,6 +170,8 @@ export class WeekArbiter extends Server {
         // Manches already played in the current, not-yet-scored point — see
         // snapshotFor's own comment and completeRound below.
         pointManches: [],
+        // One-slot-per-recipient message inbox — see consumeInbox above.
+        inbox: { A: null, B: null },
       };
       await this.persist();
       await this.ctx.storage.setAlarm(this.match.joinDeadline);
@@ -152,7 +180,11 @@ export class WeekArbiter extends Server {
         game, opponentAddress: null, myTeam: 'A', status: 'pending', turnLabel: 'pending',
         pointsToWin: config.pointsToWin, expiresAt: null, joinDeadline: this.match.joinDeadline,
       });
-      this.send(connection, { type: 'connected', ...this.snapshotFor('A') });
+      // Nothing to deliver — this match didn't exist a moment ago, so
+      // inboxMessage is always null here (included anyway for a shape
+      // src/net.js's `week` object can rely on being present, not just
+      // sometimes-undefined).
+      this.send(connection, { type: 'connected', ...this.snapshotFor('A'), inboxMessage: null });
       return;
     }
 
@@ -169,12 +201,14 @@ export class WeekArbiter extends Server {
 
     if (address === this.match.playerA) {
       connection.setState({ team: 'A' });
-      this.send(connection, { type: 'connected', ...this.snapshotFor('A') });
+      const inboxMessage = await this.consumeInbox('A');
+      this.send(connection, { type: 'connected', ...this.snapshotFor('A'), inboxMessage });
       return;
     }
     if (address === this.match.playerB) {
       connection.setState({ team: 'B' });
-      this.send(connection, { type: 'connected', ...this.snapshotFor('B') });
+      const inboxMessage = await this.consumeInbox('B');
+      this.send(connection, { type: 'connected', ...this.snapshotFor('B'), inboxMessage });
       return;
     }
     if (this.match.playerB) { this.send(connection, { type: 'full' }); connection.close(); return; }
@@ -193,7 +227,13 @@ export class WeekArbiter extends Server {
     await this.ctx.storage.setAlarm(this.match.expiresAt);
     connection.setState({ team: 'B' });
     await Promise.all([this.pushIndexUpdate('A'), this.pushIndexUpdate('B')]);
-    this.send(connection, { type: 'connected', ...this.snapshotFor('B') });
+    // B's very first-ever connection to this match — still a legitimate
+    // delivery moment: A could already have left a message for B before B
+    // ever joined (see main.js's showWeekFirstShotScreen-era flow, now
+    // folded into the same "play immediately on create" entry, which lets A
+    // message B from the post-shot waiting screen while B has no code yet).
+    const inboxMessage = await this.consumeInbox('B');
+    this.send(connection, { type: 'connected', ...this.snapshotFor('B'), inboxMessage });
   }
 
   async onMessage(connection, message) {
@@ -205,17 +245,36 @@ export class WeekArbiter extends Server {
     if (msg.type === 'shot') {
       // 'pending' allowed too, not just 'active' — lets the creator (team A)
       // play their own first shot before B has even joined (see main.js's
-      // hostWeekMatch/showWeekFirstShotScreen). Safe: team can only ever be
-      // 'B' once status is already 'active' (onConnect sets both together,
-      // see above), so a 'pending' shot can only ever come from A.
+      // hostWeekMatch, folded straight into the same aim flow now). Safe:
+      // team can only ever be 'B' once status is already 'active' (onConnect
+      // sets both together, see above), so a 'pending' shot can only ever
+      // come from A. No message bundled in anymore — see msg.type ===
+      // 'message' below, a fully separate, optional, later action.
       if ((this.match.status !== 'active' && this.match.status !== 'pending') || this.match.pendingShots[team]) return;
-      const text = typeof msg.message === 'string'
-        ? Array.from(msg.message.replace(/[\r\n\t]+/g, ' ').trim()).slice(0, 60).join('')
-        : '';
-      this.match.pendingShots[team] = { stones: msg.stones, sweep: msg.sweep || null, message: text };
+      this.match.pendingShots[team] = { stones: msg.stones, sweep: msg.sweep || null };
       await this.persist();
       await Promise.all([this.pushIndexUpdate('A'), this.pushIndexUpdate('B')]);
       this.send(connection, { type: 'shotAccepted', ...this.snapshotFor(team) });
+      return;
+    }
+
+    // A message is addressed to the OTHER team, saved into their inbox slot
+    // (see consumeInbox above) — fully decoupled from 'shot' now: reachable
+    // any time after this team has already submitted its shot for the
+    // current manche (the "YOUR SHOT IS ON THE ICE" screen, see main.js),
+    // not gathered before sending. Overwrites whatever undelivered message
+    // was already sitting there — a single slot per recipient, not a queue
+    // (per explicit request: no unread/multi-message inbox for now).
+    if (msg.type === 'message') {
+      if (this.match.status !== 'active' && this.match.status !== 'pending') return;
+      const text = typeof msg.message === 'string'
+        ? Array.from(msg.message.replace(/[\r\n\t]+/g, ' ').trim()).slice(0, 60).join('')
+        : '';
+      if (!text) return;
+      if (!this.match.inbox) this.match.inbox = { A: null, B: null }; // pre-existing match, see consumeInbox
+      this.match.inbox[otherTeam(team)] = { text };
+      await this.persist();
+      this.send(connection, { type: 'messageSent' });
       return;
     }
 

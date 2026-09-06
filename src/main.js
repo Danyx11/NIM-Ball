@@ -204,8 +204,11 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
   // is position:absolute;inset:0 against that final parent, same box as the
   // canvas, so no separate mobile-only detach dance is needed here the way
   // the old two-window #chatBar required (that one was a flex sibling below
-  // the board, not an inset:0 overlay on top of it).
-  ['overlay', 'replayBar', 'syncToast', 'chatMask'].forEach((id) => {
+  // the board, not an inset:0 overlay on top of it). #weekBoardPanel (WEEK's
+  // own message/PLAY/waiting card, see its own index.html comment) is the
+  // same kind of inset:0-over-the-canvas overlay, so it gets the identical
+  // treatment.
+  ['overlay', 'replayBar', 'syncToast', 'chatMask', 'weekBoardPanel'].forEach((id) => {
     gameCard.appendChild(document.getElementById(id));
   });
   // The pre-game menu screens (mode-select + Classic/Custom + Settings +
@@ -2384,16 +2387,21 @@ function showMatchHostWaitingScreen(net, code, matchConfig) {
 // WEEK's own creation flow (party/weekArbiter.js) — no "waiting for
 // opponent" live screen the way LIVE's showMatchHostWaitingScreen has: WEEK
 // never holds a connection open hoping for a push (see the WEEK design
-// conversation). Once the code exists, the creator plays their own first
-// shot right away (showWeekFirstShotScreen -> showWeekAimScreen, same path
-// a normal turn already takes — party/weekArbiter.js accepts a 'pending'
-// shot from A specifically for this) rather than just sitting on the code
-// with nothing left to do — the match-code/"share this"/join-deadline
-// screen still shows, just afterward, once sendShot's own snapshot lands on
-// enterWeekMatch's 'pending' branch below. Reconnecting later while still
-// pending (Join with a code, or My Matches before B has joined) goes
-// straight to that same 'pending' branch instead, exactly the same
-// "connect, get current state" path a fresh join would take.
+// conversation). No intermediate code screen either (per the WEEK flow-
+// simplification conversation): the creator plays their own first shot
+// immediately, straight through enterWeekMatch's own dispatch (same path a
+// normal turn already takes — party/weekArbiter.js accepts a 'pending' shot
+// from A specifically for this). The match code + a Share button only show
+// afterward, on showWeekWaitingScreen's 'pending' variant, once that first
+// shot has actually been committed. Reconnecting later while still pending
+// (Join with a code, or My Matches before B has joined) resolves through
+// that exact same dispatch too — 'pending' isn't a special case there
+// anymore, see enterWeekMatch's own comment.
+// No intermediate "Play your first shot / Go" screen anymore (per the WEEK
+// flow-simplification conversation) — A plays their first shot immediately
+// on creation, straight into enterWeekMatch's own dispatch (which, for a
+// brand new match, always resolves to showWeekAimScreen: no reveal yet,
+// nothing submitted yet).
 async function hostWeekMatch(matchConfig) {
   let code = generateMatchCode();
   showLoadingOverlay();
@@ -2401,7 +2409,7 @@ async function hostWeekMatch(matchConfig) {
     try {
       const week = await createWeekMatch(code, hubAddress, activeVibe, matchConfig);
       hideLoadingOverlay();
-      showWeekFirstShotScreen(week);
+      enterWeekMatch(week);
       return;
     } catch (err) {
       if (err.reason === 'occupied' && attempt < 4) { code = generateMatchCode(); continue; }
@@ -2410,30 +2418,6 @@ async function hostWeekMatch(matchConfig) {
       return;
     }
   }
-}
-
-// Deliberately does NOT week.close() here (unlike every other terminal
-// showNetPanel screen in this file) — showWeekAimScreen below still needs
-// this same live socket for its eventual sendShot() (net.js's weekMatchHandle
-// methods all reuse the one socket from creation/join, not a fresh
-// connection per call), so closing it here would make that call fail
-// silently. Whichever branch of enterWeekMatch the post-shot snapshot lands
-// on (see showWeekMessageScreen's submit()) owns closing it instead, same as
-// every other point this flow can end at.
-function showWeekFirstShotScreen(week) {
-  const cls = week.team === 'A' ? 'a' : 'b';
-  const teamLabel = week.team === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
-  showNetPanel(`
-    <span class="team-pill ${cls}">${teamLabel}</span>
-    <h2>Play your first shot</h2>
-    <p>Take your shot now — your opponent will see it once they join with your code.</p>
-    <button class="bigbtn" id="weekFirstShotGoBtn">Go</button>
-  `);
-  document.getElementById('weekFirstShotGoBtn').addEventListener('click', () => {
-    audio.play('button');
-    hideNetPanel();
-    showWeekAimScreen(week);
-  });
 }
 
 // retryScreen: where an error (bad code, connect failure) or a later
@@ -2513,14 +2497,6 @@ async function joinMatch(code, joinBtn, retryScreen) {
 // same entry point either way, since a WEEK connection is always "connect,
 // then render whatever the snapshot says" (see the WEEK design conversation
 // — no live push to react to instead).
-function formatTimeLeft(ts) {
-  const ms = ts - Date.now();
-  if (ms <= 0) return 'less than a minute';
-  const hours = Math.floor(ms / 3_600_000);
-  if (hours < 1) return `${Math.max(1, Math.floor(ms / 60_000))}m`;
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
 function enterWeekMatch(week) {
   hideLobby();
   // Same bug/fix as showLobby()'s own joinCodeOverlay.classList.add('hidden')
@@ -2549,47 +2525,94 @@ function enterWeekMatch(week) {
     document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
     return;
   }
-  if (week.status === 'pending') {
-    // Only reachable by reconnecting as A while B hasn't joined yet (e.g.
-    // via My Matches) — same code screen as creation, still nothing to wait
-    // on live for.
-    week.close();
-    const cls = week.team === 'A' ? 'a' : 'b';
-    const teamLabel = week.team === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
-    showNetPanel(`
-      <span class="team-pill ${cls}">${teamLabel}</span>
-      <h2>Waiting for opponent</h2>
-      <div class="match-code">${week.code}</div>
-      <p>They have ${formatTimeLeft(week.joinDeadline)} left to join.</p>
-      <button class="bigbtn" id="weekDoneBtn">OK</button>
-    `);
-    document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
-    return;
-  }
-  // status === 'active'
+  // 'pending' (A alone, still waiting on B to join) and 'active' both funnel
+  // through the exact same aim/waiting/reveal dispatch below — per the WEEK
+  // flow-simplification conversation, A now plays their first shot
+  // immediately on creation (no separate code screen first), so 'pending'
+  // really only ever differs from 'active' in whether B has joined yet,
+  // which showWeekWaitingScreen itself checks (to offer the code/share row)
+  // — nothing here needs to branch on it. week.reveal is naturally always
+  // null while 'pending' (B doesn't exist yet to have submitted anything),
+  // so the check below still resolves correctly with no separate branch.
   if (week.reveal) { showWeekRevealScreen(week); return; }
-  if (week.mySubmitted) {
-    week.close();
-    showNetPanel(`<h2>Your shot is on the ice.</h2><p>Wait for your opponent.</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
-    document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
-    return;
-  }
+  if (week.mySubmitted) { showWeekWaitingScreen(week, null); return; }
   showWeekAimScreen(week);
 }
 
 // Merges a fresh server reply (WeekArbiter's 'connected'/'shotAccepted'/
 // 'roundCompleted', all built from the same snapshotFor()) onto an existing
 // `week` handle — the reply carries every match-state field but not the
-// handle's own methods (sendShot/completeRound/close), so a plain spread
-// keeps those while replacing the state with what the server just sent.
-function mergeWeek(week, snapshot) { return { ...week, ...snapshot }; }
+// handle's own methods (sendShot/sendMessage/completeRound/close), so a
+// plain spread keeps those while replacing the state with what the server
+// just sent. inboxMessage explicitly defaults to null on every merge, not
+// just whatever `snapshot` happens to carry: party/weekArbiter.js only ever
+// attaches a fresh one to its 3 onConnect replies (see its own comment —
+// delivered once, at connect time, never as a side effect of this team's
+// own shot/message/completeRound actions), so a 'shotAccepted'/
+// 'roundCompleted' snapshot has no `inboxMessage` key at all. Without this
+// `?? null`, the plain spread below would silently carry the ALREADY-SHOWN
+// message from `week`'s previous state forward instead of clearing it.
+function mergeWeek(week, snapshot) { return { ...week, ...snapshot, inboxMessage: snapshot.inboxMessage ?? null }; }
+
+// ---- WEEK's own board-panel overlay (index.html's #weekBoardPanel, see its
+// own comment there) — a small card floating over the rink instead of a
+// full-screen panel that hides it (per the WEEK flow-simplification
+// conversation: "the rink is always the main screen, panels only appear
+// when something needs a decision"). `bgDataUrl`, when given, is a frozen
+// boardSnapshot (see weekController.js's playSingleShot) shown as a plain
+// background image for the moments the real canvas has already torn down;
+// omitted, the box floats directly over whatever's already live underneath
+// (blocking its pointer-events until dismissed — no game.js phase-machine
+// involvement needed for that, a covering DOM element is enough).
+const weekBoardPanel = document.getElementById('weekBoardPanel');
+const weekBoardPanelBg = document.getElementById('weekBoardPanelBg');
+const weekBoardPanelBox = document.getElementById('weekBoardPanelBox');
+function showWeekBoardPanel(html, bgDataUrl) {
+  weekBoardPanelBox.innerHTML = html;
+  if (bgDataUrl) { weekBoardPanelBg.src = bgDataUrl; weekBoardPanel.classList.add('has-bg'); }
+  else { weekBoardPanel.classList.remove('has-bg'); weekBoardPanelBg.removeAttribute('src'); }
+  weekBoardPanel.classList.remove('hidden');
+}
+function hideWeekBoardPanel() {
+  weekBoardPanel.classList.add('hidden');
+  weekBoardPanel.classList.remove('has-bg');
+  weekBoardPanelBg.removeAttribute('src');
+  weekBoardPanelBox.innerHTML = '';
+}
+
+// SHARE MATCH (see showWeekWaitingScreen's pending-only row) — the match
+// code plus whatever message is currently typed into that same screen's
+// (always-open, for this specific case) message field, so sharing and
+// messaging read as one action rather than two separate steps.
+// navigator.share (mobile-friendly share sheet) when available, clipboard
+// copy + a brief label swap otherwise.
+function buildWeekShareText(week, message) {
+  const base = `Join my WEEK match! Code: ${week.code}`;
+  return message ? `${base}\n"${message}"` : base;
+}
+async function shareWeekMatch(week, message, btn) {
+  const text = buildWeekShareText(week, message);
+  if (navigator.share) {
+    try { await navigator.share({ text }); } catch { /* cancelled by the user — no-op */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    const original = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  } catch { /* clipboard unavailable — the code is still on screen either way */ }
+}
 
 // "Your turn" — game.js's own aim UI (see src/weekController.js's
 // playSingleShot, which reuses the exact 'lanAim' phase LAN already has, no
 // timer, no phase-machine changes beyond the 5 hooks documented in
-// startGame()) runs until the local player commits a shot, then this hands
-// straight to the message/skip step — never a separate confirmation screen
-// in between, matching the brief's "shot validé -> LEAVE A MESSAGE" flow.
+// startGame()). Starts the real board immediately (per the flow-
+// simplification conversation) and shows the entry notice — the opponent's
+// message, if one arrived, otherwise just PLAY — as a card floating over
+// it, not a separate screen to close first: the covering card blocks
+// dragging until dismissed, so no phase-machine gate is needed in game.js
+// itself for that.
 async function showWeekAimScreen(week) {
   hideNetPanel();
   // Same bug/fix as showLobby()'s own modeOverlay.classList.add('hidden')
@@ -2604,58 +2627,120 @@ async function showWeekAimScreen(week) {
   showToolbar();
   activeMatchMode = 'week';
   await preloadCoreAssets(IS_MOBILE);
-  const { stones, sweep } = await playSingleShot(week, {
+  const shotPromise = playSingleShot(week, {
     ...rockHandlers, mobile: IS_MOBILE,
     identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
     onMatchReady: hideLoadingOverlay,
   });
-  hideMatchChrome();
-  showWeekMessageScreen(week, stones, sweep);
-}
-
-// "Leave a message / Skip" — optional, short, attached to this one shot
-// (not a running chat, see the WEEK design conversation). Either action
-// submits the same way; SKIP just sends an empty string.
-function showWeekMessageScreen(week, stones, sweep) {
-  showNetPanel(`
-    <h2>Leave a message</h2>
-    <p>Optional — shown to your opponent alongside the reveal.</p>
-    <input id="weekMessageInput" type="text" maxlength="60" placeholder="Good luck…" autocomplete="off" />
-    <button class="bigbtn" id="weekMessageSendBtn">Send</button>
-    <button class="bigbtn" id="weekMessageSkipBtn">Skip</button>
+  showWeekBoardPanel(week.inboxMessage ? `
+    <h2>${week.opponentAddress ? shortenAddressCompact(week.opponentAddress) : 'Your opponent'} left you a message</h2>
+    <p class="week-quote">"${escapeHtml(week.inboxMessage.text)}"</p>
+    <button class="bigbtn" id="weekEntryPlayBtn">Play</button>
+  ` : `
+    <button class="bigbtn" id="weekEntryPlayBtn">Play</button>
   `);
-  const submit = async (message) => {
-    hideNetPanel();
-    showLoadingOverlay();
-    try {
-      const snapshot = await week.sendShot(stones, sweep, message);
-      hideLoadingOverlay();
-      enterWeekMatch(mergeWeek(week, snapshot));
-    } catch (err) {
-      hideLoadingOverlay();
-      week.close();
-      showWeekErrorScreen(err.message);
-    }
-  };
-  document.getElementById('weekMessageSendBtn').addEventListener('click', () => {
-    audio.play('button');
-    submit(document.getElementById('weekMessageInput').value.trim());
-  });
-  document.getElementById('weekMessageSkipBtn').addEventListener('click', () => { audio.play('button'); submit(''); });
+  document.getElementById('weekEntryPlayBtn').addEventListener('click', () => { audio.play('button'); hideWeekBoardPanel(); });
+  const { stones, sweep, boardSnapshot } = await shotPromise;
+  hideMatchChrome();
+  showLoadingOverlay();
+  try {
+    const snapshot = await week.sendShot(stones, sweep);
+    hideLoadingOverlay();
+    const merged = mergeWeek(week, snapshot);
+    if (merged.reveal) { showWeekRevealScreen(merged); return; }
+    showWeekWaitingScreen(merged, boardSnapshot);
+  } catch (err) {
+    hideLoadingOverlay();
+    week.close();
+    showWeekErrorScreen(err.message);
+  }
 }
 
-// "Watch the reveal" — both shots (and messages) are already in. Shows them
-// up front (per the brief: tension/anticipation before the reveal itself),
-// then a manual tap hands off into src/weekController.js's playReveal
-// (reuses launchSimulation() exactly as the AI branch does — completely
-// normal pacing, no auto-play on arrival, see the WEEK design conversation
-// on why this is never pushed live even if both players happen to be
-// online at once).
+// "Your shot is on the ice" — shown over the frozen boardSnapshot from the
+// commit that just happened (or, on a cold reconnect that finds a shot
+// already waiting, no background at all — see enterWeekMatch). Two shapes:
+// still 'pending' (B hasn't joined at all yet, only ever true for A right
+// after their first shot) gets the match code + Share, with the message
+// field already open (per explicit request — sharing the code and leaving a
+// first note read as one beat here); already 'active' gets a plain
+// MESSAGE/QUIT pair instead, the message field opening on demand.
+function showWeekWaitingScreen(week, boardSnapshot) {
+  hideMatchChrome();
+  modeOverlay.classList.add('hidden');
+  const isPending = week.status === 'pending';
+  const messageField = `
+    <input id="weekMsgInput" type="text" maxlength="60" placeholder="Leave a message (optional)…" autocomplete="off" />
+    <button class="bigbtn" id="weekMsgSendBtn">Send</button>
+  `;
+  showWeekBoardPanel(`
+    <h2>Your shot is on the ice.</h2>
+    ${isPending ? `
+      <div class="match-code">${week.code}</div>
+      <button class="bigbtn" id="weekShareBtn">Share match</button>
+      ${messageField}
+    ` : `
+      <div id="weekMsgArea" class="hidden">${messageField}</div>
+    `}
+    <div class="week-panel-row">
+      ${isPending ? '' : `<button class="bigbtn" id="weekMsgToggleBtn">Message</button>`}
+      <button class="bigbtn" id="weekQuitBtn">Quit</button>
+    </div>
+  `, boardSnapshot);
+
+  document.getElementById('weekQuitBtn').addEventListener('click', () => {
+    audio.play('button');
+    week.close();
+    hideWeekBoardPanel();
+    returnToModeSelect();
+  });
+
+  // A single message slot per recipient (see party/weekArbiter.js's inbox) —
+  // sending just overwrites whatever was there, no queue/history to manage
+  // here, per explicit request to keep this simple for now.
+  const sendBtn = document.getElementById('weekMsgSendBtn');
+  sendBtn.addEventListener('click', async () => {
+    const input = document.getElementById('weekMsgInput');
+    const text = input.value.trim();
+    if (!text) return;
+    audio.play('button');
+    sendBtn.disabled = true;
+    try {
+      await week.sendMessage(text);
+      sendBtn.textContent = 'Sent ✓';
+    } catch {
+      sendBtn.disabled = false;
+    }
+  });
+
+  if (isPending) {
+    document.getElementById('weekShareBtn').addEventListener('click', (e) => {
+      audio.play('button');
+      shareWeekMatch(week, document.getElementById('weekMsgInput').value.trim(), e.currentTarget);
+    });
+  } else {
+    document.getElementById('weekMsgToggleBtn').addEventListener('click', (e) => {
+      audio.play('button');
+      e.currentTarget.classList.add('hidden');
+      document.getElementById('weekMsgArea').classList.remove('hidden');
+    });
+  }
+}
+
+// "Watch the reveal" — both shots are already in. Deliberately no message
+// content shown here anymore (per explicit request: a message belongs to
+// its recipient, delivered once at their next open/reconnect — see
+// showWeekAimScreen's own entry notice — never bundled into the reveal both
+// sides eventually watch together). A plain tap-through panel, not the
+// rink-background treatment above: unlike a fresh aim, applying the
+// external manche here launches immediately once startGame() runs (see
+// game.js's own beginAimPhase/externalManche branch), so there's no "board
+// sitting idle, waiting for a tap" moment to show behind a card the way
+// there is before aiming — this only calls playReveal() once the button
+// below is actually tapped, same shape the reveal step already had before
+// this whole simplification pass.
 function showWeekRevealScreen(week) {
   showNetPanel(`
     <h2>Watch the reveal</h2>
-    ${week.reveal.mine.message ? `<p>You: ${escapeHtml(week.reveal.mine.message)}</p>` : ''}
-    ${week.reveal.opponent.message ? `<p>Opponent: ${escapeHtml(week.reveal.opponent.message)}</p>` : ''}
     <button class="bigbtn" id="weekRevealBtn">Watch the reveal</button>
   `);
   document.getElementById('weekRevealBtn').addEventListener('click', async () => {
@@ -2682,20 +2767,12 @@ function showWeekRevealScreen(week) {
         showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${result.scoreA} · Team Yellow ${result.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
         document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
       } else {
-        // No score recap here (see conversation: this isn't a point being
-        // won, just a manche settling — the board itself already shows
-        // exactly where things stand, nothing to summarize in text). Still
-        // one tap before chaining into whatever's next (almost always this
-        // same player's next aim, see enterWeekMatch — both pendingShots
-        // were just cleared server-side): the previous canvas session
-        // already tore itself down (stopGame(), see playReveal), so
-        // something has to bridge into the next one either way — this is
-        // just that bridge, not a result screen.
-        showNetPanel(`<button class="bigbtn" id="weekContinueBtn">Play</button>`);
-        document.getElementById('weekContinueBtn').addEventListener('click', () => {
-          audio.play('button');
-          enterWeekMatch(mergeWeek(week, snapshot));
-        });
+        // Straight back into enterWeekMatch — no bridging "Play" panel
+        // anymore (per explicit request: "après le résultat, retour
+        // directement sur PLAY, sans écran intermédiaire"). Re-dispatches to
+        // showWeekAimScreen for whoever's turn is next, landing right back
+        // on the rink+PLAY entry with nothing in between.
+        enterWeekMatch(mergeWeek(week, snapshot));
       }
     } catch (err) {
       hideLoadingOverlay();

@@ -416,6 +416,21 @@
       </button>
     </div>
     <div id="overlay" class="hidden"><div id="ovContent"></div></div>
+    <!-- WEEK's own board-panel overlay (src/main.js) — deliberately a
+         SEPARATE element from #overlay above, never touched by game.js: the
+         WEEK flow needs to show a small card (opponent's message + PLAY,
+         "your shot is on the ice" + message/quit, etc.) over the rink while
+         a startGame() session is either mid-way through (live canvas
+         underneath, this panel just blocks pointer-events from reaching it
+         until dismissed) or already torn down (a frozen boardSnapshot data
+         URL shown as a plain background image instead — see
+         weekController.js's playSingleShot). Owned end-to-end by main.js,
+         same as every other WEEK screen — keeps the two overlay mechanisms
+         from ever racing each other. -->
+    <div id="weekBoardPanel" class="hidden">
+      <img id="weekBoardPanelBg" alt="">
+      <div id="weekBoardPanelBox"></div>
+    </div>
     <!-- Network sync-check toast (see CLAUDE.md determinism work / game.js's
          showSyncWaiting/showSyncProblem) — deliberately NOT #overlay: it has
          to stay visible on top of the ice while the stones underneath keep
