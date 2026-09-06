@@ -2583,16 +2583,18 @@ function hideWeekBoardPanel() {
 // SHARE MATCH (see showWeekWaitingScreen's pending-only row) — the match
 // code plus whatever message is currently typed into that same screen's
 // (always-open, for this specific case) message field, so sharing and
-// messaging read as one action rather than two separate steps.
-// navigator.share (mobile-friendly share sheet) when available, clipboard
-// copy + a brief label swap otherwise.
+// messaging read as one action rather than two separate steps. Per explicit
+// request: mobile always uses the native share sheet, desktop always copies
+// — not "try share, fall back to copy" (some desktop browsers do implement
+// navigator.share, but a share-sheet popup reads as mobile-native behavior
+// on desktop, not what was asked for here).
 function buildWeekShareText(week, message) {
   const base = `Join my WEEK match! Code: ${week.code}`;
   return message ? `${base}\n"${message}"` : base;
 }
 async function shareWeekMatch(week, message, btn) {
   const text = buildWeekShareText(week, message);
-  if (navigator.share) {
+  if (IS_MOBILE && navigator.share) {
     try { await navigator.share({ text }); } catch { /* cancelled by the user — no-op */ }
     return;
   }
@@ -2656,28 +2658,26 @@ async function showWeekAimScreen(week) {
   }
 }
 
-// "Your shot is on the ice" — shown over the frozen boardSnapshot from the
+// "Your shot is ready" — shown over the frozen boardSnapshot from the
 // commit that just happened (or, on a cold reconnect that finds a shot
 // already waiting, no background at all — see enterWeekMatch). Two shapes:
 // still 'pending' (B hasn't joined at all yet, only ever true for A right
-// after their first shot) gets the match code + Share, with the message
-// field already open (per explicit request — sharing the code and leaving a
-// first note read as one beat here); already 'active' gets a plain
-// MESSAGE/QUIT pair instead, the message field opening on demand.
+// after their first shot) gets the message field (above Share, per explicit
+// request) already open, then the match code + Share; already 'active' gets
+// a plain MESSAGE/QUIT pair instead, the message field opening on demand.
+// No Send button in either case (per explicit request) — whatever's typed
+// is sent automatically on Quit, see that handler below.
 function showWeekWaitingScreen(week, boardSnapshot) {
   hideMatchChrome();
   modeOverlay.classList.add('hidden');
   const isPending = week.status === 'pending';
-  const messageField = `
-    <input id="weekMsgInput" type="text" maxlength="60" placeholder="Leave a message (optional)…" autocomplete="off" />
-    <button class="bigbtn" id="weekMsgSendBtn">Send</button>
-  `;
+  const messageField = `<input id="weekMsgInput" type="text" maxlength="60" placeholder="Leave a message (optional)…" autocomplete="off" />`;
   showWeekBoardPanel(`
     <h2>Your shot is ready.</h2>
     ${isPending ? `
+      ${messageField}
       <div class="match-code">${week.code}</div>
       <button class="bigbtn" id="weekShareBtn">Share match</button>
-      ${messageField}
     ` : `
       <div id="weekMsgArea" class="hidden">${messageField}</div>
     `}
@@ -2687,29 +2687,17 @@ function showWeekWaitingScreen(week, boardSnapshot) {
     </div>
   `, boardSnapshot);
 
-  document.getElementById('weekQuitBtn').addEventListener('click', () => {
+  // A single message slot per recipient (see party/weekArbiter.js's inbox),
+  // sent only once Quit is actually pressed — whatever's currently typed,
+  // if anything (best-effort: a failed send here doesn't block quitting,
+  // same trust posture as every other WEEK action in this file).
+  document.getElementById('weekQuitBtn').addEventListener('click', async () => {
     audio.play('button');
+    const text = document.getElementById('weekMsgInput')?.value.trim();
+    if (text) { try { await week.sendMessage(text); } catch { /* best-effort */ } }
     week.close();
     hideWeekBoardPanel();
     returnToModeSelect();
-  });
-
-  // A single message slot per recipient (see party/weekArbiter.js's inbox) —
-  // sending just overwrites whatever was there, no queue/history to manage
-  // here, per explicit request to keep this simple for now.
-  const sendBtn = document.getElementById('weekMsgSendBtn');
-  sendBtn.addEventListener('click', async () => {
-    const input = document.getElementById('weekMsgInput');
-    const text = input.value.trim();
-    if (!text) return;
-    audio.play('button');
-    sendBtn.disabled = true;
-    try {
-      await week.sendMessage(text);
-      sendBtn.textContent = 'Sent ✓';
-    } catch {
-      sendBtn.disabled = false;
-    }
   });
 
   if (isPending) {
