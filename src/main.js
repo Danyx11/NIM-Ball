@@ -2196,6 +2196,14 @@ async function handleReplayFile(file) {
       return;
     }
     replayUploadOverlay.classList.add('hidden');
+    // Unlike replayUploadOverlay, #modeOverlay itself was left showing by
+    // showReplayUpload() as this panel's own backdrop (see that function) —
+    // every other mode entry point (modeSolo, modeLocal's callback, etc.)
+    // hides it right before startGame() too; missing here left it sitting
+    // behind the replay for its whole runtime, with whatever background it
+    // had at that moment — so a later showVibeDrawer() reads as "stuck" if
+    // anything about that stale state confuses it.
+    modeOverlay.classList.add('hidden');
     beginAmbience();
     activeMatchMode = 'replay';
     // Loading overlay stays up (already showing from the decode above) through

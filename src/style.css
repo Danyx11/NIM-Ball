@@ -1987,7 +1987,11 @@ button:disabled { opacity: 0.35; cursor: default; }
    itself still clips this back down to 80vw (inherits .team-select's own
    overflow:hidden), so the image is never resized, only cropped 10vw off
    each side. */
-#modeOverlayBg { position: absolute; top: 0; left: -10vw; width: 100vw; height: 100dvh; background-size: cover; background-position: center; }
+/* background-color fallback (same #000 as #game-card, see comment above) —
+   opaque even for the one frame before the vibe-specific image (see
+   src/background.js's setModeSelectVibeBackground) has painted, so a slow
+   decode never lets the just-quit match's frozen canvas show through. */
+#modeOverlayBg { position: absolute; top: 0; left: -10vw; width: 100vw; height: 100dvh; background-color: #000; background-size: cover; background-position: center; }
 /* Same recentering trick as the desktop rule above, just re-derived for
    mobile's own reserved column: -10vw is exactly half of DESKTOP's fixed
    20vw #menuStage margin, which doesn't mean anything on mobile — there the
