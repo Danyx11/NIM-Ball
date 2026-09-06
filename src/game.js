@@ -782,8 +782,9 @@ export function startGame(opts = {}) {
   const ART_V2_SCALE = 1176 / 887;
 
   const SCALE = 1200 / 900;                   // physics scaled up vs the original 900-wide prototype
-  const STONE_R = 38 * 0.9 * ART_V2_SCALE * 0.9; // shrunk another 10% per feedback (was 38), rescaled for the V2 art (see ART_V2_SCALE), then another -10% per feedback
-  const BALL_R = STONE_R / 2 * 0.9 * 0.9;       // half a stone's diameter, shrunk 10% twice more (~15.4 pre-V2), rendered as the puck sprite
+  const STONE_R_BASE = 38 * 0.9 * ART_V2_SCALE * 0.9; // shrunk another 10% per feedback (was 38), rescaled for the V2 art (see ART_V2_SCALE), then another -10% per feedback
+  const STONE_R = STONE_R_BASE * 0.9;           // shrunk another 10% per proportions audit — more breathing room around stones/goal mouth; ball kept at its pre-shrink size (see BALL_R)
+  const BALL_R = STONE_R_BASE / 2 * 0.9 * 0.9;       // half a stone's diameter, shrunk 10% twice more (~15.4 pre-V2), rendered as the puck sprite
   const STONE_MASS = 2.4;
   const BALL_MASS = 1.0;                        // was 0.55 (4.4:1) — narrowed ratio so stones bleed more speed on ball contact, feel test
   // Pace/bounce constants calibrated against frame-tracked Globulos footage
