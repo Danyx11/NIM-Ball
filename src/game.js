@@ -1539,6 +1539,24 @@ export function startGame(opts = {}) {
       if (physicsStep()) break;
       if (allSettled()) break;
     }
+    // Every manche this replays (WEEK's resumeManches, and replay's own
+    // thumbnail fast-forward) settled WITHOUT scoring by construction — a
+    // scoring manche ends its point, and neither caller ever includes a
+    // point's final manche here (see snapshotFor's own pointManches comment:
+    // "manches already played earlier in the current, NOT-YET-SCORED
+    // point"). runSimTick's real live loop clears every stone's `used` right
+    // after exactly this same "settled, no goal, on to the next manche"
+    // moment (see its own reset right before beginStraighten()) — mirroring
+    // that reset here is what makes a WEEK reconnect match live play's own
+    // halo behavior instead of leaking a stone's *previous* manche shot
+    // forward as still-lit into a manche it was never actually part of (bug
+    // report: several stones already glowing on returning to a match, when
+    // only ones actually dragged this turn should). Sweep is deliberately
+    // untouched — it's a once-per-POINT resource in live play too (no
+    // equivalent per-manche reset exists for it, only beginRoundReset()'s
+    // real point boundary clears sweep.used).
+    entities.A.forEach((g) => { g.used = false; });
+    entities.B.forEach((g) => { g.used = false; });
   }
 
   // ---------- Replay playback bar (custom, distinct from the arcade toolbar
