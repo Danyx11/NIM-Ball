@@ -400,6 +400,20 @@ soundBtn.addEventListener('click', triggerSound);
 // forget alongside the instant cut instead of gating it.
 const exitBtn = document.getElementById('tbtn-exit');
 const exitCap = document.getElementById('tbtn-exit-cap');
+// Shared "actually leave the current match" step for every confirmed-quit
+// dialog below (toolbar exit, logo back-to-menu) — factored out so the WEEK
+// cancel-on-quit check (see pendingWeekCancel's own comment, further down
+// this file) only needs writing once, not duplicated per dialog.
+function performMatchExit() {
+  if (pendingWeekCancel) {
+    const week = pendingWeekCancel;
+    pendingWeekCancel = null;
+    week.abandon().catch(() => {}); // best-effort — same trust posture as every other WEEK action
+    week.close();
+  }
+  activeStopGame?.();
+  returnToModeSelect();
+}
 // Factored out so the "exit" HUD rock (see startGame's onRockExit option)
 // can trigger the exact same logic as the old toolbar button.
 function triggerExit() {
@@ -419,8 +433,7 @@ function triggerExit() {
     audio.stopAmbience();
     audio.play('exitPanel', { volume: 0.501 }); // -6dB, fire-and-forget
     hideLobby();
-    activeStopGame?.();
-    returnToModeSelect();
+    performMatchExit();
   };
   document.getElementById('exitNoBtn').onclick = () => { audio.play('button'); hideLobby(); };
 }
@@ -450,6 +463,17 @@ let activeMatchMode = null;
 // after calling stopGame() themselves.
 const rockHandlers = { onRockSound: triggerSound, onRockExit: triggerExit, onRockPower: triggerPower, onExit: returnToModeSelect };
 
+// Set only while showWeekAimScreen is running A's very first shot of a
+// brand new match (week.status still 'pending' — see that function's own
+// comment: nobody's joined, no code has ever actually been shown/shared
+// yet). Quitting through either confirm dialog below during that one
+// window cancels the match outright (week.abandon()) instead of leaving a
+// phantom "pending, nothing happened" row behind — still counting against
+// the 2-active-match cap and cluttering My Matches for a match that never
+// really started. Cleared the instant that window closes (the shot
+// commits) or once handled here.
+let pendingWeekCancel = null;
+
 // Nimiq logo doubles as a "back to menu" shortcut, same confirm dialog as
 // the exit toolbar button above (only relevant once a match is running —
 // on the mode-select screen there's no game in progress to lose) — always
@@ -478,8 +502,7 @@ bgLogo.addEventListener('click', () => {
     // quit gets the exit-panel sound.
     audio.play(inReplay ? 'button' : 'exitPanel', inReplay ? undefined : { volume: 0.501 }); // -6dB, fire-and-forget
     hideLobby();
-    activeStopGame?.();
-    returnToModeSelect();
+    performMatchExit();
   };
   document.getElementById('logoNoBtn').onclick = () => { audio.play('button'); hideLobby(); };
 });
@@ -2628,6 +2651,9 @@ async function showWeekAimScreen(week) {
   showLoadingOverlay();
   showToolbar();
   activeMatchMode = 'week';
+  // See pendingWeekCancel's own comment — only ever true for A, the one
+  // moment nothing has actually happened in this match yet.
+  pendingWeekCancel = week.status === 'pending' ? week : null;
   await preloadCoreAssets(IS_MOBILE);
   const shotPromise = playSingleShot(week, {
     ...rockHandlers, mobile: IS_MOBILE,
@@ -2643,6 +2669,7 @@ async function showWeekAimScreen(week) {
   `);
   document.getElementById('weekEntryPlayBtn').addEventListener('click', () => { audio.play('button'); hideWeekBoardPanel(); });
   const { stones, sweep, boardSnapshot } = await shotPromise;
+  pendingWeekCancel = null; // shot committed — no longer cancellable-on-exit
   hideMatchChrome();
   showLoadingOverlay();
   try {
