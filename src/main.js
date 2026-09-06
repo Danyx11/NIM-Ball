@@ -2521,6 +2521,17 @@ async function joinMatch(code, joinBtn, retryScreen) {
 // then render whatever the snapshot says" (see the WEEK design conversation
 // — no live push to react to instead).
 function enterWeekMatch(week) {
+  // Every panel/border tint in this app follows activeVibe (vibeTintClass()),
+  // read fresh each time rather than trusted to already be right — A's own
+  // creation flow already set it correctly (picked from the vibe tile before
+  // Classic/Custom), but "Join with a code" and My Matches both land here
+  // with no vibe context of their own, and would otherwise leave WEEK's
+  // panels showing whatever vibe happened to be active last (or none at
+  // all) instead of this match's actual game. week.game is the server's own
+  // authoritative value (see party/weekArbiter.js), already what
+  // weekController.js passes straight to startGame()'s own vibe opt — this
+  // just keeps the surrounding UI in sync with it too.
+  activeVibe = week.game;
   hideLobby();
   // Same bug/fix as showLobby()'s own joinCodeOverlay.classList.add('hidden')
   // above: reachable from "Join with a code" (joinWithCode -> joinWeekMatch)
@@ -2587,18 +2598,28 @@ function mergeWeek(week, snapshot) { return { ...week, ...snapshot, inboxMessage
 // omitted, the box floats directly over whatever's already live underneath
 // (blocking its pointer-events until dismissed — no game.js phase-machine
 // involvement needed for that, a covering DOM element is enough).
+// weekBoardPanelBg lives in #stage-wrap, not inside #weekBoardPanel itself
+// (see index.html's own comment on that element) — so #stage-wrap's own
+// edge-fade pseudo-elements apply to this frozen screenshot exactly like
+// they do the live canvas, instead of it showing a harder, flatter edge.
 const weekBoardPanel = document.getElementById('weekBoardPanel');
 const weekBoardPanelBg = document.getElementById('weekBoardPanelBg');
 const weekBoardPanelBox = document.getElementById('weekBoardPanelBox');
 function showWeekBoardPanel(html, bgDataUrl) {
   weekBoardPanelBox.innerHTML = html;
-  if (bgDataUrl) { weekBoardPanelBg.src = bgDataUrl; weekBoardPanel.classList.add('has-bg'); }
-  else { weekBoardPanel.classList.remove('has-bg'); weekBoardPanelBg.removeAttribute('src'); }
+  // Same vibe tint every other match panel gets (fillModeHeader/showNetPanel
+  // follow this exact same remove-both-then-add-current pattern) — read
+  // fresh on every call since it can only ever be hockey or curling, never
+  // stale from a class left over on a previous show.
+  weekBoardPanelBox.classList.remove('mode-hockey', 'mode-curling');
+  weekBoardPanelBox.classList.add(vibeTintClass());
+  if (bgDataUrl) { weekBoardPanelBg.src = bgDataUrl; weekBoardPanelBg.classList.remove('hidden'); }
+  else { weekBoardPanelBg.classList.add('hidden'); weekBoardPanelBg.removeAttribute('src'); }
   weekBoardPanel.classList.remove('hidden');
 }
 function hideWeekBoardPanel() {
   weekBoardPanel.classList.add('hidden');
-  weekBoardPanel.classList.remove('has-bg');
+  weekBoardPanelBg.classList.add('hidden');
   weekBoardPanelBg.removeAttribute('src');
   weekBoardPanelBox.innerHTML = '';
 }
@@ -2651,6 +2672,13 @@ async function showWeekAimScreen(week) {
   showLoadingOverlay();
   showToolbar();
   activeMatchMode = 'week';
+  // Fixed to this player's own team for the whole match, same reasoning as
+  // Remote Match/vs AI (see setProfilePillTeam's own comment) — WEEK has no
+  // single "team whose turn it is" the sidebar should track either, both
+  // sides aim on their own schedule. hideMatchChrome() (called between every
+  // WEEK screen transition) nulls this back out each time, so every screen
+  // that can follow one re-sets it rather than counting on it surviving.
+  setProfilePillTeam(week.team);
   // See pendingWeekCancel's own comment — only ever true for A, the one
   // moment nothing has actually happened in this match yet.
   pendingWeekCancel = week.status === 'pending' ? week : null;
@@ -2696,6 +2724,7 @@ async function showWeekAimScreen(week) {
 // is sent automatically on Quit, see that handler below.
 function showWeekWaitingScreen(week, boardSnapshot) {
   hideMatchChrome();
+  setProfilePillTeam(week.team); // see showWeekAimScreen's own comment
   modeOverlay.classList.add('hidden');
   const isPending = week.status === 'pending';
   const messageField = `<input id="weekMsgInput" type="text" maxlength="60" placeholder="Leave a message (optional)…" autocomplete="off" />`;
@@ -2766,6 +2795,7 @@ function showWeekRevealScreen(week) {
     showLoadingOverlay();
     showToolbar();
     activeMatchMode = 'week';
+    setProfilePillTeam(week.team); // see showWeekAimScreen's own comment
     await preloadCoreAssets(IS_MOBILE);
     const result = await playReveal(week, {
       ...rockHandlers, mobile: IS_MOBILE,

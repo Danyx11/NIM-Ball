@@ -366,6 +366,17 @@
 <div id="app">
   <div id="stage-wrap">
     <canvas id="stage" width="3312" height="1896"></canvas>
+    <!-- WEEK's frozen-board freeze-frame (src/weekController.js's
+         boardSnapshot, shown by main.js's showWeekBoardPanel) — deliberately
+         a direct child of #stage-wrap, NOT of #weekBoardPanel below (which
+         gets reparented into #game-card at init, see main.js's own comment
+         on that reparent list): #stage-wrap's own ::before/::after fade
+         pseudo-elements (the soft edge-to-black blend around the canvas,
+         see their own comment further down this file) only ever apply to
+         #stage-wrap's real children, so staying here is what lets this
+         plain screenshot pick up that exact same fade instead of showing a
+         harder, flatter-looking edge than the live canvas ever does. -->
+    <img id="weekBoardPanelBg" class="hidden" alt="">
     <div id="toolbar-top" class="hidden">
       <!-- #mobileController state icons for chat/sound (see style.css's
            .mc-icon-overlay/.mc-icon-backdrop rules and main.js/game.js for
@@ -422,13 +433,13 @@
          "your shot is on the ice" + message/quit, etc.) over the rink while
          a startGame() session is either mid-way through (live canvas
          underneath, this panel just blocks pointer-events from reaching it
-         until dismissed) or already torn down (a frozen boardSnapshot data
-         URL shown as a plain background image instead — see
-         weekController.js's playSingleShot). Owned end-to-end by main.js,
-         same as every other WEEK screen — keeps the two overlay mechanisms
-         from ever racing each other. -->
+         until dismissed) or already torn down (a frozen boardSnapshot, see
+         #weekBoardPanelBg up in #stage-wrap instead — kept separate from
+         this scrim+card so it can pick up #stage-wrap's own edge fade, see
+         its own comment there). Owned end-to-end by main.js, same as every
+         other WEEK screen — keeps the two overlay mechanisms from ever
+         racing each other. -->
     <div id="weekBoardPanel" class="hidden">
-      <img id="weekBoardPanelBg" alt="">
       <div id="weekBoardPanelBox"></div>
     </div>
     <!-- Network sync-check toast (see CLAUDE.md determinism work / game.js's
