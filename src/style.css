@@ -2517,19 +2517,16 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* WEEK's own board-panel overlay (index.html's own comment on the element,
    main.js's showWeekBoardPanel) — a small card floating over the rink,
    either the live canvas (message + PLAY, before aiming) or a frozen
-   boardSnapshot image (the post-shot waiting screen) underneath. Deliberately
-   separate from #overlay (game.js's own goal/victory panel mechanism) —
-   see index.html's comment on why these two never touch each other. */
+   boardSnapshot image (the post-shot waiting screen, see #weekBoardPanelBg
+   up by #stage-wrap instead — kept separate so it can pick up #stage-wrap's
+   own edge fade). Deliberately separate from #overlay (game.js's own goal/
+   victory panel mechanism) — see index.html's comment on why these two
+   never touch each other. */
 #weekBoardPanel {
   position: absolute; inset: 0; z-index: 10;
   display: flex; align-items: center; justify-content: center;
 }
 #weekBoardPanel.hidden { display: none; }
-#weekBoardPanelBg {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: cover; display: none;
-}
-#weekBoardPanel.has-bg #weekBoardPanelBg { display: block; }
 /* Dims whatever's underneath (live canvas or the frozen bg image alike) so
    the card's own text stays legible regardless of what the ice looks like
    at that exact moment — same role as #overlay's own --scrim-92 wash. */
@@ -2545,6 +2542,21 @@ button:disabled { opacity: 0.35; cursor: default; }
   overflow: auto;
   animation: panel-in 260ms cubic-bezier(.16,1,.3,1);
 }
+/* Same vibe-follows-activeVibe tint as every other match panel in this app
+   (.config-panel.mode-hockey/.mode-curling, #overlay.mode-hockey/.mode-
+   curling) — set via main.js's showWeekBoardPanel (vibeTintClass()), same
+   0.55-wash-over-the-default-scrim convention, gold light enough to need
+   the same dark-ink swap curling gets everywhere else. */
+#weekBoardPanelBox.mode-hockey { background: rgba(5, 130, 202, 0.55); }
+#weekBoardPanelBox.mode-curling { background: rgba(233, 178, 19, 0.55); color: var(--bg-deep); }
+#weekBoardPanelBox.mode-curling h2 { color: var(--bg-deep); }
+#weekBoardPanelBox.mode-curling p { color: rgba(11, 31, 42, 0.75); }
+#weekBoardPanelBox.mode-curling .week-quote { background: rgba(11, 31, 42, 0.12); color: var(--bg-deep); }
+#weekBoardPanelBox.mode-curling .week-sent-note { color: rgba(11, 31, 42, 0.6); }
+/* Translucent-white .bigbtn (base rule below) reads poorly on this light
+   gold tint — same dark-ink swap every other translucent-white button on a
+   gold/light backdrop already gets in this app. */
+#weekBoardPanelBox.mode-curling .bigbtn { color: var(--bg-deep); }
 #weekBoardPanelBox h2 { margin: 0; font-size: 22px; color: #fff; }
 #weekBoardPanelBox p { margin: 0; color: rgba(255,255,255,0.75); max-width: 320px; font-size: 14px; line-height: 1.5; }
 /* The opponent's own words — set apart from this screen's own copy (h2/p
@@ -2569,6 +2581,16 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 #weekBoardPanelBox input[type="text"]::placeholder { color: rgba(31,35,72,0.5); }
 #weekBoardPanelBox .week-sent-note { margin: 0; font-size: 12px; color: rgba(255,255,255,0.55); }
+/* #weekBoardPanelBg (index.html's own comment) lives inside #stage-wrap, not
+   under #weekBoardPanel — sized/positioned exactly like the canvas it sits
+   above (see canvas's own z-index:1 rule further up), just later in source
+   order so it paints on top; #stage-wrap's ::before/::after fades (z-index:2)
+   still apply over it same as they do the live canvas. */
+#weekBoardPanelBg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; z-index: 1;
+}
+#weekBoardPanelBg.hidden { display: none; }
 /* Staggered right after the panel itself (panel-in above), not from the
    very start — a beat behind its own container reads as "the panel arrived,
    then its choices settled in", not two unrelated things animating at once.
