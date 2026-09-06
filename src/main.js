@@ -2673,7 +2673,7 @@ function showWeekWaitingScreen(week, boardSnapshot) {
     <button class="bigbtn" id="weekMsgSendBtn">Send</button>
   `;
   showWeekBoardPanel(`
-    <h2>Your shot is on the ice.</h2>
+    <h2>Your shot is ready.</h2>
     ${isPending ? `
       <div class="match-code">${week.code}</div>
       <button class="bigbtn" id="weekShareBtn">Share match</button>
