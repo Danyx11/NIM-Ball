@@ -40,8 +40,8 @@ const SCHEDULE_LOOKAHEAD_S = 1; // schedule the next scheduled copy/leg (ambienc
 export const LASER_SRC = `${ASSET_BASE}sfx/laser sample.m4a`;
 export const LASER_LOOP_POINT_S = 0.5; // ping-pong body starts here; the 0..this attack only ever plays once, right as a stone is grabbed
 export const LASER_END_TRIM_S = 0.3; // clip's last 300ms is never played — trimmed off both the attack and the loop's far turnaround
-export const LASER_VOLUME_MIN_DB = -34; // was -37, +40% (~+2.9dB) — discrete, right at grab (drag distance 0)
-export const LASER_VOLUME_MAX_DB = -29; // was -32, +40% (~+2.9dB) — small lift at max pull distance, see setLaserIntensity()
+export const LASER_VOLUME_MIN_DB = -33.2; // was -34, +10% (~+0.8dB) — discrete, right at grab (drag distance 0)
+export const LASER_VOLUME_MAX_DB = -28.2; // was -29, +10% (~+0.8dB) — small lift at max pull distance, see setLaserIntensity()
 // Lowpass cutoff sweeps between these two, breathing in sync with the aimed
 // stone's own halo pulse (see startLaser()'s phaseOffsetS param) — same
 // period as game.js's HALO_PULSE_PERIOD, kept as a plain number here since
@@ -53,7 +53,7 @@ export const LASER_LP_GAIN_DIP_DB = -5; // extra gain riding the same sweep: 0dB
 
 // Per-sound reverb send amount (0 = dry). Only the stone impacts get a touch
 // of the forest reverb bus for now; other one-shot SFX stay dry.
-export const REVERB_SEND = { hitWall: 0, hitStone: 0, hitStoneBall: 0 };
+export const REVERB_SEND = { hitWall: 0.1, hitStone: 0.1, hitStoneBall: 0.1 };
 
 export const GLIDE_SAMPLE_SRC = `${ASSET_BASE}sfx/whoosh layer.m4a`;
 

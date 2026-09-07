@@ -1813,7 +1813,7 @@ export function startGame(opts = {}) {
     // laser/stone now stand in for it — restored in releaseDrag. Mobile has
     // no visible cursor to hide (touch-drag and the joystick alike).
     if (!mobile) document.body.style.cursor = 'none';
-    audio.play('stoneSelect', { volume: 0.316 }); // -10dB
+    audio.play('stoneSelect', { volume: 0.253 }); // was 0.316, -20%
     // aim-laser loop, runs for the whole drag until releaseDrag's stopLaser() — phase offset
     // syncs its filter sweep to this specific stone's own halo pulse, see pulseStrength()
     const haloIdx = parseInt(g.id.slice(1), 10) || 0;
@@ -1830,7 +1830,7 @@ export function startGame(opts = {}) {
     if (dist < MAX_DRAG) {
       if (dist - drag.lastTickDist >= DRAG_TICK_STEP) {
         drag.lastTickDist = dist;
-        audio.play('dragTick', { volume: 0.221, rate: 0.95 + Math.random() * 0.1 }); // was 0.316, -30%
+        audio.play('dragTick', { volume: 0.177, rate: 0.95 + Math.random() * 0.1 }); // was 0.221, -20%
       } else if (dist < drag.lastTickDist) {
         // shortening: track silently so the next stretch resumes ticking
         // right away instead of first re-crossing the old high-water mark
@@ -1847,7 +1847,7 @@ export function startGame(opts = {}) {
     if (dist > MAX_DRAG) { const s = MAX_DRAG / dist; dx *= s; dy *= s; dist = MAX_DRAG; }
     const g = drag.entity;
     if (!mobile) document.body.style.cursor = '';
-    audio.play('stoneSelect', { volume: 0.316 }); // -10dB, echoes the pickup cue on release too
+    audio.play('stoneSelect', { volume: 0.253 }); // was 0.316, -20% — echoes the pickup cue on release too
     audio.stopLaser(); // aim-laser loop ends exactly when the release cue plays, whether or not this drag turns into a shot
     if (dist > 6) {
       g.pendingVx = dx * POWER_SCALE;
@@ -1983,7 +1983,7 @@ export function startGame(opts = {}) {
       // select this stone for the joystick instead of arming a shot.
       evt.preventDefault();
       selectedStone = pendingTap.entity;
-      audio.play('stoneSelect', { volume: 0.316 });
+      audio.play('stoneSelect', { volume: 0.253 }); // was 0.316, -20%
       pendingTap = null;
       return;
     }
@@ -3836,7 +3836,7 @@ export function startGame(opts = {}) {
     // Nature ambience pauses under the +1 panel — restarts the instant the
     // player dismisses it below, back into the next round.
     audio.stopAmbience();
-    audio.play('pointOk', { volume: 0.315 }); // was 0.45, -30%
+    audio.play('pointOk', { volume: 0.252 }); // was 0.315, -20%
     // Tinted by whichever team just scored (blue for A, gold for B — see
     // style.css's #overlay.team-a-scored/.team-b-scored), not by mode/vibe:
     // this panel is the one place in a live match where "who scored" matters
@@ -3876,7 +3876,7 @@ export function startGame(opts = {}) {
     // resumes it for the fresh match).
     audio.stopAmbience();
     audio.stopAllGlides();
-    audio.play('pointOk', { volume: 0.315 }); // was 0.45, -30% — ticket2 fanfare removed
+    audio.play('pointOk', { volume: 0.252 }); // was 0.315, -20% — ticket2 fanfare removed
     const winningTeam = scoreA >= WIN_SCORE ? 'A' : 'B';
     showOverlay(`<p>Generating ticket…</p>`);
     const stats = {
