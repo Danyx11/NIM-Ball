@@ -223,7 +223,7 @@ if (new URLSearchParams(location.search).has('debuglayout')) {
   // Mobile keeps its existing behavior untouched (still #game-card children)
   // — #menuStage isn't part of mobile's layout yet.
   const menuHost = IS_MOBILE ? gameCard : document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'remoteModeOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'myMatchesOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -474,18 +474,35 @@ const rockHandlers = { onRockSound: triggerSound, onRockExit: triggerExit, onRoc
 // commits) or once handled here.
 let pendingWeekCancel = null;
 
-// Nimiq logo doubles as a "back to menu" shortcut, same confirm dialog as
-// the exit toolbar button above (only relevant once a match is running —
-// on the mode-select screen there's no game in progress to lose) — always
-// confirmed, replay included, so an accidental click never dumps the player
-// straight out. No page reload either way now (see triggerExit above) — a
-// still-present ?replay= param no longer matters for landing on mode-select,
-// but stopGame() itself still strips it (history.replaceState) so a later
-// real page refresh doesn't relaunch the same replay.
+// Nimiq logo is now purely decorative branding (see index.html's #navHome
+// comment, nimicurl arborescence rework) — the "back to menu" shortcut it
+// used to carry moved onto its own labeled sidebar nav entry below. Two
+// cases, not one: mid-match (#modeOverlay hidden — the canvas is the only
+// thing on screen) still gets the confirm dialog below, exactly as before
+// (losing a match is real to confirm); anywhere else in the MENU system
+// (#modeOverlay stays visible as every submenu's shared backdrop — the
+// mode-select tiles themselves, the vibe/More/Join&Matches pickers, Custom
+// Settings, etc.) has nothing to lose, so this just jumps straight back to
+// the tile grid with no dialog — reported broken (silently did nothing from
+// any of those submenus) before this second branch existed, since the old
+// single guard below only ever fired for the mid-match case. No page reload
+// either way for the confirmed case (see triggerExit above) — a still-
+// present ?replay= param no longer matters for landing on mode-select, but
+// stopGame() itself still strips it (history.replaceState) so a later real
+// page refresh doesn't relaunch the same replay.
 const bgLogo = document.getElementById('bg-logo');
 const replayBar = document.getElementById('replayBar');
-bgLogo.addEventListener('click', () => {
-  if (!modeOverlay.classList.contains('hidden')) return;
+const navHome = document.getElementById('navHome');
+navHome.addEventListener('click', () => {
+  if (!modeOverlay.classList.contains('hidden')) {
+    // Already browsing the menu system, not mid-match — just resurface the
+    // tile grid (no-op if that's already what's showing).
+    if (modeDrawer.classList.contains('hidden')) {
+      audio.play('button');
+      showModeDrawer();
+    }
+    return;
+  }
   audio.play('button');
   const inReplay = !replayBar.classList.contains('hidden');
   showLobby(`
@@ -1038,7 +1055,7 @@ function renderClaimStep(step, ctx) {
   }
 }
 
-// ---- Mode select: Pass & Play / Remote Match / AI Training / Replay ----
+// ---- Mode select: NimiCurl / Pure Curling / More / Join & My Matches ----
 // startGame() isn't called until a mode is picked, so it only ever runs once
 // per page load. Duel LAN isn't offered here anymore (dropped from the
 // picker), but it's still reachable via the `?duel` magic link below, which
@@ -1064,12 +1081,13 @@ const modeOverlay = document.getElementById('modeOverlay');
 // function — call it before showing whichever one is next.
 function hideRemoteMatchStack() {
   vibeSubOverlay.classList.add('hidden');
-  remoteModeOverlay.classList.add('hidden');
+  moreSubOverlay.classList.add('hidden');
+  moreVibeOverlay.classList.add('hidden');
+  moreLaunchOverlay.classList.add('hidden');
   classicCustomOverlay.classList.add('hidden');
   customSettingsOverlay.classList.add('hidden');
   matchNetworkOverlay.classList.add('hidden');
   joinCodeOverlay.classList.add('hidden');
-  myMatchesOverlay.classList.add('hidden');
 }
 function showModeDrawer() {
   hideRemoteMatchStack();
@@ -1080,15 +1098,15 @@ function showModeDrawer() {
 const modeDrawer = document.getElementById('modeDrawer');
 const modeHockey = document.getElementById('modeHockey');
 const modeCurling = document.getElementById('modeCurling');
-const modeSolo = document.getElementById('modeSolo');
+const modeMore = document.getElementById('modeMore');
 const modeJoinCode = document.getElementById('modeJoinCode');
 const startOverlay = document.getElementById('startOverlay');
 const overlay = document.getElementById('overlay');
 const ovContent = document.getElementById('ovContent');
 
-// ---- Vibe pick (Hockey/Curling, see conversation) — one level above P&P/
+// ---- Vibe pick (Hockey/Curling, see conversation) — one level above AI/P&P/
 // Remote now: #modeHockey/#modeCurling (the top row of #modeDrawer) open
-// #vibeSubOverlay's own 2-tile drawer (#modeLocal/#modeMatch, untouched)
+// #vibeSubOverlay's own 3-tile drawer (#modeAi/#modeLocal/#modeMatch)
 // instead of going straight into Classic/Custom. `activeVibe` drives every
 // downstream tint (Classic/Custom, Custom Settings, Remote Match's 3
 // screens, the exit-confirm dialog, the in-match +1 goal panel in game.js)
@@ -1097,13 +1115,15 @@ const ovContent = document.getElementById('ovContent');
 let activeVibe = null;
 const vibeSubOverlay = document.getElementById('vibeSubOverlay');
 const vibeBackBtn = document.getElementById('vibeBackBtn');
+const modeAi = document.getElementById('modeAi');
 const modeLocal = document.getElementById('modeLocal');
 const modeMatch = document.getElementById('modeMatch');
-// Cloned into each of #modeLocal/#modeMatch's own top (.tile-vibe-logo, see
-// index.html) rather than a separate external header (see conversation) —
-// aria-hidden in the markup since each tile's own tag ("PASS & PLAY"/
-// "REMOTE MATCH") already gives screen readers a real name; this is a
-// purely decorative reinforcement, redundant to announce on both tiles.
+// Cloned into each of #modeAi/#modeLocal/#modeMatch's own top (.tile-vibe-logo,
+// see index.html) rather than a separate external header (see conversation) —
+// aria-hidden in the markup since each tile's own tag already gives screen
+// readers a real name; this is a purely decorative reinforcement, redundant
+// to announce on every tile.
+const modeAiVibeLogo = document.getElementById('modeAiVibeLogo');
 const modeLocalVibeLogo = document.getElementById('modeLocalVibeLogo');
 const modeMatchVibeLogo = document.getElementById('modeMatchVibeLogo');
 const VIBE_LABELS = { hockey: 'NimiCurl', curling: 'Pure Curling' };
@@ -1113,6 +1133,7 @@ function showVibeDrawer(vibe) {
   activeVibe = vibe;
   setModeSelectVibeBackground(vibe);
   const vibeIcon = VIBE_TILES[vibe].querySelector('.mode-icon');
+  modeAiVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
   modeLocalVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
   modeMatchVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
   vibeSubOverlay.classList.remove('mode-hockey', 'mode-curling');
@@ -1125,63 +1146,152 @@ modeHockey.addEventListener('click', () => { audio.play('button'); showVibeDrawe
 modeCurling.addEventListener('click', () => { audio.play('button'); showVibeDrawer('curling'); });
 // Lives inside #modeMatch now (see index.html's own comment there) — without
 // stopPropagation this click would also bubble up into modeMatch's own
-// listener below and immediately jump into Remote Match right after going
-// back.
+// listener below and immediately jump into Remote right after going back.
 vibeBackBtn.addEventListener('click', (e) => { e.stopPropagation(); audio.play('button'); showModeDrawer(); });
 
-// ---- LIVE/WEEK picker (see WEEK design conversation) — one level deeper
-// than the vibe sub-drawer above, reached by tapping REMOTE MATCH there
-// instead of going straight to Classic/Custom (see modeMatch's own click
-// handler further down). Same tile-drawer language/tinting as
-// #vibeSubOverlay, just its own element (index.html's #remoteModeOverlay) so
-// the two can be shown/hidden independently.
-const remoteModeOverlay = document.getElementById('remoteModeOverlay');
-const remoteModeLive = document.getElementById('remoteModeLive');
-const remoteModeWeek = document.getElementById('remoteModeWeek');
-const remoteModeBackBtn = document.getElementById('remoteModeBackBtn');
-const weekWalletGate = document.getElementById('weekWalletGate');
-const remoteModeWeekSub = document.getElementById('remoteModeWeekSub');
-function showRemoteModeDrawer() {
-  remoteModeOverlay.classList.remove('mode-hockey', 'mode-curling');
-  remoteModeOverlay.classList.add(vibeTintClass());
-  hideRemoteMatchStack(); // see that function's own comment
-  modeOverlay.classList.remove('hidden');
-  remoteModeOverlay.classList.remove('hidden');
-  // Re-checked every time this screen opens (not just once) — connecting a
-  // wallet elsewhere (the sidebar identity pill, the earlier connect gate)
-  // shouldn't leave a stale gate note showing here.
-  const isGuest = !hubAddress;
-  weekWalletGate.classList.toggle('hidden', !isGuest);
-  remoteModeWeekSub.classList.toggle('hidden', isGuest);
-}
-remoteModeLive.addEventListener('click', () => { audio.play('button'); showCreateMatchScreen(); });
-remoteModeWeek.addEventListener('click', () => {
+// vs AI: moved in from the old top-level AI Training tile (see conversation,
+// nimicurl arborescence rework) — now per-vibe and Classic-only (no Custom
+// settings, same as before this move: skips straight to #startOverlay's
+// equivalent, which for solo is nothing at all). Hockey plays exactly like
+// the old tile did; Pure Curling's AI isn't trained yet, so it shows the
+// shared "under construction" panel (showConstructionScreen, see the League/
+// Partnership section further down) instead of launching anything.
+modeAi.addEventListener('click', async () => {
   audio.play('button');
-  if (!hubAddress) return; // wallet gate note is already showing — see showRemoteModeDrawer
-  showCreateWeekMatchScreen();
+  if (activeVibe === 'curling') { showConstructionScreen('AI Training'); return; }
+  // #modeAi lives inside #vibeSubOverlay — a sibling of #modeOverlay, not
+  // nested inside it (see that overlay's own comment) — so hiding
+  // #modeOverlay alone leaves this tile's own 3-tile picker sitting on top
+  // of the live match underneath. Every other tile in here reaches this
+  // same point via showClassicCustomScreen, which already calls
+  // hideRemoteMatchStack() on the way; AI skips that screen entirely, so it
+  // needs the same hide explicitly.
+  hideRemoteMatchStack();
+  modeOverlay.classList.add('hidden');
+  showToolbar();
+  activeMatchMode = 'solo';
+  showLoadingOverlay();
+  await preloadCoreAssets(IS_MOBILE);
+  await new Promise((resolve) => {
+    activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, onMatchReady: resolve });
+  });
+  hideLoadingOverlay();
+  setProfilePillTeam('A'); // EXPERIMENT — human is always team A vs AI, fixed for the whole match (see setProfilePillTeam's own comment)
+  syncIdentityPill();
+});
+
+// ---- More: Custom / Week / Replay (see conversation, nimicurl arborescence
+// rework) — reached from #modeMore, the old top-level AI Training tile's
+// slot. Same sibling-of-#modeOverlay pattern as #vibeSubOverlay above.
+const moreSubOverlay = document.getElementById('moreSubOverlay');
+const moreBackBtn = document.getElementById('moreBackBtn');
+const moreCustom = document.getElementById('moreCustom');
+const moreWeek = document.getElementById('moreWeek');
+const moreReplay = document.getElementById('moreReplay');
+const moreWeekWalletGate = document.getElementById('moreWeekWalletGate');
+const moreWeekSub = document.getElementById('moreWeekSub');
+function showMoreSubOverlay() {
+  setModeSelectVibeBackground(null); // no vibe chosen yet at this level
+  hideRemoteMatchStack(); // see that function's own comment
+  modeDrawer.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  moreSubOverlay.classList.remove('hidden');
+  // Re-checked every time this screen opens (not just once) — connecting a
+  // wallet elsewhere (the sidebar identity pill, the connect gate) shouldn't
+  // leave a stale gate note showing here. Same wallet-gate pattern the old
+  // LIVE/WEEK picker's own #weekWalletGate used, moved here now that WEEK's
+  // entry point lives under More instead of behind Remote (see conversation).
+  const isGuest = !hubAddress;
+  moreWeekWalletGate.classList.toggle('hidden', !isGuest);
+  moreWeekSub.classList.toggle('hidden', isGuest);
+}
+modeMore.addEventListener('click', () => { audio.play('button'); modeOverlay.classList.add('hidden'); showMoreSubOverlay(); });
+moreBackBtn.addEventListener('click', (e) => { e.stopPropagation(); audio.play('button'); showModeDrawer(); });
+moreCustom.addEventListener('click', () => { audio.play('button'); showMoreVibeOverlay('custom'); });
+moreWeek.addEventListener('click', () => {
+  audio.play('button');
+  if (!hubAddress) return; // wallet gate note is already showing — see showMoreSubOverlay
+  showMoreVibeOverlay('week');
 });
 // Tapping the gate note itself connects (same flow as the sidebar identity
 // pill / connect gate's own CONNECT button, see connectIdentity() below) —
-// stopPropagation so it doesn't also trigger #remoteModeWeek's own "enter
-// WEEK" click right after connecting succeeds.
-weekWalletGate.addEventListener('click', (e) => {
+// stopPropagation so it doesn't also trigger #moreWeek's own "enter WEEK"
+// click right after connecting succeeds.
+moreWeekWalletGate.addEventListener('click', (e) => {
   e.stopPropagation();
   audio.play('button');
   connectIdentity()
     .then((address) => {
       hubAddress = address;
       syncIdentityPill();
-      weekWalletGate.classList.add('hidden');
-      remoteModeWeekSub.classList.remove('hidden');
+      moreWeekWalletGate.classList.add('hidden');
+      moreWeekSub.classList.remove('hidden');
     })
     .catch(() => {}); // cancelled/failed — stay on this screen, gate note still showing
 });
-remoteModeBackBtn.addEventListener('click', (e) => {
+moreReplay.addEventListener('click', () => { showReplayUpload(); });
+
+// ---- More's own vibe pick (NimiCurl/Pure Curling), shared by Custom and
+// Week (see conversation) — #modeHockey/#modeCurling's own click handlers
+// are permanently wired to the normal AI/P&P/Remote flow above, so this is
+// its own small picker instead of reusing those tiles directly. Icons cloned
+// once at load (below), same reuse idiom #vibeSubOverlay's own
+// tile-vibe-logo already uses — no new art. `moreFlowTarget` records which
+// of the two flows is asking ('custom' or 'week') so picking a vibe here
+// knows where to continue.
+const moreVibeOverlay = document.getElementById('moreVibeOverlay');
+const moreVibeBackBtn = document.getElementById('moreVibeBackBtn');
+const moreVibeHockey = document.getElementById('moreVibeHockey');
+const moreVibeCurling = document.getElementById('moreVibeCurling');
+document.getElementById('moreVibeHockeyIcon').replaceChildren(modeHockey.querySelector('.mode-icon').cloneNode(true));
+document.getElementById('moreVibeCurlingIcon').replaceChildren(modeCurling.querySelector('.mode-icon').cloneNode(true));
+let moreFlowTarget = null;
+function showMoreVibeOverlay(target) {
+  moreFlowTarget = target;
+  hideRemoteMatchStack(); // see that function's own comment
+  modeOverlay.classList.remove('hidden');
+  moreVibeOverlay.classList.remove('hidden');
+}
+moreVibeBackBtn.addEventListener('click', (e) => { e.stopPropagation(); audio.play('button'); moreVibeOverlay.classList.add('hidden'); showMoreSubOverlay(); });
+moreVibeHockey.addEventListener('click', () => { audio.play('button'); pickMoreVibe('hockey'); });
+moreVibeCurling.addEventListener('click', () => { audio.play('button'); pickMoreVibe('curling'); });
+function pickMoreVibe(vibe) {
+  activeVibe = vibe;
+  setModeSelectVibeBackground(vibe);
+  moreVibeOverlay.classList.add('hidden');
+  if (moreFlowTarget === 'week') showMoreWeekFlow();
+  else showMoreCustomSettingsScreen(vibe);
+}
+
+// ---- More's own P&P/Remote picker, for a Custom config already chosen (see
+// conversation) — same tiles as #vibeSubOverlay's own #modeLocal/#modeMatch,
+// minus AI (AI never goes through Classic/Custom, see conversation), icons
+// cloned once at load same as the vibe picker above. Tinted to the active
+// vibe (mode-hockey/mode-curling) like every other screen past this point in
+// the flow.
+const moreLaunchOverlay = document.getElementById('moreLaunchOverlay');
+const moreLaunchBackBtn = document.getElementById('moreLaunchBackBtn');
+const moreLaunchLocal = document.getElementById('moreLaunchLocal');
+const moreLaunchRemote = document.getElementById('moreLaunchRemote');
+document.getElementById('moreLaunchLocalIcon').replaceChildren(modeLocal.querySelector('.mode-icon').cloneNode(true));
+document.getElementById('moreLaunchRemoteIcon').replaceChildren(modeMatch.querySelector('.mode-icon').cloneNode(true));
+let moreLaunchConfig = null;
+function showMoreLaunchOverlay(config) {
+  moreLaunchConfig = config;
+  moreLaunchOverlay.classList.remove('mode-hockey', 'mode-curling');
+  moreLaunchOverlay.classList.add(vibeTintClass());
+  hideRemoteMatchStack(); // see that function's own comment
+  modeOverlay.classList.remove('hidden');
+  moreLaunchOverlay.classList.remove('hidden');
+}
+moreLaunchBackBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   audio.play('button');
-  remoteModeOverlay.classList.add('hidden');
-  showVibeDrawer(activeVibe);
+  moreLaunchOverlay.classList.add('hidden');
+  showMoreCustomSettingsScreen(activeVibe);
 });
+moreLaunchLocal.addEventListener('click', () => { audio.play('button'); moreLaunchOverlay.classList.add('hidden'); launchPassPlayMatch(moreLaunchConfig); });
+moreLaunchRemote.addEventListener('click', () => { audio.play('button'); moreLaunchOverlay.classList.add('hidden'); hostMatch(moreLaunchConfig); });
 
 // ---- Curling: tiles/menus are live (see conversation), the actual match
 // engine isn't plugged in yet — every path that would otherwise call
@@ -1488,16 +1598,19 @@ function showClassicCustomScreen(mode, launch, goBack, errorMsg) {
 // Create/Join choice in between — this screen IS "create" for LIVE (Join
 // lives entirely on the separate #modeJoinCode tile). Reused as the retry
 // target on a connection failure too (hostMatch's catch,
-// showMatchHostWaitingScreen's onDisconnect/onLost below). Back now returns
-// to the LIVE/WEEK picker (one more step was inserted above it, see
-// showRemoteModeDrawer) instead of straight to the vibe drawer.
+// showMatchHostWaitingScreen's onDisconnect/onLost below). Remote is now
+// reached straight off the vibe drawer (see conversation — the old LIVE/WEEK
+// picker in between is gone, WEEK moved under More instead), so Back returns
+// straight there.
 function showCreateMatchScreen(errorMsg) {
-  showClassicCustomScreen('remote', (config) => hostMatch(config), () => showRemoteModeDrawer(), errorMsg);
+  showClassicCustomScreen('remote', (config) => hostMatch(config), () => showVibeDrawer(activeVibe), errorMsg);
 }
-// WEEK's own entry point — same Classic/Custom screen, routed to
-// hostWeekMatch() instead of hostMatch(), Back also to the LIVE/WEEK picker.
-function showCreateWeekMatchScreen(errorMsg) {
-  showClassicCustomScreen('remote', (config) => hostWeekMatch(config), () => showRemoteModeDrawer(), errorMsg);
+// WEEK's own entry point, reached via More (see conversation) — same
+// Classic/Custom screen, routed to hostWeekMatch() instead of hostMatch().
+// Back returns to More's own vibe picker; also reused as hostWeekMatch's own
+// error-retry target (activeVibe is already set correctly by then).
+function showMoreWeekFlow(errorMsg) {
+  showClassicCustomScreen('remote', (config) => hostWeekMatch(config), () => showMoreVibeOverlay('week'), errorMsg);
 }
 
 ccBackBtn.addEventListener('click', () => {
@@ -1537,6 +1650,30 @@ function showCustomSettingsScreen(mode, initialConfig) {
   customSettingsOverlay.classList.remove('hidden');
 }
 
+// More's own Custom entry point (see conversation, nimicurl arborescence
+// rework) — same #customSettingsOverlay as the flow above, but reached
+// directly (this tile IS "Custom", no Classic/Custom fork first) and BEFORE
+// Pass & Play vs Remote is chosen (that pick now happens after settings, see
+// #moreLaunchOverlay above) — so there's no `mode` to build a P&P/Remote
+// header icon from yet, the active vibe's own icon is used instead, and the
+// draft is persisted under its own 'more' namespace (src/matchConfig.js),
+// independent of the passplay/remote presets below.
+function showMoreCustomSettingsScreen(vibe) {
+  customSettingsMode = 'more';
+  customSettingsDraft = { ...getCustomConfig('more') };
+  csModeIcon.replaceChildren(VIBE_TILES[vibe].querySelector('.mode-icon').cloneNode(true));
+  csModeIcon.setAttribute('aria-label', VIBE_LABELS[vibe]);
+  customSettingsOverlay.classList.remove('mode-hockey', 'mode-curling');
+  customSettingsOverlay.classList.add(vibeTintClass());
+  renderCustomSettingsDraft();
+  hideLobby();
+  hideNetPanel();
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  hideRemoteMatchStack(); // see that function's own comment
+  customSettingsOverlay.classList.remove('hidden');
+}
+
 segControls.forEach((seg) => {
   const field = seg.dataset.field;
   const numeric = field !== 'skin';
@@ -1557,6 +1694,10 @@ segControls.forEach((seg) => {
 csBackBtn.addEventListener('click', () => {
   audio.play('button');
   customSettingsOverlay.classList.add('hidden');
+  // More's own Custom flow has no Classic/Custom fork to return to (see
+  // showMoreCustomSettingsScreen's own comment) — back one step means
+  // re-picking the vibe instead.
+  if (customSettingsMode === 'more') { showMoreVibeOverlay('custom'); return; }
   classicCustomOverlay.classList.remove('hidden');
 });
 
@@ -1573,6 +1714,11 @@ csSaveBtn.addEventListener('click', () => {
   audio.play('button');
   setCustomConfig(customSettingsMode, customSettingsDraft);
   customSettingsOverlay.classList.add('hidden');
+  // More's own Custom flow saves, then asks Pass & Play vs Remote (see
+  // #moreLaunchOverlay above) instead of launching straight away — neither
+  // has been chosen yet at this point (see showMoreCustomSettingsScreen's
+  // own comment).
+  if (customSettingsMode === 'more') { showMoreLaunchOverlay({ ...customSettingsDraft }); return; }
   onConfigReady?.({ ...customSettingsDraft });
 });
 
@@ -1673,60 +1819,49 @@ cgGuestBtn.addEventListener('click', () => {
   proceedPastConnectGate();
 });
 
-modeLocal.addEventListener('click', () => {
-  audio.play('button');
-  showClassicCustomScreen('passplay', async (config) => {
-    modeOverlay.classList.add('hidden');
-    startOverlay.classList.remove('hidden');
-    showToolbar();
-    activeMatchMode = 'passplay';
-    // Same loading-overlay/onMatchReady wait howTo pioneered (see htPlayBtn's
-    // own comment) — #startOverlay's ready-tap screen sits underneath the
-    // loading overlay until assets are actually baked, so neither player can
-    // tap ready onto a board still showing flat fallback bubble colors.
-    showLoadingOverlay();
-    await preloadCoreAssets(IS_MOBILE);
-    await new Promise((resolve) => {
-      activeStopGame = startGame({
-        ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config, vibe: activeVibe,
-        onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('passplay', config); },
-        onTurnChange: setProfilePillTeam, // EXPERIMENT, see setProfilePillTeam's own comment
-        onMatchReady: resolve,
-      });
-    });
-    hideLoadingOverlay();
-    // No proactive setProfilePillTeam('A') here (unlike vs AI/Remote below) —
-    // per explicit request the halo should stay off through the very first
-    // hand-off/intro too, only appearing once completeHandoff() fires its own
-    // first onTurnChange('A') as aimA actually begins.
-    syncIdentityPill();
-  }, () => showVibeDrawer(activeVibe));
-});
-
-modeMatch.addEventListener('click', () => {
-  audio.play('button');
+// Factored out of modeLocal's own click handler below so More's own launch
+// picker (#moreLaunchOverlay, see conversation) can start the exact same
+// Pass & Play match straight off a saved Custom config, skipping the
+// Classic/Custom fork entirely (that fork already happened — the tile was
+// literally "Custom").
+async function launchPassPlayMatch(config) {
   modeOverlay.classList.add('hidden');
-  showRemoteModeDrawer();
-});
-
-// Solo vs IA: only one human, controlling team A — no ready-tap lobby needed
-// (game.js's aiTeam branch skips #startOverlay itself), straight into aimA.
-// Same loading-overlay/onMatchReady wait howTo pioneered (see htPlayBtn's
-// own comment) — without it this mode's board could appear mid-bake, flat
-// fallback bubble colors visible under the huddle slide-in.
-modeSolo.addEventListener('click', async () => {
-  audio.play('button');
-  modeOverlay.classList.add('hidden');
+  startOverlay.classList.remove('hidden');
   showToolbar();
-  activeMatchMode = 'solo';
+  activeMatchMode = 'passplay';
+  // Same loading-overlay/onMatchReady wait howTo pioneered (see htPlayBtn's
+  // own comment) — #startOverlay's ready-tap screen sits underneath the
+  // loading overlay until assets are actually baked, so neither player can
+  // tap ready onto a board still showing flat fallback bubble colors.
   showLoadingOverlay();
   await preloadCoreAssets(IS_MOBILE);
   await new Promise((resolve) => {
-    activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, onMatchReady: resolve });
+    activeStopGame = startGame({
+      ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config, vibe: activeVibe,
+      onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('passplay', config); },
+      onTurnChange: setProfilePillTeam, // EXPERIMENT, see setProfilePillTeam's own comment
+      onMatchReady: resolve,
+    });
   });
   hideLoadingOverlay();
-  setProfilePillTeam('A'); // EXPERIMENT — human is always team A vs AI, fixed for the whole match (see setProfilePillTeam's own comment)
+  // No proactive setProfilePillTeam('A') here (unlike vs AI/Remote below) —
+  // per explicit request the halo should stay off through the very first
+  // hand-off/intro too, only appearing once completeHandoff() fires its own
+  // first onTurnChange('A') as aimA actually begins.
   syncIdentityPill();
+}
+modeLocal.addEventListener('click', () => {
+  audio.play('button');
+  showClassicCustomScreen('passplay', (config) => launchPassPlayMatch(config), () => showVibeDrawer(activeVibe));
+});
+
+// Remote: reached straight off the vibe drawer now (see conversation — the
+// old LIVE/WEEK picker in between is gone, WEEK moved under More instead) —
+// same Classic/Custom + code-lobby flow LIVE always used, unchanged.
+modeMatch.addEventListener('click', () => {
+  audio.play('button');
+  modeOverlay.classList.add('hidden');
+  showCreateMatchScreen();
 });
 
 // ---- Replay mode (see CLAUDE.md replay section) — upload a saved ticket
@@ -1754,10 +1889,6 @@ function showReplayUpload() {
   replayUploadStatus.textContent = '';
   replayUploadOverlay.classList.remove('hidden');
 }
-// Sidebar's own Replay entry (see index.html) — same activeStopGame guard as
-// the identity pill, since this is reachable from outside mode-select too.
-const navReplay = document.getElementById('navReplay');
-navReplay.addEventListener('click', () => { if (!activeStopGame) showReplayUpload(); });
 
 // ---- "Join with a code" (see conversation) — was the Replay tile's slot,
 // now a direct shortcut into joining an already-created private match by
@@ -1796,6 +1927,7 @@ function showJoinCodeScreen(errorMsg) {
   });
   joinBtn.onclick = () => { audio.play('button'); joinWithCode(input.value, joinBtn, showJoinCodeScreen); };
   joinCodeOverlay.classList.remove('hidden');
+  renderMyMatchesContent(); // bottom half of this same merged panel, see its own comment
 }
 modeJoinCode.addEventListener('click', () => { audio.play('button'); showJoinCodeScreen(); });
 joinCodeBackBtn.addEventListener('click', () => {
@@ -2169,7 +2301,9 @@ helpBtnVisibilityObserver.observe(modeOverlay, { attributes: true, attributeFilt
 replayUploadBackBtn.addEventListener('click', () => {
   audio.play('button');
   replayUploadOverlay.classList.add('hidden');
-  returnToModeSelect();
+  // Reached only via More now (see conversation) — one level back is that
+  // picker, not straight to mode-select.
+  showMoreSubOverlay();
 });
 replayChooseFileBtn.addEventListener('click', () => { audio.play('button'); replayFileInput.click(); });
 replayFileInput.addEventListener('change', () => {
@@ -2198,7 +2332,7 @@ async function handleReplayFile(file) {
     replayUploadOverlay.classList.add('hidden');
     // Unlike replayUploadOverlay, #modeOverlay itself was left showing by
     // showReplayUpload() as this panel's own backdrop (see that function) —
-    // every other mode entry point (modeSolo, modeLocal's callback, etc.)
+    // every other mode entry point (modeAi, modeLocal's callback, etc.)
     // hides it right before startGame() too; missing here left it sitting
     // behind the replay for its whole runtime, with whatever background it
     // had at that moment — so a later showVibeDrawer() reads as "stuck" if
@@ -2447,7 +2581,7 @@ async function hostWeekMatch(matchConfig) {
     } catch (err) {
       if (err.reason === 'occupied' && attempt < 4) { code = generateMatchCode(); continue; }
       hideLoadingOverlay();
-      showCreateWeekMatchScreen(err.message);
+      showMoreWeekFlow(err.message);
       return;
     }
   }
@@ -2845,33 +2979,24 @@ function showWeekErrorScreen(message) {
 function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 // ---- My Matches (party/playerIndex.js) — a UX shortcut back into an
-// existing WEEK match, reached from the sidebar (#navMyMatches), never a
+// existing WEEK match, rendered into the bottom half of the merged Join & My
+// Matches panel (#joinCodeOverlay, see showJoinCodeScreen below — the two
+// used to be separate screens/overlays, see conversation), never a
 // substitute for the code itself (see conversation, point 12 of the brief).
-const myMatchesOverlay = document.getElementById('myMatchesOverlay');
-const myMatchesBackBtn = document.getElementById('myMatchesBackBtn');
+// Always exactly MY_MATCHES_SLOTS rows now — this wallet's own active-WEEK-
+// match cap — per explicit request, rather than a variable-length list; an
+// unused slot renders as a greyed "Empty" placeholder instead of shrinking.
 const myMatchesContent = document.getElementById('myMatchesContent');
+const MY_MATCHES_SLOTS = 2;
 const TURN_LABELS = { yourTurn: 'Your turn', waiting: 'Waiting for opponent', revealReady: 'Reveal ready', pending: 'Waiting for opponent to join', expired: 'Expired', completed: 'Finished', abandoned: 'Abandoned' };
-async function showMyMatchesScreen() {
-  hideMatchChrome();
-  // Same reasoning as showModeDrawer's own hideRemoteMatchStack() call
-  // (reported: this screen was left sitting on top of "Play your first
-  // shot" when reached mid-creation-flow via the sidebar) — reachable from
-  // #navMyMatches at any point in the mode-select stack, not just from a
-  // clean mode grid.
-  hideRemoteMatchStack();
-  modeOverlay.classList.add('hidden');
+async function renderMyMatchesContent() {
   myMatchesContent.innerHTML = '<p>Loading…</p>';
-  myMatchesOverlay.classList.remove('hidden');
   if (!hubAddress) {
     myMatchesContent.innerHTML = '<p>Connect your Nimiq wallet to see your WEEK matches.</p>';
     return;
   }
   const matches = await fetchMyWeekMatches(hubAddress);
   const codes = Object.keys(matches);
-  if (!codes.length) {
-    myMatchesContent.innerHTML = '<p>No WEEK matches in progress.</p>';
-    return;
-  }
   // A bigger card per match (avatar, custom/default name, game+config
   // summary, turn state, expiry — per explicit request) plus a narrow
   // actions column (rename, then trash) beside it, rather than one plain
@@ -2883,7 +3008,9 @@ async function showMyMatchesScreen() {
   // (the match is already terminal) — only the trash icon stays live, to
   // dismiss the notification; rename is hidden too, nothing left worth
   // labeling.
-  myMatchesContent.innerHTML = codes.map((code) => {
+  myMatchesContent.innerHTML = Array.from({ length: MY_MATCHES_SLOTS }, (_, i) => {
+    const code = codes[i];
+    if (!code) return `<div class="week-match-row"><div class="week-match-card week-match-empty">Empty</div></div>`;
     const m = matches[code];
     const opp = m.opponentAddress ? shortenAddressCompact(m.opponentAddress) : 'opponent';
     const label = getWeekMatchLabel(code);
@@ -2935,7 +3062,7 @@ async function showMyMatchesScreen() {
       try {
         const week = await joinWeekMatch(btn.dataset.code, hubAddress);
         hideLoadingOverlay();
-        myMatchesOverlay.classList.add('hidden');
+        joinCodeOverlay.classList.add('hidden');
         enterWeekMatch(week);
       } catch (err) {
         hideLoadingOverlay();
@@ -2955,7 +3082,7 @@ async function showMyMatchesScreen() {
       const next = prompt('Name this match', getWeekMatchLabel(code));
       if (next === null) return;
       setWeekMatchLabel(code, next.trim());
-      showMyMatchesScreen();
+      renderMyMatchesContent();
     });
   });
   myMatchesContent.querySelectorAll('.week-match-abandon[data-code]').forEach((btn) => {
@@ -2970,7 +3097,7 @@ async function showMyMatchesScreen() {
       if (btn.dataset.left === 'true') {
         await dismissWeekMatch(hubAddress, code);
         setWeekMatchLabel(code, '');
-        showMyMatchesScreen();
+        renderMyMatchesContent();
         return;
       }
       if (!confirm('Abandon this match? This cannot be undone.')) return;
@@ -2987,12 +3114,10 @@ async function showMyMatchesScreen() {
       }
       setWeekMatchLabel(code, '');
       hideLoadingOverlay();
-      showMyMatchesScreen();
+      renderMyMatchesContent();
     });
   });
 }
-document.getElementById('navMyMatches').addEventListener('click', () => { audio.play('button'); showMyMatchesScreen(); });
-myMatchesBackBtn.addEventListener('click', () => { audio.play('button'); myMatchesOverlay.classList.add('hidden'); returnToModeSelect(); });
 
 // ---- Title/splash screen (see index.html's #homeOverlay comment) — the
 // very first thing a normal (non-magic-link) entry sees, above even the

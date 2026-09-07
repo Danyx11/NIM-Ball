@@ -57,11 +57,16 @@ export function sanitizeMatchConfig(cfg) {
 
 // ---------- Local persistence ----------
 // Same pattern as src/settings.js's basicLaser flag (localStorage, read once
-// at module load) — two independent keys so a Pass & Play Custom tweak never
-// touches the Remote one (see conversation, point 10 of the brief).
+// at module load) — independent keys so a Pass & Play Custom tweak never
+// touches the Remote one (see conversation, point 10 of the brief). 'more' is
+// the More tile's own Custom flow (see main.js's showMoreCustomSettingsScreen)
+// — there the settings are edited BEFORE picking Pass & Play vs Remote, so it
+// can't share either of their namespaces; its own preset is what actually
+// launches once that pick is made.
 const STORAGE_KEYS = {
   passplay: 'nimball-custom-passplay',
   remote: 'nimball-custom-remote',
+  more: 'nimball-custom-more',
 };
 
 export function getCustomConfig(mode) {

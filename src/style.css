@@ -325,6 +325,34 @@ html, body {
 .nav-item:hover { background: var(--nb-12); color: var(--nb-100); }
 .nav-item.active { background: var(--nb-16); color: var(--nb-100); font-weight: 700; }
 
+/* Home / League: flat top-level nav actions (see conversation, nimicurl
+   arborescence rework — Home carries the old #bg-logo "back to menu" click,
+   League moved out of the removed "More" accordion), sitting directly in
+   .sidebar-nav rather than inside a .nav-section. Same typography/hover
+   ladder as .nav-item above (these read as primary actions, not a category
+   label like .nav-label), plus a leading icon — .nav-label-icon-sized but
+   its own class since it's paired with .nav-item-scale text, not
+   .nav-label's small caps. */
+.nav-flat-item {
+  display: flex;
+  align-items: center;
+  justify-content: center; /* centered on brand/pill's shared center, same as .nav-item */
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--nb-80);
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.nav-flat-item:hover { background: var(--nb-12); color: var(--nb-100); }
+.nav-flat-item-icon { width: 16px; height: 16px; flex: none; }
+
 /* Identity pill — a real card, not a small CTA (that was this element's old
    job as a corner "Connecter" button): bigger, pinned to the very bottom of
    #sidebar's flex column via its own margin-top:auto (see conversation — nav
@@ -562,6 +590,7 @@ html, body {
   overflow-y: auto;
 }
 .mobile-layout .nav-item { padding: 8px 10px; font-size: 13px; }
+.mobile-layout .nav-flat-item { padding: 8px 10px; font-size: 13px; }
 /* Scroll thumb for the section above, real element rather than native
    scrollbar styling (iOS Safari doesn't support ::-webkit-scrollbar at all,
    unlike the desktop-only thin scrollbar further up this file) — main.js's
@@ -1665,10 +1694,12 @@ button:disabled { opacity: 0.35; cursor: default; }
    Hockey, gold for Curling), driven by main.js's activeVibe rather than
    whether a match happens to be networked. Solo/Replay are untouched, not
    part of the vibe system. */
-#overlay.mode-hockey { background: rgba(5, 130, 202, 0.55); }
-#overlay.mode-solo { background: rgba(31, 35, 72, 0.55); }
-#overlay.mode-replay { background: rgba(33, 188, 165, 0.55); }
-#overlay.mode-curling { background: rgba(233, 178, 19, 0.55); }
+/* 0.72, not the original 0.55 (see conversation) — matches the mode-select
+   tiles' own opacity, same push applied to .config-panel/#weekBoardPanelBox. */
+#overlay.mode-hockey { background: rgba(5, 130, 202, 0.72); }
+#overlay.mode-solo { background: rgba(31, 35, 72, 0.72); }
+#overlay.mode-replay { background: rgba(33, 188, 165, 0.72); }
+#overlay.mode-curling { background: rgba(233, 178, 19, 0.72); }
 #overlay.mode-curling, #overlay.mode-replay { color: var(--bg-deep); --ink-dim: rgba(11, 31, 42, 0.7); }
 #overlay.mode-curling h2, #overlay.mode-replay h2 { color: var(--bg-deep); }
 /* Dark/blue tints (default scrim, hockey, solo) fail contrast with the
@@ -1681,12 +1712,12 @@ button:disabled { opacity: 0.35; cursor: default; }
    Once a match is actually running, this one panel cares who just scored,
    not which mode/vibe is being played (see conversation): Team A's own
    --teamA blue, Team B's own --teamB gold, every mode/vibe alike (Hockey,
-   Curling, Solo, Replay). Same 0.55 wash + dark-ink-on-light convention as
+   Curling, Solo, Replay). Same 0.72 wash + dark-ink-on-light convention as
    the mode-* tints above — .goal-address/.goal-score inherit this via
    `color` (no color of their own), same as .mode-curling/.mode-replay's
    text already does. */
-#overlay.team-a-scored { background: rgba(63, 169, 245, 0.55); }
-#overlay.team-b-scored { background: rgba(255, 201, 77, 0.55); color: var(--bg-deep); --ink-dim: rgba(11, 31, 42, 0.7); }
+#overlay.team-a-scored { background: rgba(63, 169, 245, 0.72); }
+#overlay.team-b-scored { background: rgba(255, 201, 77, 0.72); color: var(--bg-deep); --ink-dim: rgba(11, 31, 42, 0.7); }
 /* Shrinks just the +1 goal panel's own box to 70% of the full-bleed size
    (see showGoalPanel's goal-box-70 toggle in game.js) — content inside
    (identicon/badge/address/score) keeps its normal size untouched, just
@@ -2081,9 +2112,13 @@ button:disabled { opacity: 0.35; cursor: default; }
 .mobile-layout #vibeSubOverlay { left: 3%; right: calc(var(--controller-reserved-w) + 3%); }
 /* Reuses .mode-drawer's grid/tile-pop-in/scale(0.9) look wholesale, just
    flowed inside #vibeSubOverlay's flex column (its only child now) instead
-   of absolutely inset:6% of #modeOverlay itself. */
+   of absolutely inset:6% of #modeOverlay itself. Three columns now (AI/P&P/
+   Remote, see conversation) instead of the base rule's fixed 2 — without
+   this override the 3rd tile wraps onto its own implicit grid row instead of
+   sitting in a single row alongside the other two. */
 #vibeSubOverlay .mode-drawer {
   position: relative; inset: auto; flex: 1; min-height: 0;
+  grid-template-columns: repeat(3, 1fr);
   grid-template-rows: 1fr;
 }
 /* #modeLocal/#modeMatch need their own positioning context (see conversation:
@@ -2136,7 +2171,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    shared bases every tile still needs (Replay keeps the plain 30.6px). */
 #modeHockey .mode-icon { height: 30.6px; }
 #modeCurling .mode-icon { height: 50.4px; }
-#modeSolo .mode-icon-tall { height: 49px; }
+#modeMore .mode-icon { height: 30.6px; }
 #modeJoinCode .mode-icon-tall { height: 42.84px; }
 /* Logos aligned by vertical center across both grid rows (see conversation)
    — fully reversible, purely additive: each icon gets equal top/bottom
@@ -2149,17 +2184,15 @@ button:disabled { opacity: 0.35; cursor: default; }
    flush under the title's own actual height (1 or 2 lines, no reserved
    gap), per explicit request. */
 #modeOverlay .mode-drawer .sub { min-height: 30px; }
-#modeHockey .mode-icon { margin-top: 9.9px; margin-bottom: 9.9px; }
-#modeSolo .mode-icon-tall { margin-top: 0.7px; margin-bottom: 0.7px; }
+#modeHockey .mode-icon, #modeMore .mode-icon { margin-top: 9.9px; margin-bottom: 9.9px; }
 #modeJoinCode .mode-icon-tall { margin-top: 3.78px; margin-bottom: 3.78px; }
 /* Mobile: all 4 mode-tile logos -30% (see conversation) — same ×0.7 applied
    to each of the 4 desktop heights above, and the centering margins
    recomputed against the new tallest one (Curling's 35.28px replaces
    50.4px as the slot), so the vertical-center alignment from above still
    holds at the smaller size instead of drifting. */
-.mobile-layout #modeHockey .mode-icon { height: 21.42px; margin-top: 6.93px; margin-bottom: 6.93px; }
+.mobile-layout #modeHockey .mode-icon, .mobile-layout #modeMore .mode-icon { height: 21.42px; margin-top: 6.93px; margin-bottom: 6.93px; }
 .mobile-layout #modeCurling .mode-icon { height: 35.28px; }
-.mobile-layout #modeSolo .mode-icon-tall { height: 34.3px; margin-top: 0.49px; margin-bottom: 0.49px; }
 .mobile-layout #modeJoinCode .mode-icon-tall { height: 29.99px; margin-top: 2.65px; margin-bottom: 2.65px; }
 
 /* Elevation layer 2/3 (card/menu box -> tiles): scoped to #modeOverlay only,
@@ -2185,8 +2218,8 @@ button:disabled { opacity: 0.35; cursor: default; }
    color, not menu chrome), so its own base rule stays untouched; this only
    overrides for elements actually inside #modeOverlay. */
 #modeOverlay .half.a { background: rgba(5, 130, 202, 0.72); }   /* Nimiq Light Blue — Hockey Vibe */
-#modeOverlay .half.c { background: rgba(31, 35, 72, 0.72); }    /* Nimiq Blue — AI Training */
-#modeOverlay .half.d { background: rgba(33, 188, 165, 0.72); }  /* Nimiq Green — Replay */
+#modeOverlay .half.c { background: rgba(31, 35, 72, 0.72); }    /* Nimiq Blue — More */
+#modeOverlay .half.d { background: rgba(33, 188, 165, 0.72); }  /* Nimiq Green — Join & My Matches */
 #modeOverlay .half.e { background: rgba(233, 178, 19, 0.72); }  /* Nimiq Gold — Curling Vibe */
 /* Gold and Green are light enough that the shared white-ish text/icon color
    (.half .tag inherits var(--ink), .half .sub/.mode-icon are literal near-
@@ -2199,86 +2232,122 @@ button:disabled { opacity: 0.35; cursor: default; }
 #modeOverlay .half.d .sub, #modeOverlay .half.e .sub { color: rgba(11,31,42,0.75); }
 #modeOverlay .half.d .mode-icon, #modeOverlay .half.e .mode-icon { color: var(--bg-deep); }
 
-/* #vibeSubOverlay's own two tiles (#modeLocal/#modeMatch, P&P/Remote) don't
-   keep the fixed per-slot a/e brand colors above — under a given vibe, both
-   should read as "the same game" rather than one blue/one gold. Overridden
-   here per active vibe (class set in main.js's showVibeDrawer), at higher
-   specificity than the #modeOverlay .half.a/.half.e rules above so it wins
-   despite #vibeSubOverlay's tiles also matching those broader selectors.
-   Hockey reuses the exact Light Blue wash + default light text (tile 'a'
-   already looks like this); Curling reuses the exact Gold wash + dark-ink
-   text (tile 'e' already looks like this) — same two brand colors, just no
-   longer tied to which physical slot a tile sits in. */
+/* #vibeSubOverlay's own three tiles (#modeAi/#modeLocal/#modeMatch, AI/P&P/
+   Remote) don't keep the fixed per-slot brand colors above — under a given
+   vibe, all three should read as "the same game" rather than mismatched
+   colors. Overridden here per active vibe (class set in main.js's
+   showVibeDrawer), at higher specificity than the #modeOverlay .half.a/
+   .half.e rules above so it wins despite #vibeSubOverlay's tiles also
+   matching those broader selectors. Hockey reuses the exact Light Blue wash
+   + default light text (tile 'a' already looks like this); Curling reuses
+   the exact Gold wash + dark-ink text (tile 'e' already looks like this) —
+   same two brand colors, just no longer tied to which physical slot a tile
+   sits in. #modeAi (.half.f, see conversation — moved in from the old
+   top-level AI Training tile) picks up the exact same treatment as .half.e,
+   not a fourth color of its own. */
 #vibeSubOverlay.mode-hockey .half.a,
-#vibeSubOverlay.mode-hockey .half.e {
+#vibeSubOverlay.mode-hockey .half.e,
+#vibeSubOverlay.mode-hockey .half.f {
   background: rgba(5, 130, 202, 0.72);
   color: var(--ink);
 }
-#vibeSubOverlay.mode-hockey .half.e .sub { color: rgba(255,255,255,0.85); }
-#vibeSubOverlay.mode-hockey .half.e .mode-icon { color: rgba(255,255,255,0.92); }
+#vibeSubOverlay.mode-hockey .half.e .sub,
+#vibeSubOverlay.mode-hockey .half.f .sub { color: rgba(255,255,255,0.85); }
+#vibeSubOverlay.mode-hockey .half.e .mode-icon,
+#vibeSubOverlay.mode-hockey .half.f .mode-icon { color: rgba(255,255,255,0.92); }
 #vibeSubOverlay.mode-curling .half.a,
-#vibeSubOverlay.mode-curling .half.e {
+#vibeSubOverlay.mode-curling .half.e,
+#vibeSubOverlay.mode-curling .half.f {
   background: rgba(233, 178, 19, 0.72);
   color: var(--bg-deep);
 }
 #vibeSubOverlay.mode-curling .half.a .sub,
-#vibeSubOverlay.mode-curling .half.e .sub { color: rgba(11,31,42,0.75); }
+#vibeSubOverlay.mode-curling .half.e .sub,
+#vibeSubOverlay.mode-curling .half.f .sub { color: rgba(11,31,42,0.75); }
 #vibeSubOverlay.mode-curling .half.a .mode-icon,
-#vibeSubOverlay.mode-curling .half.e .mode-icon { color: var(--bg-deep); }
+#vibeSubOverlay.mode-curling .half.e .mode-icon,
+#vibeSubOverlay.mode-curling .half.f .mode-icon { color: var(--bg-deep); }
+/* #modeAi's own tile-vibe-logo badge already picks up the Curling-only
+   doubled size from the existing #vibeSubOverlay.mode-curling
+   .tile-vibe-logo .mode-icon rule above (.tile-vibe-logo section) — that
+   selector isn't scoped to a specific tile, so all three (including this
+   new one) share it for free. */
 
-/* LIVE/WEEK picker (#remoteModeOverlay, see index.html/main.js) — one level
-   deeper than #vibeSubOverlay, same .mode-drawer/.half markup and the exact
-   same "retint both tiles to the active vibe" treatment as #vibeSubOverlay
-   above, just duplicated onto this element (its own class, not merged into
-   the #vibeSubOverlay selectors) since the two overlays are shown/hidden
-   independently. Base positioning/sizing copied verbatim from #vibeSubOverlay
-   above (same sibling-of-#modeOverlay/z-index-4 reasoning — see that rule's
-   own comment) since it's a plain block element otherwise, sized to its
-   content instead of filling the shared quadrant footprint. */
-#remoteModeOverlay {
+/* Sizing for #modeAi's own icon (moved verbatim off the old top-level AI
+   Training tile, see index.html — same numbers that tile used under
+   #modeOverlay's own centering rule above, just re-scoped here since this
+   tile now lives under #vibeSubOverlay instead). */
+#modeAi .mode-icon-tall { height: 49px; margin-top: 0.7px; margin-bottom: 0.7px; }
+.mobile-layout #modeAi .mode-icon-tall { height: 34.3px; margin-top: 0.49px; margin-bottom: 0.49px; }
+
+/* More's own two intermediate pickers (#moreSubOverlay: Custom/Week/Replay,
+   #moreVibeOverlay: NimiCurl/Pure Curling for Custom or Week) — same
+   sibling-of-#modeOverlay/z-index-4/.mode-drawer-reuse pattern as
+   #vibeSubOverlay above (see that rule's own comment), fixed to the More
+   tile's own Nimiq Blue navy (same value as #modeOverlay .half.c and
+   #overlay.mode-solo) rather than a per-vibe tint — #moreSubOverlay hasn't
+   picked a vibe yet, and #moreVibeOverlay is the very screen picking it. */
+#moreSubOverlay, #moreVibeOverlay, #moreLaunchOverlay {
   position: absolute; inset: 6%;
   display: flex; flex-direction: column;
   z-index: 4;
 }
-#remoteModeOverlay.hidden { display: none; }
-.mobile-layout #remoteModeOverlay { left: 3%; right: calc(var(--controller-reserved-w) + 3%); }
-#remoteModeOverlay .mode-drawer {
+#moreSubOverlay.hidden, #moreVibeOverlay.hidden, #moreLaunchOverlay.hidden { display: none; }
+.mobile-layout #moreSubOverlay,
+.mobile-layout #moreVibeOverlay,
+.mobile-layout #moreLaunchOverlay { left: 3%; right: calc(var(--controller-reserved-w) + 3%); }
+#moreSubOverlay .mode-drawer,
+#moreVibeOverlay .mode-drawer,
+#moreLaunchOverlay .mode-drawer {
   position: relative; inset: auto; flex: 1; min-height: 0;
   grid-template-rows: 1fr;
 }
-#remoteModeLive, #remoteModeWeek { position: relative; }
-#remoteModeWeek .config-back { top: 14px; right: 14px; }
-#remoteModeOverlay.mode-hockey .half.a,
-#remoteModeOverlay.mode-hockey .half.e {
+/* Three tiles (Custom/Week/Replay), same reasoning as #vibeSubOverlay's own
+   3-column override above — #moreVibeOverlay/#moreLaunchOverlay stay at the
+   base rule's 2 columns (each only ever shows 2 tiles). */
+#moreSubOverlay .mode-drawer { grid-template-columns: repeat(3, 1fr); }
+#moreCustom, #moreWeek, #moreReplay,
+#moreVibeHockey, #moreVibeCurling { position: relative; background: rgba(31, 35, 72, 0.72); color: var(--ink); }
+#moreReplay .config-back, #moreVibeCurling .config-back { top: 14px; right: 14px; }
+/* Icons cloned in by main.js (showMoreVibeOverlay/showMoreLaunchOverlay,
+   same reuse idiom as .tile-vibe-logo above) rather than drawn fresh — this
+   just needs to center whatever lands inside it. */
+.mode-icon-slot { display: flex; justify-content: center; }
+
+/* #moreLaunchOverlay's own two tiles (Pass & Play / Remote for a Custom
+   config already chosen) reuse the exact same "retint to the active vibe"
+   treatment #vibeSubOverlay's own .half.a/.half.e get — by this point a vibe
+   IS active, same reasoning as that rule's own comment. */
+#moreLaunchOverlay.mode-hockey .half.a,
+#moreLaunchOverlay.mode-hockey .half.e {
   background: rgba(5, 130, 202, 0.72);
   color: var(--ink);
 }
-#remoteModeOverlay.mode-hockey .half.e .sub { color: rgba(255,255,255,0.85); }
-#remoteModeOverlay.mode-hockey .half.e .mode-icon { color: rgba(255,255,255,0.92); }
-#remoteModeOverlay.mode-curling .half.a,
-#remoteModeOverlay.mode-curling .half.e {
+#moreLaunchOverlay.mode-hockey .half.e .sub { color: rgba(255,255,255,0.85); }
+#moreLaunchOverlay.mode-curling .half.a,
+#moreLaunchOverlay.mode-curling .half.e {
   background: rgba(233, 178, 19, 0.72);
   color: var(--bg-deep);
 }
-#remoteModeOverlay.mode-curling .half.a .sub,
-#remoteModeOverlay.mode-curling .half.e .sub { color: rgba(11,31,42,0.75); }
-#remoteModeOverlay.mode-curling .half.a .mode-icon,
-#remoteModeOverlay.mode-curling .half.e .mode-icon { color: var(--bg-deep); }
-#remoteModeOverlay.mode-curling #remoteModeWeek .config-back { color: var(--bg-deep); }
-/* Wallet gate note (index.html's #weekWalletGate) replaces the WEEK tile's
-   normal .sub line when getIdentity().type === 'guest' (main.js) — same
-   type treatment as .sub, just its own id so JS can toggle the two without
-   fighting a shared class. Clickable (main.js wires it to the same connect
-   flow as the sidebar identity pill) — cursor/underline hint at that. */
-#weekWalletGate { cursor: pointer; }
-#weekWalletGate .sub { text-decoration: underline; text-underline-offset: 2px; }
+#moreLaunchOverlay.mode-curling .half.a .sub,
+#moreLaunchOverlay.mode-curling .half.e .sub { color: rgba(11,31,42,0.75); }
+#moreLaunchOverlay.mode-curling #moreLaunchRemote .config-back { color: var(--bg-deep); }
+/* Wallet gate note (.week-wallet-gate, index.html's #moreWeekWalletGate)
+   replaces the WEEK tile's normal .sub line when getIdentity().type ===
+   'guest' (main.js) — class-based (was ID-scoped to the old
+   #remoteModeOverlay's own #weekWalletGate, moved here now that WEEK's own
+   entry point lives under More instead of behind Remote, see conversation).
+   Clickable (main.js wires it to the same connect flow as the sidebar
+   identity pill) — cursor/underline hint at that. */
+.week-wallet-gate { cursor: pointer; }
+.week-wallet-gate .sub { text-decoration: underline; text-underline-offset: 2px; }
 /* This file has no global `.hidden{display:none}` utility — every hideable
    element gets its own explicit rule (see e.g. #howToOverlay.hidden above,
    or the git-history comment at .mc-icon-overlay.hidden: toggling the class
-   alone does nothing without one). These two are new elements, so they need
-   their own pair, same as every other one here. */
-#weekWalletGate.hidden { display: none; }
-#remoteModeWeekSub.hidden { display: none; }
+   alone does nothing without one). Class-based (not ID-scoped) since
+   .week-wallet-gate is now reused by name (see that rule's own comment). */
+.week-wallet-gate.hidden { display: none; }
+#moreWeekSub.hidden { display: none; }
 
 /* ---- Classic/Custom + Custom Settings screens (see main.js) — shown after
    Pass & Play / Remote Match is picked from #modeOverlay above, never for
@@ -2337,24 +2406,21 @@ button:disabled { opacity: 0.35; cursor: default; }
    not which mode tile (P&P/Remote) this screen follows — set via JS
    (main.js's fillModeHeader/showNetPanel) since Classic/Custom, Custom
    Settings and Remote Match's 3 sub-screens are all reused across both
-   P&P and Remote under either vibe, not duplicated per mode. */
-.config-panel.mode-hockey { background: rgba(5, 130, 202, 0.55); } /* Nimiq Light Blue */
-.config-panel.mode-curling { background: rgba(233, 178, 19, 0.55); }  /* Nimiq Gold */
+   P&P and Remote under either vibe, not duplicated per mode. 0.72, not the
+   original 0.55 (see conversation) — matches the mode-select tiles' own
+   opacity (#modeOverlay .half.a/etc above) now, per explicit request. */
+.config-panel.mode-hockey { background: rgba(5, 130, 202, 0.72); } /* Nimiq Light Blue */
+.config-panel.mode-curling { background: rgba(233, 178, 19, 0.72); }  /* Nimiq Gold */
 /* Connect gate isn't tied to any vibe (it shows before mode-select is even
    reachable), so it gets its own fixed tint rather than one picked via
    fillModeHeader — Nimiq Light Blue again, same value as .mode-hockey,
    since it reads as "wallet/identity" rather than a specific game mode. */
-.config-panel.mode-connect { background: rgba(5, 130, 202, 0.55); }
+.config-panel.mode-connect { background: rgba(5, 130, 202, 0.72); }
 /* "Join with a code" (#joinCodeOverlay, see conversation) isn't tied to a
    vibe either (it's a direct mode-grid shortcut, no picker in between) —
    own fixed tint instead, the same Nimiq Green as its own tile
    (#modeOverlay .half.d above). */
-.config-panel.mode-joincode { background: rgba(33, 188, 165, 0.55); }
-/* "My Matches" (#myMatchesOverlay, see index.html/main.js) isn't tied to a
-   vibe either (it lists WEEK matches across both games) — Nimiq Blue, the
-   one brand color not already used by another .config-panel tint, reading
-   as neutral/profile rather than a specific game mode. */
-.config-panel.mode-week { background: rgba(31, 35, 72, 0.55); }
+.config-panel.mode-joincode { background: rgba(33, 188, 165, 0.72); }
 /* Small entrance every time ANY of these menu panels opens (Classic/Custom,
    Custom Settings, Remote Match's 3 sub-screens, the connect gate) — one
    shared rule/keyframe rather than one per screen, since they're all the
@@ -2413,7 +2479,26 @@ button:disabled { opacity: 0.35; cursor: default; }
 .config-panel.mode-joincode { color: var(--bg-deep); --ink-dim: rgba(11,31,42,0.7); }
 .config-panel.mode-joincode .config-mode-icon svg,
 .config-panel.mode-joincode .config-lobby-content h2,
+.config-panel.mode-joincode .config-create-label,
 .config-panel.mode-joincode .config-back { color: var(--bg-deep); }
+/* "MY MATCHES" sub-header text/dividers (see #joinCodeOverlay's own comment,
+   index.html) need the same lighter dark-ink-on-green treatment .week-match-*
+   already gets its own translucent-white cards for — only the divider line
+   and the empty-slot placeholder's own text need an explicit override here. */
+.config-panel.mode-joincode .join-mymatches-divider { background: rgba(11,31,42,0.18); }
+.config-panel.mode-joincode .week-match-card.week-match-empty { color: rgba(11,31,42,0.6); }
+/* .week-match-* (see that rule's own comment further down) was only ever
+   shown on the old #myMatchesOverlay's dark navy background before — white
+   text/translucent-white cards read fine there. Now that My Matches always
+   renders inside this Green panel instead (see conversation), it needs the
+   exact same dark-ink swap Gold/Curling and this panel's own base rule above
+   already apply everywhere else. */
+.config-panel.mode-joincode .week-match-card { color: var(--bg-deep); }
+.config-panel.mode-joincode .week-match-meta { color: rgba(11,31,42,0.75); }
+.config-panel.mode-joincode .week-match-sub { color: rgba(11,31,42,0.6); }
+.config-panel.mode-joincode .week-match-expiry { color: rgba(11,31,42,0.45); }
+.config-panel.mode-joincode .week-match-rename,
+.config-panel.mode-joincode .week-match-abandon { color: var(--bg-deep); }
 /* Symmetric side padding reserves the exit button's own footprint
    (top-right, see .config-back below) on both sides, so centering the
    title+icon within this narrower box keeps it visually centered in the
@@ -2438,6 +2523,21 @@ button:disabled { opacity: 0.35; cursor: default; }
    for opponent…) — this is a supporting label, not this screen's title. */
 .config-create-label { margin: 0 0 20px; font-weight: 700; font-size: 19px; letter-spacing: 0.3px; color: #fff; text-align: center; }
 .config-create-label.hidden { display: none; }
+/* Join & My Matches (#joinCodeOverlay, see conversation — the two used to
+   be separate screens/panels, now one) — a plain 1px translucent rule
+   between the join-code form and the "MY MATCHES" section below it, same
+   weight as .config-preset-btn's own border so it reads as part of the
+   same panel language rather than a harsh divider. */
+.join-mymatches-divider { width: 100%; max-width: 360px; height: 1px; margin: 24px 0 20px; background: rgba(255,255,255,0.18); }
+.join-mymatches-section { gap: 10px; }
+/* Empty slot (see main.js's renderMyMatchesContent) — this wallet's 2-active-
+   WEEK-match cap always renders as exactly 2 slots now, per explicit
+   request, rather than a variable-length list; an unused one gets this
+   greyed, non-interactive placeholder instead of a real .week-match-card. */
+.week-match-card.week-match-empty {
+  opacity: 0.4; cursor: default; justify-content: center;
+  font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase; font-size: 13px;
+}
 .config-back {
   position: absolute; top: 24px; right: 28px; width: 40px; height: 40px;
   border-radius: 50%; background: rgba(255,255,255,0.12); color: #fff;
@@ -2549,10 +2649,11 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* Same vibe-follows-activeVibe tint as every other match panel in this app
    (.config-panel.mode-hockey/.mode-curling, #overlay.mode-hockey/.mode-
    curling) — set via main.js's showWeekBoardPanel (vibeTintClass()), same
-   0.55-wash-over-the-default-scrim convention, gold light enough to need
+   0.72-wash-over-the-default-scrim convention (see conversation — pushed up
+   from 0.55, matching the mode-select tiles), gold light enough to need
    the same dark-ink swap curling gets everywhere else. */
-#weekBoardPanelBox.mode-hockey { background: rgba(5, 130, 202, 0.55); }
-#weekBoardPanelBox.mode-curling { background: rgba(233, 178, 19, 0.55); color: var(--bg-deep); }
+#weekBoardPanelBox.mode-hockey { background: rgba(5, 130, 202, 0.72); }
+#weekBoardPanelBox.mode-curling { background: rgba(233, 178, 19, 0.72); color: var(--bg-deep); }
 #weekBoardPanelBox.mode-curling h2 { color: var(--bg-deep); }
 #weekBoardPanelBox.mode-curling p { color: rgba(11, 31, 42, 0.75); }
 #weekBoardPanelBox.mode-curling .week-quote { background: rgba(11, 31, 42, 0.12); color: var(--bg-deep); }
@@ -2943,8 +3044,9 @@ button:disabled { opacity: 0.35; cursor: default; }
   max-width: 380px; border-radius: 24px;
   /* Nimiq Green (--nimiq-gold in the official kit is the *other* tinted
      panel — this is Replay's own tile color, #modeOverlay .half.d), same
-     0.55 wash convention as .config-panel.mode-hockey/.mode-curling. */
-  background: rgba(33, 188, 165, 0.55);
+     0.72 wash convention as .config-panel.mode-hockey/.mode-curling (see
+     conversation — pushed up from 0.55, matching the mode-select tiles). */
+  background: rgba(33, 188, 165, 0.72);
   /* No border by default (was a dashed drop-zone outline — read as a
      scissor-cut edge against the new tinted background, and none of the
      other mode panels have a border at all). Transparent, not removed
