@@ -37,15 +37,23 @@ function revealToManche(week) {
 // isn't team-relative).
 function resumeManchesFor(week) { return week.pointManches || null; }
 
-// True only for the actual opening of the match — no point has been scored
-// yet AND this point itself has no manches yet either. A later point
-// starting fresh (after the last one scored) also has an empty
+// True only for A's own very first shot of a brand new match — no point has
+// been scored yet AND this point itself has no manches yet either (a later
+// point starting fresh, after the last one scored, also has an empty
 // resumeManchesFor(week), which is why that alone isn't enough here — see
-// game.js's own weekMatchStart comment for why this distinction matters
-// (per explicit feedback, the match-intro replay is scoped to this moment
-// only, nothing else).
+// game.js's own weekMatchStart comment). Deliberately gated on team === 'A'
+// too: B's own first aim session hits this exact same "scoreless, no
+// manches yet" state (it's still the match's first point) but per explicit
+// feedback should never replay the intro either — B is joining a match
+// already in progress, not opening one. Only ever passed to playSingleShot
+// below, never to playReveal — a reveal is two already-known shots about to
+// resolve, never "the match opening", regardless of team or score (see
+// playReveal's own comment on why it omits this opt entirely; passing
+// isMatchStart(week) there too, for whichever side reveals the match's
+// first-ever manche, was the actual bug behind stones resetting and the
+// intro replaying between a shot and its reveal).
 function isMatchStart(week) {
-  return week.scoreA === 0 && week.scoreB === 0 && !(week.pointManches && week.pointManches.length);
+  return week.team === 'A' && week.scoreA === 0 && week.scoreB === 0 && !(week.pointManches && week.pointManches.length);
 }
 
 // "Your turn" — runs a single-team aim session (no timer, no opponent
@@ -89,7 +97,9 @@ export function playReveal(week, engineOpts) {
       ...engineOpts,
       externalManche: manche,
       resumeManches: resumeManchesFor(week),
-      weekMatchStart: isMatchStart(week),
+      // No weekMatchStart here — see isMatchStart's own comment: a reveal
+      // never shows the match-intro huddle/sting, regardless of team or
+      // score, only ever playSingleShot does.
       matchConfig: week.config,
       vibe: week.game,
       // `manche` rides along on the resolved result (not just
