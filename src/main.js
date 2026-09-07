@@ -2945,27 +2945,34 @@ function showWeekWaitingScreen(week, boardSnapshot) {
       ${isPending ? '' : `<button class="bigbtn" id="weekMsgToggleBtn">Message</button>`}
       <button class="bigbtn" id="weekQuitBtn">Come back to your match anytime</button>
     </div>
+    <button class="bigbtn" id="weekExitBtn">Exit</button>
   `, boardSnapshot);
 
-  // A single message slot per recipient (see party/weekArbiter.js's inbox),
-  // sent only once Quit is actually pressed — whatever's currently typed,
-  // if anything (best-effort: a failed send here doesn't block quitting,
-  // same trust posture as every other WEEK action in this file).
-  // Direct to Code/Matches, no confirmation dialog — per explicit request,
-  // this isn't "quit and lose the match" (there's nothing to lose, the
-  // shot's already saved server-side), just "step away, come back via your
-  // code or My Matches whenever". Message send is fire-and-forget, NOT
-  // awaited: awaiting it here previously meant a slow/stuck reply left the
-  // whole click silently doing nothing (reported: "click exit, rien ne se
-  // passe") — navigation must never wait on it.
-  document.getElementById('weekQuitBtn').addEventListener('click', () => {
-    audio.play('button');
+  // Shared by both buttons below — a single message slot per recipient
+  // (see party/weekArbiter.js's inbox), sent whenever either is pressed,
+  // whatever's currently typed, if anything. Fire-and-forget, NOT awaited:
+  // awaiting it here previously meant a slow/stuck reply left the whole
+  // click silently doing nothing (reported: "click exit, rien ne se
+  // passe") — navigation must never wait on it. No confirmation dialog on
+  // either — per explicit request, this isn't "quit and lose the match"
+  // (there's nothing to lose, the shot's already saved server-side), just
+  // "step away for now"; `next` is the only thing that differs between the
+  // two — Code/Matches (weekQuitBtn) vs the main menu (weekExitBtn).
+  function leaveWaitingScreen(next) {
     activeWeekWaiting = null; // handling it ourselves — performMatchExit doesn't own this exit path
     const text = document.getElementById('weekMsgInput')?.value.trim();
     if (text) week.sendMessage(text).catch(() => {});
     week.close();
     hideMatchChrome();
-    showJoinCodeScreen();
+    next();
+  }
+  document.getElementById('weekQuitBtn').addEventListener('click', () => {
+    audio.play('button');
+    leaveWaitingScreen(showJoinCodeScreen);
+  });
+  document.getElementById('weekExitBtn').addEventListener('click', () => {
+    audio.play('button');
+    leaveWaitingScreen(showModeDrawer);
   });
 
   if (isPending) {
