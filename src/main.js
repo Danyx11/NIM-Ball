@@ -1351,7 +1351,7 @@ function showLobby(html, mode = null) {
   // too, same invisible-Ready-button bug as above. #modeOverlay is a no-op
   // to hide here for Duel LAN (never shown in the first place — the `?duel`
   // link skips mode-select entirely), and showNetPanel() unhides it again on
-  // the way back out (disconnect -> showCreateMatchScreen), so this doesn't
+  // the way back out (disconnect -> showRemoteConnectError), so this doesn't
   // strand Remote Match's own "back" path either.
   modeOverlay.classList.add('hidden');
   overlay.classList.remove(...OVERLAY_TINT_CLASSES);
@@ -1594,16 +1594,28 @@ function showClassicCustomScreen(mode, launch, goBack, errorMsg) {
     showCustomSettingsScreen(mode, getCustomConfig(mode));
   };
 }
-// Remote Match / LIVE's own entry point: straight into Classic/Custom, no
-// Create/Join choice in between — this screen IS "create" for LIVE (Join
-// lives entirely on the separate #modeJoinCode tile). Reused as the retry
-// target on a connection failure too (hostMatch's catch,
-// showMatchHostWaitingScreen's onDisconnect/onLost below). Remote is now
-// reached straight off the vibe drawer (see conversation — the old LIVE/WEEK
-// picker in between is gone, WEEK moved under More instead), so Back returns
-// straight there.
-function showCreateMatchScreen(errorMsg) {
-  showClassicCustomScreen('remote', (config) => hostMatch(config), () => showVibeDrawer(activeVibe), errorMsg);
+// Remote's own connect-failure/disconnect retry screen (see conversation,
+// nimicurl arborescence rework — Classic/Custom no longer sits in this flow
+// at all, reserved for the More tile now, so there's no fork screen left to
+// fall back into on an error the way #modeMatch used to reuse
+// showClassicCustomScreen for). Retry re-attempts hostMatch with the exact
+// config that failed — works the same whether that came from this tile's
+// own fixed Classic config or a Custom one saved via More's own
+// #moreLaunchOverlay, since both funnel through hostMatch(config) now. Back
+// always lands on the tile grid — same "no deeper context worth preserving"
+// call every other error/placeholder screen in this file already makes
+// (About/League/Partnership's own returnToModeSelect, for instance).
+function showRemoteConnectError(message, config) {
+  showLobby(`
+    <h2>Connection failed</h2>
+    <p>${escapeHtml(message)}</p>
+    <div style="display:flex; gap:12px;">
+      <button class="bigbtn" id="remoteRetryBtn">Retry</button>
+      <button class="bigbtn" id="remoteBackBtn">Back</button>
+    </div>
+  `, 'remote');
+  document.getElementById('remoteRetryBtn').onclick = () => { audio.play('button'); hideLobby(); hostMatch(config); };
+  document.getElementById('remoteBackBtn').onclick = () => { audio.play('button'); hideLobby(); returnToModeSelect(); };
 }
 // WEEK's own entry point, reached via More (see conversation) — same
 // Classic/Custom screen, routed to hostWeekMatch() instead of hostMatch().
@@ -1825,6 +1837,15 @@ cgGuestBtn.addEventListener('click', () => {
 // Classic/Custom fork entirely (that fork already happened — the tile was
 // literally "Custom").
 async function launchPassPlayMatch(config) {
+  // #modeLocal lives inside #vibeSubOverlay (and #moreLaunchLocal inside
+  // #moreLaunchOverlay) — siblings of #modeOverlay, not nested inside it
+  // (see conversation) — so hiding #modeOverlay alone leaves whichever
+  // picker got us here sitting on top of the live match underneath. Both
+  // callers used to reach this point via showClassicCustomScreen, which
+  // hid it on the way; now that the Classic/Custom fork is gone from the
+  // plain vibe-drawer path (and #moreLaunchOverlay already hides itself
+  // explicitly before calling in), this needs the same hide explicitly.
+  hideRemoteMatchStack();
   modeOverlay.classList.add('hidden');
   startOverlay.classList.remove('hidden');
   showToolbar();
@@ -1850,18 +1871,22 @@ async function launchPassPlayMatch(config) {
   // first onTurnChange('A') as aimA actually begins.
   syncIdentityPill();
 }
+// No Classic/Custom fork here anymore (see conversation, nimicurl
+// arborescence rework) — Custom is reserved for the More tile now (see
+// #moreLaunchOverlay above); Pass & Play straight off the vibe drawer always
+// starts a Classic match immediately.
 modeLocal.addEventListener('click', () => {
   audio.play('button');
-  showClassicCustomScreen('passplay', (config) => launchPassPlayMatch(config), () => showVibeDrawer(activeVibe));
+  launchPassPlayMatch({ ...DEFAULT_MATCH_CONFIG });
 });
 
-// Remote: reached straight off the vibe drawer now (see conversation — the
-// old LIVE/WEEK picker in between is gone, WEEK moved under More instead) —
-// same Classic/Custom + code-lobby flow LIVE always used, unchanged.
+// Remote: same — no Classic/Custom fork, straight into hostMatch() with the
+// Classic config. The generated-code "waiting for opponent" screen
+// (showMatchHostWaitingScreen) is Remote's own next step, not a mode choice.
 modeMatch.addEventListener('click', () => {
   audio.play('button');
   modeOverlay.classList.add('hidden');
-  showCreateMatchScreen();
+  hostMatch({ ...DEFAULT_MATCH_CONFIG });
 });
 
 // ---- Replay mode (see CLAUDE.md replay section) — upload a saved ticket
@@ -2482,8 +2507,9 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
 // #modeJoinCode tile, see conversation) is the only way in as team B now —
 // there's no in-Remote-Match Create/Join choice anymore, this whole screen
 // pair used to live behind one (showMatchChoiceScreen/showMatchJoinScreen,
-// both removed) that's since been replaced by showCreateMatchScreen going
-// straight to Classic/Custom.
+// both removed) that's since been replaced by #modeMatch calling hostMatch()
+// directly (see conversation — Classic/Custom no longer sits in this flow
+// at all, reserved for the More tile now).
 //
 // Alphabet excludes visually ambiguous characters (0/O, 1/I) since the code
 // is read off one screen and typed on another, often by voice or a glance
@@ -2525,14 +2551,14 @@ async function hostMatch(matchConfig) {
     showMatchHostWaitingScreen(net, code, matchConfig);
   } catch (err) {
     hideLoadingOverlay();
-    showCreateMatchScreen(err.message);
+    showRemoteConnectError(err.message, matchConfig);
   }
 }
 
 // Same shape as showWaitingScreen above, but also displays the code (the
-// host is the one waiting to share it) and sends a disconnected opponent
-// back to Classic/Custom (a fresh Classic/Custom pick gets a fresh code —
-// the old one, tied to this now-empty room, isn't reused).
+// host is the one waiting to share it) and sends a disconnected opponent to
+// showRemoteConnectError (a fresh hostMatch() retry gets a fresh code — the
+// old one, tied to this now-empty room, isn't reused).
 function showMatchHostWaitingScreen(net, code, matchConfig) {
   const teamLabel = net.myTeam === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
@@ -2546,9 +2572,9 @@ function showMatchHostWaitingScreen(net, code, matchConfig) {
   `);
   net.onOpponentJoined(() => {
     hostedRoomNet = null;
-    showReadyScreen(net, teamLabel, cls, (msg) => showCreateMatchScreen(msg), matchConfig);
+    showReadyScreen(net, teamLabel, cls, (msg) => showRemoteConnectError(msg, matchConfig), matchConfig);
   });
-  net.onDisconnect(() => { hostedRoomNet = null; showCreateMatchScreen('The other player disconnected.'); });
+  net.onDisconnect(() => { hostedRoomNet = null; showRemoteConnectError('The other player disconnected.', matchConfig); });
 }
 
 // WEEK's own creation flow (party/weekArbiter.js) — no "waiting for
