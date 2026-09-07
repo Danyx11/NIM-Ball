@@ -106,31 +106,26 @@
       <img id="bg-logo" alt="logo">
     </div>
     <nav class="sidebar-nav">
-      <div class="nav-section">
-        <div class="nav-label" role="button" tabindex="0" aria-expanded="false">
-          <svg class="nav-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.544-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.152A4 4 0 0 0 17.32 5z"/><line x1="6" y1="11" x2="10" y2="11"/><line x1="8" y1="9" x2="8" y2="13"/><line x1="15" y1="12" x2="15.01" y2="12"/><line x1="18" y1="10" x2="18.01" y2="10"/></svg>
-          <span>More</span>
-          <svg class="nav-label-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-        </div>
-        <div class="nav-section-items">
-          <button class="nav-item" id="navLeague" type="button">League</button>
-          <button class="nav-item" id="navReplay" type="button">Replay</button>
-          <!-- WEEK matches in progress (see party/weekArbiter.js /
-               party/playerIndex.js) — a UX shortcut back into an existing
-               match, never the actual key to it (the 4-char code still is,
-               see conversation): main.js's showMyMatchesScreen() fetches
-               this wallet's active matches and lets a tap resume one
-               directly, same as typing its code into Join. -->
-          <button class="nav-item" id="navMyMatches" type="button">My Matches</button>
-        </div>
-        <!-- Mobile-only scroll thumb (see style.css's .mobile-layout
-             .nav-scroll-pill + main.js's updateNavScrollPill) — a real
-             element instead of native scrollbar styling since iOS Safari
-             ignores ::-webkit-scrollbar entirely; shown/sized/positioned by
-             JS only when this section is open AND its own item list
-             overflows its max-height. -->
-        <div class="nav-scroll-pill" aria-hidden="true"></div>
-      </div>
+      <!-- Home / League: flat, non-accordion nav actions (see conversation —
+           nimicurl arborescence rework). Home carries the "back to menu"
+           confirm-dialog function that used to live on the #bg-logo click
+           itself (that logo is now purely decorative branding, no click
+           handler of its own anymore) — moved here so there's a persistent,
+           labeled nav entry for it instead of only the logo being
+           clickable. League already had a real destination (the shared
+           #constructionOverlay placeholder, wired via wireConstructionNav
+           below) — just relocated out of the old "More" accordion (removed:
+           Replay and My Matches both moved onto their own mode-select tiles
+           instead, see conversation, leaving nothing else to group under
+           it). -->
+      <button class="nav-flat-item" id="navHome" type="button">
+        <svg class="nav-flat-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-9"/><path d="M9.5 20v-6h5v6"/></svg>
+        <span>Home</span>
+      </button>
+      <button class="nav-flat-item" id="navLeague" type="button">
+        <svg class="nav-flat-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 5H4.5a2 2 0 0 0 0 4H7"/><path d="M17 5h2.5a2 2 0 0 1 0 4H17"/><path d="M12 17v3.5"/><path d="M8 21h8"/></svg>
+        <span>League</span>
+      </button>
       <div class="nav-section">
         <div class="nav-label" role="button" tabindex="0" aria-expanded="false">
           <svg class="nav-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.5"/><path d="M12 17.2h.01"/></svg>
@@ -482,12 +477,18 @@
          tiles off-screen on short/narrow phones. Duel LAN dropped from the
          picker (still reachable via the `?duel` magic link, see main.js).
          Top row is now a "vibe" pick (Hockey/Curling, see conversation)
-         instead of P&P/Remote directly — those two moved one level deeper,
-         into #vibeSubOverlay's own #vibeDrawer below, reached via
-         #modeHockey/#modeCurling (main.js's showVibeDrawer). AI Training
-         (bottom-left) is untouched; bottom-right used to be Replay, now
-         #modeJoinCode ("join with a code" — Replay itself moved to being
-         sidebar-only, see conversation). -->
+         instead of P&P/Remote directly — those two (+ AI, see below) moved
+         one level deeper, into #vibeSubOverlay's own #vibeDrawer below,
+         reached via #modeHockey/#modeCurling (main.js's showVibeDrawer).
+         Bottom-left used to be the AI Training tile — repurposed into
+         #modeMore (see conversation, nimicurl arborescence rework): AI now
+         lives inside #vibeSubOverlay instead (per-vibe, Classic-only), and
+         this slot opens the Custom/Week/Replay picker (#moreSubOverlay)
+         instead. Bottom-right, #modeJoinCode, now also carries "My Matches"
+         underneath its own join-code form (see main.js's showJoinCodeScreen
+         + #joinCodeOverlay below) — Replay and My Matches both used to be
+         sidebar-only; My Matches merged into this tile's own panel, Replay
+         moved under #modeMore instead. -->
     <div id="modeOverlay" class="team-select hidden">
       <div id="modeOverlayBg"></div>
       <div class="mode-select-scrim"></div>
@@ -515,7 +516,52 @@
           <div class="tag">PURE CURLING</div>
           <div class="sub">get closest</div>
         </div>
-        <div class="half c" id="modeSolo">
+        <!-- More (see conversation) — reuses the sidebar's old "More" nav
+             icon (a gamepad, since that whole accordion is gone now, see
+             #sidebar above) rather than drawing a new one. Opens
+             #moreSubOverlay: Custom (settings for either vibe, then P&P or
+             Remote), Week, Replay. -->
+        <div class="half c" id="modeMore">
+          <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.544-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.152A4 4 0 0 0 17.32 5z"/><line x1="6" y1="11" x2="10" y2="11"/><line x1="8" y1="9" x2="8" y2="13"/><line x1="15" y1="12" x2="15.01" y2="12"/><line x1="18" y1="10" x2="18.01" y2="10"/></svg>
+          <div class="tag">MORE</div>
+          <div class="sub">Custom, Week & Replay</div>
+        </div>
+        <div class="half d" id="modeJoinCode">
+          <svg class="mode-icon mode-icon-tall" viewBox="0 0 40 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="8" y="20" width="24" height="20" rx="4"/>
+            <path d="M13 20v-6a7 7 0 0 1 14 0v6"/>
+            <circle cx="20" cy="30" r="2.6" fill="currentColor" stroke="none"/>
+            <line x1="20" y1="32.5" x2="20" y2="36"/>
+          </svg>
+          <div class="tag">CODE/MATCHES</div>
+          <div class="sub">Enter a code, or resume a match</div>
+        </div>
+      </div>
+    </div>
+    <!-- Vibe sub-drawer: AI/P&P/Remote picker for whichever vibe was just
+         chosen above (#modeHockey/#modeCurling) — same sibling-of-
+         #modeOverlay pattern as #classicCustomOverlay etc. below (shown
+         while #modeOverlay itself stays visible for its bg/scrim, with only
+         #modeDrawer's own tile grid hidden, see main.js's showVibeDrawer).
+         #vibeDrawer reuses .mode-drawer's own tile grid/animation CSS
+         (single row here, not 2x2) so these tiles keep the exact same visual
+         language as the top-level ones. #modeLocal/#modeMatch keep their
+         original ids/click handlers from before this feature; #modeAi is new
+         (see conversation, nimicurl arborescence rework) — moved in from the
+         old top-level AI Training tile, now per-vibe and Classic-only:
+         Hockey launches straight in, Curling isn't trained yet and shows the
+         shared "under construction" panel instead (main.js). All three tiles
+         are re-tinted to the ACTIVE VIBE's single color here (blue for
+         Hockey, gold for Curling — #vibeSubOverlay.mode-hockey/.mode-curling
+         in style.css), overriding their old fixed per-slot brand colors,
+         since under a given vibe every one of these should read as "the same
+         game", not different games. -->
+    <div id="vibeSubOverlay" class="hidden">
+      <div class="mode-drawer" id="vibeDrawer">
+        <div class="half f" id="modeAi">
+          <span class="tile-vibe-logo" id="modeAiVibeLogo" aria-hidden="true"></span>
+          <!-- Moved verbatim from the old top-level AI Training tile (see
+               conversation) — same icon, no redraw. -->
           <svg class="mode-icon mode-icon-tall" viewBox="0 0 48 56" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="24" cy="4" r="1.8" fill="currentColor" stroke="none"/>
             <line x1="24" y1="6" x2="24" y2="11"/>
@@ -530,46 +576,9 @@
             <ellipse cx="24" cy="41" rx="9" ry="5"/>
             <ellipse cx="24" cy="49" rx="16" ry="4" opacity="0.5"/>
           </svg>
-          <div class="tag">AI TRAINING</div>
-          <div class="sub">Play against an AI opponent</div>
+          <div class="tag">PLAY VS AI</div>
+          <div class="sub">1 player, Classic rules only</div>
         </div>
-        <!-- Was the REPLAY tile (see conversation) — Replay itself moved to
-             being sidebar-only (#navReplay calls main.js's showReplayUpload()
-             directly now, no tile involved). This slot is now a direct
-             shortcut into joining an already-created private match by its
-             4-character code, skipping the vibe/P&P-Remote picker entirely
-             (see main.js's showJoinCodeScreen + #joinCodeOverlay below) —
-             closed padlock: the code is what opens it. -->
-        <div class="half d" id="modeJoinCode">
-          <svg class="mode-icon mode-icon-tall" viewBox="0 0 40 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="8" y="20" width="24" height="20" rx="4"/>
-            <path d="M13 20v-6a7 7 0 0 1 14 0v6"/>
-            <circle cx="20" cy="30" r="2.6" fill="currentColor" stroke="none"/>
-            <line x1="20" y1="32.5" x2="20" y2="36"/>
-          </svg>
-          <div class="tag">JOIN WITH A CODE</div>
-          <div class="sub">Enter a code to join a private match</div>
-        </div>
-      </div>
-    </div>
-    <!-- Vibe sub-drawer: P&P/Remote picker for whichever vibe was just
-         chosen above (#modeHockey/#modeCurling) — same sibling-of-
-         #modeOverlay pattern as #classicCustomOverlay etc. below (shown
-         while #modeOverlay itself stays visible for its bg/scrim, with only
-         #modeDrawer's own tile grid hidden, see main.js's showVibeDrawer).
-         #vibeDrawer reuses .mode-drawer's own tile grid/animation CSS
-         (single row here, not 2x2) so these two tiles keep the exact same
-         visual language as the top-level ones; its two tiles are #modeLocal/
-         #modeMatch themselves (same ids, same click handlers as before this
-         feature, just relocated one level deeper — see conversation) so
-         nothing else downstream (Classic/Custom, Match réseau, etc.) had to
-         change shape. Both tiles are re-tinted to the ACTIVE VIBE's single
-         color here (blue for Hockey, gold for Curling — #vibeSubOverlay.
-         mode-hockey/.mode-curling in style.css), overriding their old fixed
-         per-slot a/e brand colors, since under a given vibe both P&P and
-         Remote should read as "the same game", not two different games. -->
-    <div id="vibeSubOverlay" class="hidden">
-      <div class="mode-drawer" id="vibeDrawer">
         <div class="half a" id="modeLocal">
           <!-- Vibe logo, not a separate external header anymore (see
                conversation) — main.js's showVibeDrawer clones the active
@@ -586,7 +595,7 @@
             <circle cx="46" cy="34" r="1.9" fill="currentColor" stroke="none"/>
           </svg>
           <div class="tag">PASS & PLAY</div>
-          <div class="sub">Play 1v1 on the same device</div>
+          <div class="sub">2 players, 1 device</div>
         </div>
         <div class="half e" id="modeMatch">
           <!-- Back button lives here now, not floating above both tiles (see
@@ -606,43 +615,106 @@
             <circle cx="44" cy="20.5" r="1.9" fill="currentColor" stroke="none"/>
             <path d="M22 10Q32 -1 42 10" stroke-dasharray="0.1 7.64"/>
           </svg>
-          <div class="tag">REMOTE MATCH</div>
-          <div class="sub">Play 1v1 on separate devices</div>
+          <div class="tag">REMOTE</div>
+          <div class="sub">2 players, 2 devices</div>
         </div>
       </div>
     </div>
-    <!-- LIVE/WEEK picker (see main.js's showRemoteModeDrawer / WEEK design
-         conversation) — one level deeper than #vibeSubOverlay above, reached
-         by tapping REMOTE MATCH there instead of going straight to
-         Classic/Custom (main.js's showCreateMatchScreen now takes the
-         chosen mode instead of assuming LIVE). LIVE keeps its exact current
-         behavior end to end (main.js's hostMatch/joinMatch, party/arbiter.js
-         — untouched). Same .mode-drawer/.half markup and vibe-tint pattern
-         as #vibeSubOverlay (main.js sets .mode-hockey/.mode-curling here
-         too), so this reads as "one more step of the same picker", not a
-         different screen language. -->
-    <div id="remoteModeOverlay" class="hidden">
-      <div class="mode-drawer" id="remoteModeDrawer">
-        <div class="half a" id="remoteModeLive">
-          <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7l0-7z"/></svg>
-          <div class="tag">LIVE</div>
-          <div class="sub">Play now — both online, 30s per shot</div>
+    <!-- More's own 3-tile picker (Custom / Week / Replay, see conversation) —
+         reached from #modeMore above, same sibling-of-#modeOverlay/
+         #vibeDrawer-reuse pattern as #vibeSubOverlay. Fixed "More" tint
+         (Nimiq Blue navy, same value as #modeOverlay .half.c/#overlay.
+         mode-solo — see style.css's #moreSubOverlay .half) rather than a
+         per-vibe one: no vibe has been chosen yet at this level. -->
+    <div id="moreSubOverlay" class="hidden">
+      <div class="mode-drawer" id="moreDrawer">
+        <div class="half" id="moreCustom">
+          <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+          <div class="tag">CUSTOM</div>
+          <div class="sub">Play with your own settings</div>
         </div>
-        <div class="half e" id="remoteModeWeek">
-          <button class="config-back" id="remoteModeBackBtn" type="button" aria-label="Back">
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
-          </button>
+        <div class="half" id="moreWeek">
           <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/><path d="M8 14l2.5 2.5L16 11"/></svg>
           <div class="tag">WEEK</div>
-          <div class="sub" id="remoteModeWeekSub">Play when you can — 7 days, no timer</div>
-          <!-- Wallet gate (see main.js's showRemoteModeDrawer / point 4 of
-               the WEEK brief — no guests) — hidden by default, shown in
-               place of the .sub line above when getIdentity().type is
-               'guest' instead of disabling the tile outright, so the reason
-               is always visible right where the player tapped. -->
-          <div class="week-wallet-gate hidden" id="weekWalletGate">
+          <div class="sub" id="moreWeekSub">Take your time — 7 days, no timer</div>
+          <!-- Wallet gate (see main.js's showMoreSubOverlay / the old
+               #remoteModeOverlay's own #weekWalletGate, same pattern moved
+               here now that WEEK's own entry point lives under More instead
+               of behind Remote — no guests, see conversation) — hidden by
+               default, shown in place of the .sub line above when
+               getIdentity().type is 'guest'. -->
+          <div class="week-wallet-gate hidden" id="moreWeekWalletGate">
             <div class="sub">WEEK requires a Nimiq wallet. Create your wallet in about 50 seconds.</div>
           </div>
+        </div>
+        <div class="half" id="moreReplay">
+          <button class="config-back" id="moreBackBtn" type="button" aria-label="Back">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+          </button>
+          <svg class="mode-icon mode-icon-tall" viewBox="0 0 40 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10 4h13l9 9v31H10z"/>
+            <path d="M23 4v9h9"/>
+            <path d="M16.5 19v10l8.5-5z"/>
+            <line x1="15" y1="34" x2="27" y2="34"/>
+            <line x1="15" y1="39" x2="23" y2="39"/>
+          </svg>
+          <div class="tag">REPLAY</div>
+          <div class="sub">Watch the match again</div>
+        </div>
+      </div>
+    </div>
+    <!-- Vibe pick for Custom/Week (see conversation) — More's own equivalent
+         of #modeHockey/#modeCurling above, since those two tiles' own click
+         handlers are permanently wired to the normal AI/P&P/Remote flow
+         (#vibeSubOverlay) and can't be reused as-is here. Icons cloned from
+         those same top-level tiles at click time (main.js's showMoreVibeOverlay),
+         same reuse idiom #vibeSubOverlay's own tile-vibe-logo already uses —
+         no new art. Shared between the Custom and Week entry points
+         (main.js tracks which one via moreFlowTarget); back returns to
+         #moreSubOverlay. Fixed "More" tint, same reasoning as #moreSubOverlay
+         above — the vibe itself is what's being picked here. -->
+    <div id="moreVibeOverlay" class="hidden">
+      <div class="mode-drawer" id="moreVibeDrawer">
+        <div class="half" id="moreVibeHockey">
+          <span class="mode-icon-slot" id="moreVibeHockeyIcon" aria-hidden="true"></span>
+          <div class="tag">NIMICURL</div>
+          <div class="sub">score a goal</div>
+        </div>
+        <div class="half" id="moreVibeCurling">
+          <!-- Back lives on the last tile, same convention as every other
+               picker here (#modeMatch's own vibeBackBtn, #moreReplay's own
+               moreBackBtn — see conversation) — was on the first tile
+               (#moreVibeHockey) instead, which read wrong next to those. -->
+          <button class="config-back" id="moreVibeBackBtn" type="button" aria-label="Back">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+          </button>
+          <span class="mode-icon-slot" id="moreVibeCurlingIcon" aria-hidden="true"></span>
+          <div class="tag">PURE CURLING</div>
+          <div class="sub">get closest</div>
+        </div>
+      </div>
+    </div>
+    <!-- P&P/Remote picker for a saved Custom config (see conversation) —
+         More's own equivalent of #vibeSubOverlay's #modeLocal/#modeMatch
+         pair (icons cloned from those same tiles, main.js), minus the AI
+         tile: Custom settings are already chosen by the time this shows, and
+         AI never goes through Classic/Custom (see conversation). Tinted to
+         the active vibe (mode-hockey/mode-curling), same as #vibeSubOverlay
+         — the vibe was already picked one step back. -->
+    <div id="moreLaunchOverlay" class="hidden">
+      <div class="mode-drawer" id="moreLaunchDrawer">
+        <div class="half a" id="moreLaunchLocal">
+          <span class="mode-icon-slot" id="moreLaunchLocalIcon" aria-hidden="true"></span>
+          <div class="tag">PASS & PLAY</div>
+          <div class="sub">2 players, 1 device</div>
+        </div>
+        <div class="half e" id="moreLaunchRemote">
+          <button class="config-back" id="moreLaunchBackBtn" type="button" aria-label="Back">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+          </button>
+          <span class="mode-icon-slot" id="moreLaunchRemoteIcon" aria-hidden="true"></span>
+          <div class="tag">REMOTE</div>
+          <div class="sub">2 players, 2 devices</div>
         </div>
       </div>
     </div>
@@ -860,16 +932,24 @@
       <p class="sub">Coming soon — this vibe isn't plugged in yet.</p>
       <button class="bigbtn" id="csoOkBtn">OK</button>
     </div>
-    <!-- "Join with a code" (see conversation / #modeJoinCode above) — reached
-         directly off the mode grid, no vibe/P&P-Remote picker in between.
-         Own tint (.mode-joincode in style.css, the tile's own Nimiq Green)
-         rather than the vibe-driven mode-hockey/mode-curling every other
-         config-panel here uses, since this screen exists outside that
-         picker entirely. Reuses main.js's joinMatch() — same connect logic
-         as Remote Match's own Join screen, just a different entry/retry
-         screen and no matchNetworkOverlay involved. Back always goes
-         straight to mode-select (there's no earlier step, same as
-         Replay's). -->
+    <!-- "Join with a code" + "My Matches" (see conversation, nimicurl
+         arborescence rework — the two used to be separate screens,
+         #joinCodeOverlay reached off the mode grid and #myMatchesOverlay off
+         the sidebar; now one panel behind #modeJoinCode's single tile, code
+         entry on top and this wallet's matches underneath, per explicit
+         request). Own tint (.mode-joincode in style.css, the tile's own
+         Nimiq Green) rather than the vibe-driven mode-hockey/mode-curling
+         every other config-panel here uses, since this screen exists
+         outside that picker entirely. #joinCodeContent reuses main.js's
+         joinMatch()/joinWithCode() — same connect logic as Remote Match's
+         own Join screen, just a different entry/retry screen and no
+         matchNetworkOverlay involved. #myMatchesContent is filled by
+         main.js's renderMyMatchesContent() (party/playerIndex.js) — always
+         exactly 2 fixed slots (this wallet's 2-active-WEEK-match cap), each
+         either an in-progress match card or a greyed "Empty" placeholder,
+         per explicit request, rather than a variable-length list. Back
+         always goes straight to mode-select (there's no earlier step, same
+         as Replay's). -->
     <div id="joinCodeOverlay" class="config-panel mode-joincode hidden">
       <button class="config-back" id="joinCodeBackBtn" type="button" aria-label="Back">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
@@ -878,6 +958,9 @@
         <span class="config-mode-icon" id="joinCodeModeIcon"></span>
       </div>
       <div id="joinCodeContent" class="config-lobby-content"></div>
+      <div class="join-mymatches-divider"></div>
+      <h2 class="config-create-label">MY MATCHES</h2>
+      <div id="myMatchesContent" class="config-lobby-content join-mymatches-section"></div>
     </div>
     <!-- "Claim a handle" (see main.js's openClaimHandleDialog/renderClaimStep,
          reached from the sidebar identity pill, never a mode tile — no back
@@ -891,25 +974,6 @@
          same "wallet/identity" tint #connectGateOverlay's own panel uses. -->
     <div id="claimHandleOverlay" class="config-panel mode-connect hidden">
       <div id="claimHandleContent" class="config-lobby-content"></div>
-    </div>
-    <!-- "My Matches" (see party/playerIndex.js / main.js's
-         showMyMatchesScreen) — WEEK matches in progress for this wallet,
-         reached from the sidebar's #navMyMatches, never a mode tile. Same
-         .config-panel/#menuStage shell as Claim a handle just above, own
-         mode-week tint (style.css) rather than mode-connect since this isn't
-         about identity itself. A UX shortcut only — the match code is still
-         the real way back in, see conversation. -->
-    <div id="myMatchesOverlay" class="config-panel mode-week hidden">
-      <button class="config-back" id="myMatchesBackBtn" type="button" aria-label="Back">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
-      </button>
-      <div class="config-header">
-        <span class="config-mode-icon">
-          <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/><path d="M8 14l2.5 2.5L16 11"/></svg>
-        </span>
-        <span class="config-mode-title">My Matches</span>
-      </div>
-      <div id="myMatchesContent" class="config-lobby-content"></div>
     </div>
     <!-- "How to?" hub (see conversation — #helpBtn opens this, the sole
          entry point now that the sidebar's own "How to" nav item is gone)
