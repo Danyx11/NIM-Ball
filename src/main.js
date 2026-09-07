@@ -410,6 +410,12 @@ function performMatchExit() {
     pendingWeekCancel = null;
     week.abandon().catch(() => {}); // best-effort — same trust posture as every other WEEK action
     week.close();
+  } else if (activeWeekWaiting) {
+    const week = activeWeekWaiting;
+    activeWeekWaiting = null;
+    const text = document.getElementById('weekMsgInput')?.value.trim();
+    if (text) week.sendMessage(text).catch(() => {}); // best-effort, same posture as above
+    week.close();
   }
   activeStopGame?.();
   returnToModeSelect();
@@ -473,6 +479,20 @@ const rockHandlers = { onRockSound: triggerSound, onRockExit: triggerExit, onRoc
 // really started. Cleared the instant that window closes (the shot
 // commits) or once handled here.
 let pendingWeekCancel = null;
+
+// Set while showWeekWaitingScreen is showing (the "Your shot is ready"
+// card, with its own optional message field) — lets performMatchExit flush
+// a typed-but-unsent message no matter which confirm dialog the player
+// actually leaves through. That screen's own Quit button already sends it
+// itself before tearing down (see its own handler); Home/logo bypass that
+// button entirely (their own confirm dialog, then straight to
+// performMatchExit), so without this a message typed there and left
+// unsent would silently vanish instead of reaching the opponent (reported:
+// "j'avais share/copié le code et mis un message" right before hitting the
+// stuck-panel bug below, fixed alongside it). Mutually exclusive with
+// pendingWeekCancel by construction — one covers before the first shot,
+// this one after.
+let activeWeekWaiting = null;
 
 // Nimiq logo is now purely decorative branding (see index.html's #navHome
 // comment, nimicurl arborescence rework) — the "back to menu" shortcut it
@@ -1088,6 +1108,16 @@ function hideRemoteMatchStack() {
   customSettingsOverlay.classList.add('hidden');
   matchNetworkOverlay.classList.add('hidden');
   joinCodeOverlay.classList.add('hidden');
+  // #weekBoardPanel (WEEK's own rink-overlay card, see its own comment in
+  // index.html) joined this stack late — same bug class as every other
+  // entry here: left showing, it sits on top of whatever's shown next
+  // (reported: stuck on screen after a WEEK match, then reappearing over a
+  // brand new match started in a different mode entirely). hideWeekBoardPanel
+  // is declared further down this file but already defined by the time
+  // this function is ever actually called (user interaction, well after
+  // the whole module has run) — same as every other forward reference in
+  // this file.
+  hideWeekBoardPanel();
 }
 function showModeDrawer() {
   hideRemoteMatchStack();
@@ -2852,6 +2882,7 @@ async function showWeekAimScreen(week) {
   // See pendingWeekCancel's own comment — only ever true for A, the one
   // moment nothing has actually happened in this match yet.
   pendingWeekCancel = week.status === 'pending' ? week : null;
+  activeWeekWaiting = null; // defensive — this window's own flag, not this one's
   await preloadCoreAssets(IS_MOBILE);
   const shotPromise = playSingleShot(week, {
     ...rockHandlers, mobile: IS_MOBILE,
@@ -2895,6 +2926,9 @@ async function showWeekAimScreen(week) {
 function showWeekWaitingScreen(week, boardSnapshot) {
   hideMatchChrome();
   setProfilePillTeam(week.team); // see showWeekAimScreen's own comment
+  // See activeWeekWaiting's own comment — lets Home/logo's exit path flush
+  // a typed-but-unsent message too, not just this screen's own Quit button.
+  activeWeekWaiting = week;
   modeOverlay.classList.add('hidden');
   const isPending = week.status === 'pending';
   const messageField = `<input id="weekMsgInput" type="text" maxlength="60" placeholder="Leave a message (optional)…" autocomplete="off" />`;
@@ -2919,6 +2953,7 @@ function showWeekWaitingScreen(week, boardSnapshot) {
   // same trust posture as every other WEEK action in this file).
   document.getElementById('weekQuitBtn').addEventListener('click', async () => {
     audio.play('button');
+    activeWeekWaiting = null; // handling it ourselves — performMatchExit doesn't own this exit path
     const text = document.getElementById('weekMsgInput')?.value.trim();
     if (text) { try { await week.sendMessage(text); } catch { /* best-effort */ } }
     week.close();

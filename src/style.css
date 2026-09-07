@@ -2627,7 +2627,17 @@ button:disabled { opacity: 0.35; cursor: default; }
    victory panel mechanism) — see index.html's comment on why these two
    never touch each other. */
 #weekBoardPanel {
-  position: absolute; inset: 0; z-index: 10;
+  position: absolute; inset: 0;
+  /* One below #overlay's own z-index:10 (main.js's showLobby renders into
+     that element, not this one — e.g. the sidebar's #navHome "Back to
+     menu?" confirm dialog) — deliberately, not accidentally equal: both
+     get reparented into #game-card in the same init pass, #weekBoardPanel
+     added last (see main.js's own reparent-list comment), so at equal
+     z-index it would win the DOM-order tiebreak and sit ON TOP of that
+     confirm dialog, rendering it present but invisible/unclickable behind
+     this panel — reported as "clicking Home does nothing" while a WEEK
+     screen was still showing. */
+  z-index: 9;
   display: flex; align-items: center; justify-content: center;
 }
 #weekBoardPanel.hidden { display: none; }
