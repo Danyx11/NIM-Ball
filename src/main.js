@@ -2768,7 +2768,7 @@ function enterWeekMatch(week) {
   // — nothing here needs to branch on it. week.reveal is naturally always
   // null while 'pending' (B doesn't exist yet to have submitted anything),
   // so the check below still resolves correctly with no separate branch.
-  if (week.reveal) { showWeekRevealScreen(week); return; }
+  if (week.reveal) { playWeekReveal(week); return; }
   if (week.mySubmitted) { showWeekWaitingScreen(week, null); return; }
   showWeekAimScreen(week);
 }
@@ -2854,12 +2854,17 @@ async function shareWeekMatch(week, message, btn) {
 // playSingleShot, which reuses the exact 'lanAim' phase LAN already has, no
 // timer, no phase-machine changes beyond the 5 hooks documented in
 // startGame()). Starts the real board immediately (per the flow-
-// simplification conversation) and shows the entry notice — the opponent's
-// message, if one arrived, otherwise just PLAY — as a card floating over
-// it, not a separate screen to close first: the covering card blocks
-// dragging until dismissed, so no phase-machine gate is needed in game.js
-// itself for that.
-async function showWeekAimScreen(week) {
+// simplification conversation).
+// showNotice (default true): shows the entry card — the opponent's
+// message, if one arrived, otherwise just PLAY — blocking dragging until
+// dismissed (a covering DOM card, no phase-machine gate needed in game.js
+// for that). Passed false only by playWeekReveal's own continuation
+// straight after a reveal in this same session (per explicit feedback: no
+// panel there at all, feels like a normal match going straight back to
+// aiming) — nothing could be pending in week.inboxMessage at that exact
+// moment anyway, a message is only ever delivered at connect time, and
+// this isn't a fresh connect.
+async function showWeekAimScreen(week, showNotice = true) {
   hideNetPanel();
   // Same bug/fix as showLobby()'s own modeOverlay.classList.add('hidden')
   // (see that function's own comment) — #modeOverlay's arena-illustration
@@ -2889,14 +2894,16 @@ async function showWeekAimScreen(week) {
     identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
     onMatchReady: hideLoadingOverlay,
   });
-  showWeekBoardPanel(week.inboxMessage ? `
-    <h2>${week.opponentAddress ? shortenAddressCompact(week.opponentAddress) : 'Your opponent'} left you a message</h2>
-    <p class="week-quote">"${escapeHtml(week.inboxMessage.text)}"</p>
-    <button class="bigbtn" id="weekEntryPlayBtn">Play</button>
-  ` : `
-    <button class="bigbtn" id="weekEntryPlayBtn">Play</button>
-  `);
-  document.getElementById('weekEntryPlayBtn').addEventListener('click', () => { audio.play('button'); hideWeekBoardPanel(); });
+  if (showNotice) {
+    showWeekBoardPanel(week.inboxMessage ? `
+      <h2>${week.opponentAddress ? shortenAddressCompact(week.opponentAddress) : 'Your opponent'} left you a message</h2>
+      <p class="week-quote">"${escapeHtml(week.inboxMessage.text)}"</p>
+      <button class="bigbtn" id="weekEntryPlayBtn">Play</button>
+    ` : `
+      <button class="bigbtn" id="weekEntryPlayBtn">Play</button>
+    `);
+    document.getElementById('weekEntryPlayBtn').addEventListener('click', () => { audio.play('button'); hideWeekBoardPanel(); });
+  }
   const { stones, sweep, boardSnapshot } = await shotPromise;
   pendingWeekCancel = null; // shot committed — no longer cancellable-on-exit
   hideMatchChrome();
@@ -2905,7 +2912,7 @@ async function showWeekAimScreen(week) {
     const snapshot = await week.sendShot(stones, sweep);
     hideLoadingOverlay();
     const merged = mergeWeek(week, snapshot);
-    if (merged.reveal) { showWeekRevealScreen(merged); return; }
+    if (merged.reveal) { playWeekReveal(merged); return; }
     showWeekWaitingScreen(merged, boardSnapshot);
   } catch (err) {
     hideLoadingOverlay();
@@ -2989,61 +2996,47 @@ function showWeekWaitingScreen(week, boardSnapshot) {
   }
 }
 
-// "Watch the reveal" — both shots are already in. Deliberately no message
-// content shown here anymore (per explicit request: a message belongs to
-// its recipient, delivered once at their next open/reconnect — see
-// showWeekAimScreen's own entry notice — never bundled into the reveal both
-// sides eventually watch together). A plain tap-through panel, not the
-// rink-background treatment above: unlike a fresh aim, applying the
-// external manche here launches immediately once startGame() runs (see
-// game.js's own beginAimPhase/externalManche branch), so there's no "board
-// sitting idle, waiting for a tap" moment to show behind a card the way
-// there is before aiming — this only calls playReveal() once the button
-// below is actually tapped, same shape the reveal step already had before
-// this whole simplification pass.
-function showWeekRevealScreen(week) {
-  showNetPanel(`
-    <h2>Watch the reveal</h2>
-    <button class="bigbtn" id="weekRevealBtn">Watch the reveal</button>
-  `);
-  document.getElementById('weekRevealBtn').addEventListener('click', async () => {
-    audio.play('button');
-    hideNetPanel();
-    // See showWeekAimScreen's own comment on this same line.
-    modeOverlay.classList.add('hidden');
-    showLoadingOverlay();
-    showToolbar();
-    activeMatchMode = 'week';
-    setProfilePillTeam(week.team); // see showWeekAimScreen's own comment
-    await preloadCoreAssets(IS_MOBILE);
-    const result = await playReveal(week, {
-      ...rockHandlers, mobile: IS_MOBILE,
-      identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
-      onMatchReady: hideLoadingOverlay,
-    });
-    hideMatchChrome();
-    showLoadingOverlay();
-    try {
-      const snapshot = await week.completeRound(result.scoreA, result.scoreB, result.manche);
-      hideLoadingOverlay();
-      if (result.matchOver) {
-        week.close();
-        showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${result.scoreA} · Team Yellow ${result.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
-        document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
-      } else {
-        // Straight back into enterWeekMatch — no bridging "Play" panel
-        // anymore (per explicit request: "après le résultat, retour
-        // directement sur PLAY, sans écran intermédiaire"). Re-dispatches to
-        // showWeekAimScreen for whoever's turn is next, landing right back
-        // on the rink+PLAY entry with nothing in between.
-        enterWeekMatch(mergeWeek(week, snapshot));
-      }
-    } catch (err) {
-      hideLoadingOverlay();
-      week.close();
-      showWeekErrorScreen(err.message);
-    }
+// "Watch the reveal" — both shots are already in. Runs immediately, no tap
+// panel first (per explicit feedback: a normal match's own reveal never
+// needs a confirming tap either, WEEK shouldn't feel different) — and no
+// message content shown here (a message belongs to its recipient, delivered
+// once at their next open/reconnect — see showWeekAimScreen's own entry
+// notice — never bundled into the reveal both sides eventually watch
+// together).
+async function playWeekReveal(week) {
+  // See showWeekAimScreen's own comment on this same line.
+  modeOverlay.classList.add('hidden');
+  showLoadingOverlay();
+  showToolbar();
+  activeMatchMode = 'week';
+  setProfilePillTeam(week.team); // see showWeekAimScreen's own comment
+  await preloadCoreAssets(IS_MOBILE);
+  const result = await playReveal(week, {
+    ...rockHandlers, mobile: IS_MOBILE,
+    identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
+    onMatchReady: hideLoadingOverlay,
   });
+  hideMatchChrome();
+  showLoadingOverlay();
+  try {
+    const snapshot = await week.completeRound(result.scoreA, result.scoreB, result.manche);
+    hideLoadingOverlay();
+    if (result.matchOver) {
+      week.close();
+      showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${result.scoreA} · Team Yellow ${result.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
+      document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
+      return;
+    }
+    // Straight back into the next aim, no notice panel either (per explicit
+    // feedback: no "next turn"/"your turn" screen between a result and the
+    // next shot, same as a normal match) — see showWeekAimScreen's own
+    // showNotice comment for why skipping it here is safe.
+    showWeekAimScreen(mergeWeek(week, snapshot), false);
+  } catch (err) {
+    hideLoadingOverlay();
+    week.close();
+    showWeekErrorScreen(err.message);
+  }
 }
 
 function showWeekErrorScreen(message) {
