@@ -1136,6 +1136,11 @@ function hideRemoteMatchStack() {
   // the whole module has run) — same as every other forward reference in
   // this file.
   hideWeekBoardPanel();
+  // Same "stuck panel" bug class, same fix — #weekSpinner is a separate
+  // element from #weekBoardPanel (see its own comment), so hiding one never
+  // hides the other; an exit mid-transition (the brief server-round-trip
+  // window) needs both covered here.
+  hideWeekSpinner();
 }
 function showModeDrawer() {
   hideRemoteMatchStack();
@@ -2842,6 +2847,28 @@ function hideWeekBoardPanel() {
   weekBoardPanelBox.innerHTML = '';
 }
 
+// WEEK's own lightweight wait indicator (index.html's own comment on
+// #weekSpinner) — a small spinner over the rink's hexagon, with the board's
+// last real frame frozen behind it (reusing weekBoardPanelBg, same technique
+// showWeekBoardPanel uses, just without its scrim+card), instead of the
+// branded full-screen #loadingOverlay every other mode's entry uses. Only
+// for WEEK's own in-sitting transitions — a shot's server round-trip, a
+// reveal settling, the next session's own asset warm-up — never the very
+// first entry into a WEEK match from mode-select (see showWeekAimScreen's
+// own showNotice branch and playWeekReveal's own chained param), which still
+// gets the normal branded loading screen like every other mode: there's
+// nothing on screen worth preserving behind it at that point.
+const weekSpinner = document.getElementById('weekSpinner');
+function showWeekSpinner(bgDataUrl) {
+  if (bgDataUrl) { weekBoardPanelBg.src = bgDataUrl; weekBoardPanelBg.classList.remove('hidden'); }
+  weekSpinner.classList.remove('hidden');
+}
+function hideWeekSpinner() {
+  weekSpinner.classList.add('hidden');
+  weekBoardPanelBg.classList.add('hidden');
+  weekBoardPanelBg.removeAttribute('src');
+}
+
 // SHARE MATCH (see showWeekWaitingScreen's pending-only row) — the match
 // code plus whatever message is currently typed into that same screen's
 // (always-open, for this specific case) message field, so sharing and
@@ -2892,7 +2919,15 @@ async function showWeekAimScreen(week, showNotice = true) {
   // already does this right before showToolbar(); this one just needs the
   // same explicit call.
   modeOverlay.classList.add('hidden');
-  showLoadingOverlay();
+  // Branded full-screen loading only for a genuine fresh entry (showNotice
+  // true — see this function's own showNotice comment): nothing worth
+  // preserving on screen yet (previous screen was mode-select/My Matches).
+  // Chained (showNotice false, only ever right after a reveal in this same
+  // sitting) already has its wait indicator up — playWeekReveal's own
+  // continuation calls showWeekSpinner before handing off here, this session
+  // just needs to hide it once ready (below), never show/hide the black
+  // overlay at all.
+  if (showNotice) showLoadingOverlay();
   showToolbar();
   activeMatchMode = 'week';
   // Fixed to this player's own team for the whole match, same reasoning as
@@ -2907,10 +2942,19 @@ async function showWeekAimScreen(week, showNotice = true) {
   pendingWeekCancel = week.status === 'pending' ? week : null;
   activeWeekWaiting = null; // defensive — this window's own flag, not this one's
   await preloadCoreAssets(IS_MOBILE);
+  // Gates game.js's own entry (beginMatchIntro() for A's very first shot,
+  // see startGame's own weekEntryReady comment) behind this screen's Play
+  // tap instead of firing the instant the session starts — the entry card
+  // below covers the whole canvas until then, so starting any earlier just
+  // wastes the huddle-slide-in behind it, unseen (per explicit feedback).
+  // Left null (no gate at all) when there's no card to wait on.
+  let resolveWeekEntry = null;
+  const weekEntryReady = showNotice ? new Promise((res) => { resolveWeekEntry = res; }) : null;
   const shotPromise = playSingleShot(week, {
     ...rockHandlers, mobile: IS_MOBILE,
     identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
-    onMatchReady: hideLoadingOverlay,
+    onMatchReady: showNotice ? hideLoadingOverlay : hideWeekSpinner,
+    weekEntryReady,
   });
   if (showNotice) {
     showWeekBoardPanel(week.inboxMessage ? `
@@ -2920,20 +2964,28 @@ async function showWeekAimScreen(week, showNotice = true) {
     ` : `
       <button class="bigbtn" id="weekEntryPlayBtn">Play</button>
     `);
-    document.getElementById('weekEntryPlayBtn').addEventListener('click', () => { audio.play('button'); hideWeekBoardPanel(); });
+    document.getElementById('weekEntryPlayBtn').addEventListener('click', () => { audio.play('button'); hideWeekBoardPanel(); resolveWeekEntry(); });
   }
   const { stones, sweep, boardSnapshot } = await shotPromise;
   pendingWeekCancel = null; // shot committed — no longer cancellable-on-exit
   hideMatchChrome();
-  showLoadingOverlay();
+  // Frozen-board spinner, not the branded black overlay (see showWeekSpinner's
+  // own comment) — the board is already showing exactly the right thing
+  // (the shot that just committed), there's nothing to hide here, only a
+  // real server round-trip to wait out.
+  showWeekSpinner(boardSnapshot);
   try {
     const snapshot = await week.sendShot(stones, sweep);
-    hideLoadingOverlay();
     const merged = mergeWeek(week, snapshot);
-    if (merged.reveal) { playWeekReveal(merged); return; }
+    // Chained straight into the reveal: the spinner stays up exactly as-is
+    // (same frozen frame) through playWeekReveal's own session warm-up too —
+    // only its own onMatchReady (wired above) actually hides it, so there's
+    // no flicker-off-then-back-on between these two waits.
+    if (merged.reveal) { playWeekReveal(merged, true); return; }
+    hideWeekSpinner();
     showWeekWaitingScreen(merged, boardSnapshot);
   } catch (err) {
-    hideLoadingOverlay();
+    hideWeekSpinner();
     week.close();
     showWeekErrorScreen(err.message);
   }
@@ -3021,10 +3073,20 @@ function showWeekWaitingScreen(week, boardSnapshot) {
 // once at their next open/reconnect — see showWeekAimScreen's own entry
 // notice — never bundled into the reveal both sides eventually watch
 // together).
-async function playWeekReveal(week) {
+// chained (default false): true only when showWeekAimScreen's own shot
+// commit just found a reveal already waiting, in this same sitting — the
+// caller has already put the lightweight spinner up (over the frozen shot
+// that just committed) instead of the branded black overlay, so this
+// session must neither show its own black overlay nor hide the spinner
+// itself: it only wires the spinner's dismissal to its own onMatchReady,
+// same "hand the wait indicator forward, never flicker it off and back on"
+// principle showWeekAimScreen's own comment describes. False (a fresh
+// mode-select/My-Matches entry landing straight on an already-waiting
+// reveal, see enterWeekMatch) behaves exactly as before.
+async function playWeekReveal(week, chained = false) {
   // See showWeekAimScreen's own comment on this same line.
   modeOverlay.classList.add('hidden');
-  showLoadingOverlay();
+  if (!chained) showLoadingOverlay();
   showToolbar();
   activeMatchMode = 'week';
   setProfilePillTeam(week.team); // see showWeekAimScreen's own comment
@@ -3032,14 +3094,16 @@ async function playWeekReveal(week) {
   const result = await playReveal(week, {
     ...rockHandlers, mobile: IS_MOBILE,
     identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
-    onMatchReady: hideLoadingOverlay,
+    onMatchReady: chained ? hideWeekSpinner : hideLoadingOverlay,
   });
   hideMatchChrome();
-  showLoadingOverlay();
+  // See showWeekAimScreen's own comment on this same call — the just-settled
+  // reveal is already exactly the right frame to freeze on.
+  showWeekSpinner(result.boardSnapshot);
   try {
     const snapshot = await week.completeRound(result.scoreA, result.scoreB, result.manche);
-    hideLoadingOverlay();
     if (result.matchOver) {
+      hideWeekSpinner();
       week.close();
       showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${result.scoreA} · Team Yellow ${result.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
       document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
@@ -3048,10 +3112,12 @@ async function playWeekReveal(week) {
     // Straight back into the next aim, no notice panel either (per explicit
     // feedback: no "next turn"/"your turn" screen between a result and the
     // next shot, same as a normal match) — see showWeekAimScreen's own
-    // showNotice comment for why skipping it here is safe.
+    // showNotice comment for why skipping it here is safe. showNotice=false
+    // there also means it inherits this same spinner (still up) rather than
+    // showing its own black overlay — see its own comment.
     showWeekAimScreen(mergeWeek(week, snapshot), false);
   } catch (err) {
-    hideLoadingOverlay();
+    hideWeekSpinner();
     week.close();
     showWeekErrorScreen(err.message);
   }

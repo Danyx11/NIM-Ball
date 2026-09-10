@@ -107,8 +107,16 @@ export function playReveal(week, engineOpts) {
       // shot data back to party/weekArbiter.js's completeRound without
       // recomputing the team-relative -> A/B mapping itself (see
       // revealToManche above) — main.js's showWeekRevealScreen does exactly
-      // that.
-      onMancheSettled: (result) => { stopGame(); resolve({ ...result, manche }); },
+      // that. boardSnapshot: same freeze-frame idea as playSingleShot's own
+      // (captured right before stopGame(), same reason — main.js shows this
+      // as the background behind its lightweight spinner while completeRound
+      // round-trips and, if the match continues, the next aim session warms
+      // up, instead of a full black cut).
+      onMancheSettled: (result) => {
+        const boardSnapshot = document.getElementById('stage').toDataURL();
+        stopGame();
+        resolve({ ...result, manche, boardSnapshot });
+      },
     });
   });
 }
