@@ -282,6 +282,14 @@
     <div id="howToTileCount"></div>
     <div id="howToTileTitle"></div>
     <div id="howToTileText"></div>
+    <!-- Step-done confirmation badge — shown only during the 1s beat before
+         the next step (see game.js's howToStepDone/scheduleHowToAdvance),
+         bottom-right corner, allowed to spill past the tile's own edge (see
+         style.css). Hidden by default (class="hidden"), toggled by
+         game.js's own howToTileCheckEl. -->
+    <div id="howToTileCheck" class="hidden" aria-hidden="true">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="5,13 10,18 19,7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
     <!-- Only the "meet your stone" step uses this — it isn't gated by any
          game action, just this explicit dismiss (see game.js's
          howToGotItBtn wiring). pointer-events:auto here specifically,

@@ -7,10 +7,12 @@
 // startGame() picking whichever list matches its own `mobile` flag, and its
 // howToTargetId() for how each step's DOM/canvas target also differs.
 export const HOWTO_STEPS_MOBILE = [
-  // Special step — no game action gates it (see game.js's howToGotItBtn
-  // handling); dismissed by tapping "Got it?" instead, appended to `text`
-  // as its own pill rather than baked into this copy.
-  { id: 'meetStone', title: 'Your stone', text: 'Your stone’s 4 LEDs show how many hits from your opponent it can take before it’s knocked out.' },
+  // Special steps — no game action gates either (see game.js's
+  // howToGotItBtn handling, shared by both); dismissed by tapping their own
+  // actionLabel button instead, appended to `text` as its own pill rather
+  // than baked into this copy.
+  { id: 'meetStone', title: 'Your stone', text: 'Your stone’s 4 LEDs show how many hits from your opponent it can take before it’s knocked out.', actionLabel: 'Got it?' },
+  { id: 'ready', title: 'Let’s go', text: 'Now we gonna learn how to control your stone', actionLabel: 'Ready' },
   { id: 'select', title: 'Select', text: 'Tap your stone' },
   { id: 'aim', title: 'Aim', text: 'Drag the stick — hold 2s to lock' },
   { id: 'play', title: 'Play', text: 'Tap Play to launch your stone' },
@@ -34,7 +36,8 @@ export const HOWTO_STEPS_MOBILE = [
 // stone begins a real drag immediately, no separate tap-to-select step the
 // way mobile's joystick needs).
 export const HOWTO_STEPS_DESKTOP = [
-  { id: 'meetStone', title: 'Your stone', text: 'Your stone’s 4 LEDs show how many hits from your opponent it can take before it’s knocked out.' },
+  { id: 'meetStone', title: 'Your stone', text: 'Your stone’s 4 LEDs show how many hits from your opponent it can take before it’s knocked out.', actionLabel: 'Got it?' },
+  { id: 'ready', title: 'Let’s go', text: 'Now we gonna learn how to control your stone', actionLabel: 'Ready' },
   { id: 'aim', title: 'Aim', text: 'Click and drag your stone to aim' },
   { id: 'play', title: 'Play', text: 'Click Play to launch your stone' },
   { id: 'ice', title: 'Ice boost', text: 'Click the ice button to speed up your stone' },
