@@ -18,25 +18,53 @@ const SCALE_V = 1000;
 const SCALE_POS = 10;
 
 // ---------- Ticket layout (also used by ticket.js to draw QR tiles) ----------
-// TICKET_H is always this fixed value, whether or not a given ticket actually
-// has points to show — decodePointsFromTicketImage() below normalizes any
-// uploaded image to exactly TICKET_W x TICKET_H before cropping the fixed
-// tile rects, so the layout (and this height) must never vary per-ticket.
+// Landscape, single-column composition, matching the game's own landscape
+// canvas ratio (~1.75:1, see CLAUDE.md) instead of a tall portrait: header,
+// score row, a compact hero band, the replay QR row aligned directly under
+// it, a stats row, a "sponsored by" caption, the sponsor banner strip, and a
+// slim footer play-QR bar. TICKET_H is always this fixed value, whether or
+// not a given ticket actually has points to show — decodePointsFromTicketImage()
+// below normalizes any uploaded image to exactly TICKET_W x TICKET_H before
+// cropping the fixed tile rects, so the layout (and this height) must never
+// vary per-ticket.
 export const MAX_POINTS_ON_TICKET = 5;
-export const TICKET_W = 1080;
-export const POINTS_SECTION_Y = 1570; // right after the stats panel
-export const POINTS_SECTION_H = 240;
-export const TICKET_H = POINTS_SECTION_Y + POINTS_SECTION_H + 30 + 70 + 30 + 250; // = 2190, see ticket.js's partnerY/footerY cascade
-const POINT_TILE_W = 180;
+export const TICKET_W = 1600;
+export const MARGIN_X = 40;
+export const CONTENT_W = TICKET_W - MARGIN_X * 2; // 1520 — shared width for hero/QR row/stats
+
+export const HEADER_H = 64;
+export const CONTENT_Y = HEADER_H;
+
+// Score + avatars row, then a deliberately compact hero band (not the
+// dominant element anymore — see conversation), then the QR row right under it.
+export const PLAYERS_H = 140;
+export const HERO_Y = CONTENT_Y + PLAYERS_H + 10;
+export const HERO_H = 250;
+export const QR_ROW_Y = HERO_Y + HERO_H + 16;
+export const QR_ROW_H = 170;
+// Tested empirically against the real qrcode/jsQR round-trip (see git history):
+// fixed pixel widths below ~130px start failing unpredictably for longer
+// points (more manches => more QR modules => seam artifacts at non-integer
+// module-to-pixel scale). 130 is the smallest width that decoded reliably
+// across every manche-count tested (1 to 10) — do not shrink without re-testing.
 const POINT_QR_SIZE = 130;
 
+export const STATS_Y = QR_ROW_Y + QR_ROW_H + 16;
+export const STATS_H = 86;
+
+export const SPONSOR_LABEL_Y = STATS_Y + STATS_H + 36;
+export const BANNER_Y = SPONSOR_LABEL_Y + 20;
+export const BANNER_H = 110;
+export const FOOTER_Y = BANNER_Y + BANNER_H + 10;
+export const FOOTER_H = 70;
+export const TICKET_H = FOOTER_Y + FOOTER_H;
+
 export function pointTileRect(i) {
-  const totalW = MAX_POINTS_ON_TICKET * POINT_TILE_W;
-  const marginX = (TICKET_W - totalW) / 2;
-  const tileX = marginX + i * POINT_TILE_W;
-  const qrX = Math.round(tileX + (POINT_TILE_W - POINT_QR_SIZE) / 2);
-  const qrY = POINTS_SECTION_Y + 46;
-  return { tileX, tileW: POINT_TILE_W, qrX, qrY, size: POINT_QR_SIZE };
+  const tileW = CONTENT_W / MAX_POINTS_ON_TICKET;
+  const tileX = MARGIN_X + i * tileW;
+  const qrX = Math.round(tileX + (tileW - POINT_QR_SIZE) / 2);
+  const qrY = QR_ROW_Y;
+  return { tileX, tileY: QR_ROW_Y, tileW, tileH: QR_ROW_H, qrX, qrY, size: POINT_QR_SIZE };
 }
 
 // ---------- base64url <-> bytes ----------

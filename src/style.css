@@ -1863,6 +1863,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    above already fixed for the button's background) — dark ink instead,
    matching every other piece of text on this panel under .mode-curling. */
 #matchNetworkOverlay.mode-curling .bigbtn { color: var(--bg-deep); }
+#matchNetworkOverlay.mode-curling .code-share-btn { color: var(--bg-deep); }
 /* "Join with a code" is always green (fixed tint, not vibe-conditional —
    see .config-panel.mode-joincode above), so its Join button just gets the
    dark-ink text unconditionally, no .mode-curling-style variant needed. */
@@ -1924,7 +1925,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* Match-win ticket (see src/ticket.js/showVictory) — a single portrait PNG
    (drawn on an offscreen canvas, dropped in here as a data-URL <img>) doubling
    as both this in-game panel and the "Partager" share image, per design brief. */
-.ticket-img { max-width: 100%; max-height: 64vh; width: auto; border-radius: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
+.ticket-img { max-width: 100%; max-height: 62vh; width: auto; border-radius: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
 
 /* Inset to the physics/ice rect only (FX0/FY0/FX1/FY1 in game.js — as % of the
    V2 3312x1896 canvas: 32.79%/33.02%/31.70%/32.81%, left/top/right/bottom),
@@ -2672,6 +2673,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    gold tint — same dark-ink swap every other translucent-white button on a
    gold/light backdrop already gets in this app. */
 #weekBoardPanelBox.mode-curling .bigbtn { color: var(--bg-deep); }
+#weekBoardPanelBox.mode-curling .code-share-btn { color: var(--bg-deep); }
 #weekBoardPanelBox h2 { margin: 0; font-size: 22px; color: #fff; }
 #weekBoardPanelBox p { margin: 0; color: rgba(255,255,255,0.75); max-width: 320px; font-size: 14px; line-height: 1.5; }
 /* The opponent's own words — set apart from this screen's own copy (h2/p
@@ -3041,6 +3043,18 @@ button:disabled { opacity: 0.35; cursor: default; }
   letter-spacing: 10px;
   padding: 10px 0;
 }
+/* Wraps .match-code with its share button (LIVE's showMatchHostWaitingScreen,
+   WEEK's showWeekWaitingScreen pending row) — a small icon beside the code
+   rather than a separate full-width action, since sharing is the code's own
+   next step, not an unrelated one. */
+.match-code-row { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.code-share-btn {
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
+  font-size: 18px; display: flex; align-items: center; justify-content: center;
+  transition: background .15s ease, border-color .15s ease;
+}
+.code-share-btn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
 
 /* Ticket point-QR tiles are also directly clickable on the same device that's
    displaying the ticket (see game.js showVictory) — invisible hit regions

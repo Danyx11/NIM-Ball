@@ -405,6 +405,7 @@ const exitCap = document.getElementById('tbtn-exit-cap');
 // cancel-on-quit check (see pendingWeekCancel's own comment, further down
 // this file) only needs writing once, not duplicated per dialog.
 function performMatchExit() {
+  activeWeekAiming = null; // defensive — this window's own flag, see its own comment
   if (pendingWeekCancel) {
     const week = pendingWeekCancel;
     pendingWeekCancel = null;
@@ -420,6 +421,16 @@ function performMatchExit() {
   activeStopGame?.();
   returnToModeSelect();
 }
+// Shared by triggerExit()/navHome below — swaps in the "you have an
+// unfinished shot" copy over whatever this dialog would otherwise show,
+// exactly when activeWeekAiming is set (see its own comment: mid-turn, a
+// shot still left to play before the next panel). Reuses the one existing
+// confirm-dialog shape (title/subtitle/Yes/No) both call sites already
+// build, rather than a second dialog component, per explicit requirement.
+function quitConfirmCopy(fallbackTitle, fallbackSubtitle) {
+  if (activeWeekAiming) return { title: 'You have another shot to play.', subtitle: 'Quit anyway?' };
+  return { title: fallbackTitle, subtitle: fallbackSubtitle };
+}
 // Factored out so the "exit" HUD rock (see startGame's onRockExit option)
 // can trigger the exact same logic as the old toolbar button.
 function triggerExit() {
@@ -427,9 +438,10 @@ function triggerExit() {
   // howTo has no match/score at stake, so its copy just names the tutorial
   // and where leaving it goes, rather than warning about lost progress.
   const isHowTo = activeMatchMode === 'howTo';
+  const { title, subtitle } = quitConfirmCopy(isHowTo ? 'Quit tutorial' : 'Quit the match?', isHowTo ? 'Back to menu' : 'The current match will be lost.');
   showLobby(`
-    <h2>${isHowTo ? 'Quit tutorial' : 'Quit the match?'}</h2>
-    <p>${isHowTo ? 'Back to menu' : 'The current match will be lost.'}</p>
+    <h2>${title}</h2>
+    <p>${subtitle}</p>
     <div style="display:flex; gap:12px;">
       <button class="bigbtn" id="exitYesBtn">Yes</button>
       <button class="bigbtn" id="exitNoBtn">No</button>
@@ -494,6 +506,19 @@ let pendingWeekCancel = null;
 // this one after.
 let activeWeekWaiting = null;
 
+// Set while a WEEK aim session is actually interactive — from the moment
+// controls are enabled (a chained continuation with no Play panel, or the
+// Play/Watch-the-reveal tap once it's clicked — see showWeekAimScreen's own
+// activeWeekAiming comment) until the shot actually commits. Drives
+// triggerExit()/navHome's own confirm-dialog copy: quitting mid-turn, with
+// an unfinished shot still to play before the next panel, needs its own
+// explicit "you'll lose this shot" warning (per explicit requirement) —
+// every other WEEK screen (the Play panel itself, "Your shot is ready",
+// watching a reveal) already has nothing left to lose right now, or is
+// already covered by pendingWeekCancel/activeWeekWaiting above, so this
+// only ever needs to gate that one extra copy, not a whole extra exit path.
+let activeWeekAiming = null;
+
 // Safety net for the exact same message as activeWeekWaiting's own comment,
 // for the far more common way players actually leave this screen: not
 // through any in-app button at all, just closing the tab / backgrounding the
@@ -543,9 +568,10 @@ navHome.addEventListener('click', () => {
   }
   audio.play('button');
   const inReplay = !replayBar.classList.contains('hidden');
+  const { title, subtitle } = quitConfirmCopy('Back to menu?', inReplay ? 'The current replay will be stopped.' : 'The current match will be lost.');
   showLobby(`
-    <h2>Back to menu?</h2>
-    <p>${inReplay ? 'The current replay will be stopped.' : 'The current match will be lost.'}</p>
+    <h2>${title}</h2>
+    <p>${subtitle}</p>
     <div style="display:flex; gap:12px;">
       <button class="bigbtn" id="logoYesBtn">Yes</button>
       <button class="bigbtn" id="logoNoBtn">No</button>
@@ -2587,11 +2613,55 @@ function generateMatchCode() {
   return code;
 }
 
+// SHARE TEXT — one line picked at random per share (not per match) so a
+// player sharing the same code twice can get a different taunt each time.
+// Shared by both LIVE's and WEEK's code-share buttons (see shareOrCopyText
+// below), which is why the code line is appended separately rather than
+// baked into each taunt.
+const SHARE_TAUNTS = [
+  'Think you can beat me? Come challenge me on www.nimicurl.com',
+  'Come and challenge me on the ice! www.nimicurl.com',
+  "I'm waiting for you on the ice. Come get me! www.nimicurl.com",
+  "Let's settle this on the ice. www.nimicurl.com",
+  'Your move. Come challenge me on www.nimicurl.com',
+  "Think you've got what it takes? Join my game on www.nimicurl.com",
+  'Ready for a challenge? Meet me on the ice! www.nimicurl.com',
+  'Come see if you can knock me off the ice! www.nimicurl.com',
+  "I'm ready. Are you? Challenge me on www.nimicurl.com",
+  'Come and try to take me down! www.nimicurl.com',
+];
+function buildShareText(code) {
+  const taunt = SHARE_TAUNTS[Math.floor(Math.random() * SHARE_TAUNTS.length)];
+  return `${taunt}\nCODE: ${code}`;
+}
+
+// Per explicit request: mobile always uses the native share sheet, desktop
+// always copies — not "try share, fall back to copy" (some desktop browsers
+// do implement navigator.share, but a share-sheet popup reads as mobile-
+// native behavior on desktop, not what was asked for here). `btn` is a
+// small icon button (see .code-share-btn) — copy feedback is a checkmark
+// swap rather than a text-label swap.
+async function shareOrCopyText(text, btn) {
+  if (IS_MOBILE && navigator.share) {
+    try { await navigator.share({ text }); } catch { /* cancelled by the user — no-op */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    const original = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  } catch { /* clipboard unavailable — the code is still on screen either way */ }
+}
+function shareLiveMatch(code, btn) {
+  return shareOrCopyText(buildShareText(code), btn);
+}
+
 async function hostMatch(matchConfig) {
   const code = generateMatchCode();
   showLoadingOverlay();
   try {
-    const net = await connectMatch(code);
+    const net = await connectMatch(code, hubAddress);
     // Stored server-side against this room (see party/arbiter.js) before
     // sharing the code with anyone — the joiner receives it back in its own
     // 'joined' message (net.js) once it connects, never sends its own. Vibe
@@ -2621,8 +2691,15 @@ function showMatchHostWaitingScreen(net, code, matchConfig) {
   showNetPanel(`
     <span class="team-pill ${cls}">${teamLabel}</span>
     <h2>Waiting for opponent…</h2>
-    <div class="match-code">${code}</div>
+    <div class="match-code-row">
+      <div class="match-code">${code}</div>
+      <button class="code-share-btn" id="matchCodeShareBtn" aria-label="Share match">📤</button>
+    </div>
   `);
+  document.getElementById('matchCodeShareBtn').addEventListener('click', (e) => {
+    audio.play('button');
+    shareLiveMatch(code, e.currentTarget);
+  });
   net.onOpponentJoined(() => {
     hostedRoomNet = null;
     showReadyScreen(net, teamLabel, cls, (msg) => showRemoteConnectError(msg, matchConfig), matchConfig);
@@ -2709,7 +2786,7 @@ async function joinMatch(code, joinBtn, retryScreen) {
   if (joinBtn) joinBtn.disabled = true;
   showLoadingOverlay();
   try {
-    const net = await connectMatch(code);
+    const net = await connectMatch(code, hubAddress);
     hideLoadingOverlay();
     // Adopt the creator's actual vibe (see hostMatch's sendMatchConfig /
     // party/arbiter.js) instead of trusting whatever tile this client
@@ -2764,6 +2841,16 @@ function enterWeekMatch(week) {
   // on showLobby(). Only needs doing once, here, since nothing downstream in
   // the WEEK flow ever re-shows it.
   joinCodeOverlay.classList.add('hidden');
+  // week.reveal checked BEFORE the terminal-status branches below: a match
+  // can be 'completed' and still owe this specific player their own last
+  // look at the final reveal (see party/weekArbiter.js's own onConnect
+  // comment on this known gap — whichever side reports a manche's outcome
+  // first can flip status to 'completed' before the other side has watched
+  // it at all; the server keeps that one connection open specifically so
+  // this branch has something to show). Every other status combination
+  // still funnels into the terminal branches exactly as before, since the
+  // server never attaches a reveal to an expired/abandoned match.
+  if (week.reveal) { playWeekReveal(week); return; }
   if (week.status === 'expired') {
     week.close();
     showNetPanel(`<h2>Challenge expired</h2><p>This WEEK match is no longer active.</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
@@ -2783,15 +2870,12 @@ function enterWeekMatch(week) {
     return;
   }
   // 'pending' (A alone, still waiting on B to join) and 'active' both funnel
-  // through the exact same aim/waiting/reveal dispatch below — per the WEEK
+  // through the exact same aim/waiting dispatch below — per the WEEK
   // flow-simplification conversation, A now plays their first shot
   // immediately on creation (no separate code screen first), so 'pending'
   // really only ever differs from 'active' in whether B has joined yet,
   // which showWeekWaitingScreen itself checks (to offer the code/share row)
-  // — nothing here needs to branch on it. week.reveal is naturally always
-  // null while 'pending' (B doesn't exist yet to have submitted anything),
-  // so the check below still resolves correctly with no separate branch.
-  if (week.reveal) { playWeekReveal(week); return; }
+  // — nothing here needs to branch on it.
   if (week.mySubmitted) { showWeekWaitingScreen(week, null); return; }
   showWeekAimScreen(week);
 }
@@ -2872,44 +2956,35 @@ function hideWeekSpinner() {
 // SHARE MATCH (see showWeekWaitingScreen's pending-only row) — the match
 // code plus whatever message is currently typed into that same screen's
 // (always-open, for this specific case) message field, so sharing and
-// messaging read as one action rather than two separate steps. Per explicit
-// request: mobile always uses the native share sheet, desktop always copies
-// — not "try share, fall back to copy" (some desktop browsers do implement
-// navigator.share, but a share-sheet popup reads as mobile-native behavior
-// on desktop, not what was asked for here).
+// messaging read as one action rather than two separate steps. Text itself
+// and the actual share-vs-copy behavior are shared with LIVE's own code-
+// share button — see buildShareText/shareOrCopyText near generateMatchCode.
 function buildWeekShareText(week, message) {
-  const base = `Join my WEEK match! Code: ${week.code}`;
+  const base = buildShareText(week.code);
   return message ? `${base}\n"${message}"` : base;
 }
-async function shareWeekMatch(week, message, btn) {
-  const text = buildWeekShareText(week, message);
-  if (IS_MOBILE && navigator.share) {
-    try { await navigator.share({ text }); } catch { /* cancelled by the user — no-op */ }
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(text);
-    const original = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(() => { btn.textContent = original; }, 1500);
-  } catch { /* clipboard unavailable — the code is still on screen either way */ }
+function shareWeekMatch(week, message, btn) {
+  return shareOrCopyText(buildWeekShareText(week, message), btn);
 }
 
 // "Your turn" — game.js's own aim UI (see src/weekController.js's
 // playSingleShot, which reuses the exact 'lanAim' phase LAN already has, no
-// timer, no phase-machine changes beyond the 5 hooks documented in
+// timer, no phase-machine changes beyond the generic hooks documented in
 // startGame()). Starts the real board immediately (per the flow-
 // simplification conversation).
-// showNotice (default true): shows the entry card — the opponent's
-// message, if one arrived, otherwise just PLAY — blocking dragging until
-// dismissed (a covering DOM card, no phase-machine gate needed in game.js
-// for that). Passed false only by playWeekReveal's own continuation
-// straight after a reveal in this same session (per explicit feedback: no
-// panel there at all, feels like a normal match going straight back to
-// aiming) — nothing could be pending in week.inboxMessage at that exact
-// moment anyway, a message is only ever delivered at connect time, and
-// this isn't a fresh connect.
-async function showWeekAimScreen(week, showNotice = true) {
+// showNotice: computed from !week.enteredPoint (party/weekArbiter.js's own
+// authoritative "has this team already played or watched a reveal in the
+// CURRENT point" — see its snapshotFor comment), NOT a caller-supplied
+// flag — per explicit requirement, PLAY (the entry card — the opponent's
+// message, if one arrived, otherwise just PLAY, blocking dragging until
+// dismissed) is shown exactly once per player per NEW point, never again
+// on a later shot within that same still-open point, no matter how many
+// times this player leaves and reconnects mid-point. This also means a
+// point that was just scored gets PLAY again even when continuing straight
+// through in the same sitting (playWeekReveal's own continuation, right
+// after a scoring manche) — a genuinely new point, not a resumed one.
+async function showWeekAimScreen(week) {
+  const showNotice = !week.enteredPoint;
   hideNetPanel();
   // Same bug/fix as showLobby()'s own modeOverlay.classList.add('hidden')
   // (see that function's own comment) — #modeOverlay's arena-illustration
@@ -2942,14 +3017,18 @@ async function showWeekAimScreen(week, showNotice = true) {
   pendingWeekCancel = week.status === 'pending' ? week : null;
   activeWeekWaiting = null; // defensive — this window's own flag, not this one's
   await preloadCoreAssets(IS_MOBILE);
-  // Gates game.js's own entry (beginMatchIntro() for A's very first shot,
-  // see startGame's own weekEntryReady comment) behind this screen's Play
-  // tap instead of firing the instant the session starts — the entry card
-  // below covers the whole canvas until then, so starting any earlier just
-  // wastes the huddle-slide-in behind it, unseen (per explicit feedback).
-  // Left null (no gate at all) when there's no card to wait on.
+  // Gates game.js's own entry (beginMatchIntro() for a fresh point, see
+  // startGame's own weekEntryReady comment) behind this screen's Play tap
+  // instead of firing the instant the session starts — the entry card below
+  // covers the whole canvas until then, so starting any earlier just wastes
+  // the huddle-slide-in behind it, unseen (per explicit feedback). Left
+  // null (no gate at all) when there's no card to wait on.
   let resolveWeekEntry = null;
   const weekEntryReady = showNotice ? new Promise((res) => { resolveWeekEntry = res; }) : null;
+  // See activeWeekAiming's own comment — this player has "started playing
+  // their turn" the moment aiming actually becomes possible: immediately
+  // for a chained continuation (no panel at all), or on the Play tap below.
+  if (!showNotice) activeWeekAiming = week;
   const shotPromise = playSingleShot(week, {
     ...rockHandlers, mobile: IS_MOBILE,
     identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
@@ -2964,10 +3043,13 @@ async function showWeekAimScreen(week, showNotice = true) {
     ` : `
       <button class="bigbtn" id="weekEntryPlayBtn">Play</button>
     `);
-    document.getElementById('weekEntryPlayBtn').addEventListener('click', () => { audio.play('button'); hideWeekBoardPanel(); resolveWeekEntry(); });
+    document.getElementById('weekEntryPlayBtn').addEventListener('click', () => {
+      audio.play('button'); hideWeekBoardPanel(); activeWeekAiming = week; resolveWeekEntry();
+    });
   }
   const { stones, sweep, boardSnapshot } = await shotPromise;
   pendingWeekCancel = null; // shot committed — no longer cancellable-on-exit
+  activeWeekAiming = null; // shot committed — no longer an unfinished turn to confirm-quit over
   hideMatchChrome();
   // Frozen-board spinner, not the branded black overlay (see showWeekSpinner's
   // own comment) — the board is already showing exactly the right thing
@@ -3013,8 +3095,10 @@ function showWeekWaitingScreen(week, boardSnapshot) {
     <h2>Your shot is ready.</h2>
     ${isPending ? `
       ${messageField}
-      <div class="match-code">${week.code}</div>
-      <button class="bigbtn" id="weekShareBtn">Share match</button>
+      <div class="match-code-row">
+        <div class="match-code">${week.code}</div>
+        <button class="code-share-btn" id="weekShareBtn" aria-label="Share match">📤</button>
+      </div>
     ` : `
       <div id="weekMsgArea" class="hidden">${messageField}</div>
     `}
@@ -3066,23 +3150,27 @@ function showWeekWaitingScreen(week, boardSnapshot) {
   }
 }
 
-// "Watch the reveal" — both shots are already in. Runs immediately, no tap
-// panel first (per explicit feedback: a normal match's own reveal never
-// needs a confirming tap either, WEEK shouldn't feel different) — and no
-// message content shown here (a message belongs to its recipient, delivered
-// once at their next open/reconnect — see showWeekAimScreen's own entry
-// notice — never bundled into the reveal both sides eventually watch
-// together).
+// "Watch the reveal" — both shots are already in.
 // chained (default false): true only when showWeekAimScreen's own shot
-// commit just found a reveal already waiting, in this same sitting — the
-// caller has already put the lightweight spinner up (over the frozen shot
-// that just committed) instead of the branded black overlay, so this
-// session must neither show its own black overlay nor hide the spinner
-// itself: it only wires the spinner's dismissal to its own onMatchReady,
-// same "hand the wait indicator forward, never flicker it off and back on"
-// principle showWeekAimScreen's own comment describes. False (a fresh
-// mode-select/My-Matches entry landing straight on an already-waiting
-// reveal, see enterWeekMatch) behaves exactly as before.
+// commit just found a reveal already waiting, in this same sitting — runs
+// immediately, no tap panel first (per explicit feedback: a normal match's
+// own reveal never needs a confirming tap either, WEEK shouldn't feel
+// different there). The caller has already put the lightweight spinner up
+// (over the frozen shot that just committed) instead of the branded black
+// overlay, so this session must neither show its own black overlay nor
+// hide the spinner itself: it only wires the spinner's dismissal to its
+// own onMatchReady, same "hand the wait indicator forward, never flicker
+// it off and back on" principle showWeekAimScreen's own comment describes.
+// False (a fresh mode-select/My-Matches entry, or a reconnect, landing on
+// an already-waiting reveal — see enterWeekMatch) is a genuinely different
+// moment per explicit requirement: this player already left the app once
+// since their own last action, so the reveal now needs its own "Watch the
+// reveal" tap (same weekEntryReady gate showWeekAimScreen's own Play uses)
+// rather than auto-starting behind whatever was already on screen a moment
+// ago. No message content shown on that card either way (a message belongs
+// to its recipient, delivered once at their next open/reconnect — see
+// showWeekAimScreen's own entry notice — never bundled into the reveal
+// both sides eventually watch together).
 async function playWeekReveal(week, chained = false) {
   // See showWeekAimScreen's own comment on this same line.
   modeOverlay.classList.add('hidden');
@@ -3091,31 +3179,48 @@ async function playWeekReveal(week, chained = false) {
   activeMatchMode = 'week';
   setProfilePillTeam(week.team); // see showWeekAimScreen's own comment
   await preloadCoreAssets(IS_MOBILE);
-  const result = await playReveal(week, {
+  let resolveWeekEntry = null;
+  const weekEntryReady = chained ? null : new Promise((res) => { resolveWeekEntry = res; });
+  const revealPromise = playReveal(week, {
     ...rockHandlers, mobile: IS_MOBILE,
     identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
     onMatchReady: chained ? hideWeekSpinner : hideLoadingOverlay,
+    weekEntryReady,
   });
+  if (!chained) {
+    showWeekBoardPanel(`<button class="bigbtn" id="weekEntryWatchBtn">Watch the reveal</button>`);
+    document.getElementById('weekEntryWatchBtn').addEventListener('click', () => {
+      audio.play('button'); hideWeekBoardPanel(); resolveWeekEntry();
+    });
+  }
+  const result = await revealPromise;
   hideMatchChrome();
   // See showWeekAimScreen's own comment on this same call — the just-settled
   // reveal is already exactly the right frame to freeze on.
   showWeekSpinner(result.boardSnapshot);
   try {
-    const snapshot = await week.completeRound(result.scoreA, result.scoreB, result.manche);
-    if (result.matchOver) {
+    // scoredTeam, not an absolute score — see net.js's own completeRound
+    // comment: the server now owns scoreA/scoreB and accumulates this as a
+    // delta, so a freshly-zeroed game.js session can never again reset the
+    // match's real running total (see the WEEK score-persistence bug in
+    // conversation).
+    const snapshot = await week.completeRound(result.scoredTeam);
+    // snapshot.status, not the client's own local result.matchOver — the
+    // server is the authoritative source for the match's real running
+    // score/completion now (see this call's own comment above).
+    if (snapshot.status === 'completed') {
       hideWeekSpinner();
       week.close();
-      showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${result.scoreA} · Team Yellow ${result.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
+      showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${snapshot.scoreA} · Team Yellow ${snapshot.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
       document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
       return;
     }
-    // Straight back into the next aim, no notice panel either (per explicit
-    // feedback: no "next turn"/"your turn" screen between a result and the
-    // next shot, same as a normal match) — see showWeekAimScreen's own
-    // showNotice comment for why skipping it here is safe. showNotice=false
-    // there also means it inherits this same spinner (still up) rather than
-    // showing its own black overlay — see its own comment.
-    showWeekAimScreen(mergeWeek(week, snapshot), false);
+    // Straight back into the aim screen, which decides for itself whether
+    // this is a genuinely new point (PLAY again, see showWeekAimScreen's
+    // own showNotice comment) or a continuation within the same one (no
+    // panel) — either way it inherits this same spinner (still up) rather
+    // than showing its own black overlay, see its own comment.
+    showWeekAimScreen(mergeWeek(week, snapshot));
   } catch (err) {
     hideWeekSpinner();
     week.close();
@@ -3140,7 +3245,16 @@ function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<
 // unused slot renders as a greyed "Empty" placeholder instead of shrinking.
 const myMatchesContent = document.getElementById('myMatchesContent');
 const MY_MATCHES_SLOTS = 2;
-const TURN_LABELS = { yourTurn: 'Your turn', waiting: 'Waiting for opponent', revealReady: 'Reveal ready', pending: 'Waiting for opponent to join', expired: 'Expired', completed: 'Finished', abandoned: 'Abandoned' };
+// 'yourTurn' (this team hasn't submitted their own current-manche shot yet)
+// and 'revealReady' (party/weekArbiter.js's turnLabelFor — this team has a
+// reveal genuinely ready for them, independent of whether the opponent has
+// since moved on) both render as the same "Your turn" — per explicit
+// requirement, both mean "come back, you have something to do right now";
+// only 'waiting' (submitted, nothing of mine is ready yet) is the genuinely
+// idle state. Deliberately keyed off the server's own turnLabel, not a
+// second client-side computation of "is my reveal ready" — see that
+// function's own comment.
+const TURN_LABELS = { yourTurn: 'Your turn', waiting: 'Waiting for opponent', revealReady: 'Your turn', pending: 'Waiting for opponent to join', expired: 'Expired', completed: 'Finished', abandoned: 'Abandoned' };
 async function renderMyMatchesContent() {
   myMatchesContent.innerHTML = '<p>Loading…</p>';
   if (!hubAddress) {

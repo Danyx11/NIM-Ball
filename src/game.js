@@ -12,7 +12,7 @@ import { isBasicLaser } from './settings.js';
 import { preloadTicketAssets, renderTicket } from './ticket.js';
 import { loadImages } from './preload.js';
 import * as recorder from './recorder.js';
-import { MAX_POINTS_ON_TICKET, pointTileRect, buildReplayUrl, POINTS_SECTION_Y, POINTS_SECTION_H, TICKET_W, TICKET_H } from './replay.js';
+import { MAX_POINTS_ON_TICKET, pointTileRect, buildReplayUrl, TICKET_W, TICKET_H } from './replay.js';
 import { DEFAULT_MATCH_CONFIG, STONE_SLOTS_BY_COUNT, TIMER_WARNING_SECONDS_BY_TURN_TIME, sanitizeMatchConfig } from './matchConfig.js';
 import { HOWTO_STEPS_MOBILE, HOWTO_STEPS_DESKTOP } from './howto.js';
 
@@ -203,33 +203,51 @@ export function startGame(opts = {}) {
   // of that same function) right after the board's initial reset, so the
   // very first aim/reveal above starts from the board's real current state
   // instead of a fresh rack.
-  // weekMatchStart: true only for the actual opening of the match — team
-  // A's very first shot, and only that (see weekController.js's
-  // isMatchStart, computed off the match's real scoreA/scoreB/pointManches,
-  // not derivable from resumeManches alone: a later point starting fresh
-  // also has an empty resumeManches). Per explicit feedback this is the
-  // ONLY WEEK moment that replays beginMatchIntro()'s huddle-slide-in +
-  // sting — every other WEEK entry (B's own first aim, a later point, a
-  // mid-point reconnect, or any reveal) goes straight to beginAimPhase(),
-  // same as before; weekController.js's playReveal never passes this opt
-  // at all, for the same reason (see its own comment).
+  // weekPointStart: true only for this player's first-ever entry into the
+  // CURRENT point (see weekController.js's own comment on how this is
+  // derived from party/weekArbiter.js's enteredPoint — a fresh point every
+  // team hasn't played a shot or watched a reveal in yet). Per explicit
+  // requirement, this is the ONLY thing that replays beginMatchIntro()'s
+  // huddle-slide-in + sting — every other WEEK entry (a later shot within
+  // the same still-open point, a mid-point reconnect, or a reveal) goes
+  // straight to beginAimPhase(), same as before. Deliberately per-POINT,
+  // not per-match: both A's and B's very first entry into point 1 get it
+  // (the match's actual opening), and so does either side's first entry
+  // into point 2, 3, etc. — never a reveal session (weekController.js's
+  // playReveal never passes this opt at all, same reasoning: watching an
+  // outcome is never "entering" anything).
   // weekEntryReady (Promise, optional): WEEK-only gate on when a
-  // singleShotTeam session actually starts (beginMatchIntro() or the
-  // straight-to-aim path below) — main.js's entry card ("Play", with
-  // whatever message arrived) sits as a DOM overlay ON TOP of the canvas,
-  // covering it, so starting immediately at startGame() time (as every
-  // other opt here does) wastes the whole huddle-slide-in behind that
-  // panel: by the time the player actually taps Play, the animation is
-  // already mid-flight or over (bug report: "je préférerais qu'elle
-  // commence après avoir cliqué sur play"). Omitted (net/aiTeam/howTo/
-  // replay, and WEEK's own reveal sessions, which show no such panel)
-  // starts exactly as before, synchronously.
+  // singleShotTeam/externalManche session actually enables real
+  // interaction (beginMatchIntro()/the aim phase, or applyExternalManche()
+  // actually starting the reveal) — main.js's entry card ("Play", or
+  // "Watch the reveal" for a returning player with one pending) sits as a
+  // DOM overlay ON TOP of the canvas, covering it, so starting immediately
+  // at startGame() time (as every other opt here does) wastes the whole
+  // huddle-slide-in — or starts a reveal — behind that panel, unseen,
+  // before the player has actually tapped anything (bug report: "je
+  // préférerais qu'elle commence après avoir cliqué sur play"). Does NOT
+  // gate resumeManches' own board reconstruction — see the
+  // singleShotTeam/externalManche entry branch further down for why that
+  // has to run immediately regardless (bug report: stones visibly wrong
+  // behind the panel, because an earlier version of this gate held that up
+  // too). Omitted (net/aiTeam/howTo/replay) starts exactly as before,
+  // synchronously.
+  // weekStartScoreA/weekStartScoreB: WEEK-only seed for the local scoreA/
+  // scoreB this closure otherwise always starts at 0 (see their own
+  // declaration further down) — every WEEK session is a fresh startGame()
+  // call (see CLAUDE.md's WEEK architecture), so without this, the score
+  // this session reports back out (via onMancheSettled's scoredTeam,
+  // itself now just a delta — see party/weekArbiter.js's own completeRound
+  // comment on the score-persistence bug this fixes) would only ever be
+  // "0 or 1 goals into this one session" instead of the match's real
+  // running total. Ignored by every other mode (default 0, same as
+  // before).
   const {
     net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false,
     onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, onTurnChange = null,
     matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null,
-    singleShotTeam = null, onShotCommitted = null, externalManche = null, onMancheSettled = null, resumeManches = null, weekMatchStart = false,
-    weekEntryReady = null,
+    singleShotTeam = null, onShotCommitted = null, externalManche = null, onMancheSettled = null, resumeManches = null, weekPointStart = false,
+    weekEntryReady = null, weekStartScoreA = 0, weekStartScoreB = 0,
   } = opts;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
   // default preset; Custom is the same shape with different values. Every
@@ -1169,8 +1187,18 @@ export function startGame(opts = {}) {
     handoff = null;
   }
 
-  let scoreA = 0, scoreB = 0;
+  // weekStartScoreA/B: 0 for every mode but WEEK (see startGame's own
+  // comment on these opts) — WEEK is the only caller that ever hands a
+  // fresh session a running total to pick up from instead of 0.
+  let scoreA = weekStartScoreA, scoreB = weekStartScoreB;
   let round = 1;
+  // Set in resolveGoal() alongside the scoreA++/scoreB++ it already does,
+  // read back out by beginAimPhase()'s own externalManche "settled" branch
+  // to report which team (if any) this one manche scored for — see
+  // startGame's own onMancheSettled comment and party/weekArbiter.js's
+  // completeRound, which now accumulates score server-side from this
+  // per-manche delta instead of trusting a client-computed absolute total.
+  let lastMancheScoringTeam = null;
   // Curling only: a point is matchConfig.curlingCycles full aimA/aimB/reveal
   // cycles (not "however many until a goal/wipeout", like classic) — bumped
   // in beginStraighten() each time a manche settles without a goalResult,
@@ -1384,7 +1412,7 @@ export function startGame(opts = {}) {
         externalMancheConsumed = true;
         applyExternalManche(externalManche);
       } else {
-        onMancheSettled?.({ scoreA, scoreB, matchOver: scoreA >= WIN_SCORE || scoreB >= WIN_SCORE });
+        onMancheSettled?.({ scoreA, scoreB, matchOver: scoreA >= WIN_SCORE || scoreB >= WIN_SCORE, scoredTeam: lastMancheScoringTeam });
       }
       return;
     }
@@ -1450,6 +1478,13 @@ export function startGame(opts = {}) {
   // everything network-specific from either (no mancheValidated/sync-check —
   // there's no second live client here to validate against).
   function applyExternalManche(manche) {
+    // Reset per-manche, not per-session — see its own declaration. Only
+    // resolveGoal() ever sets this to a real team; a manche that settles
+    // without scoring never touches it, so it must default back to null
+    // right here rather than carry over a stale value from... nowhere,
+    // really (externalManche only ever plays one manche per session), but
+    // explicit beats implicit for a value a server call reads back out.
+    lastMancheScoringTeam = null;
     entities.A.forEach((g, i) => {
       const s = manche.stonesA[i];
       g.pendingVx = s ? s.vx : 0; g.pendingVy = s ? s.vy : 0; g.used = !!(s && s.used);
@@ -1780,11 +1815,12 @@ export function startGame(opts = {}) {
   // all — see beginAimPhase's own isReplay branch), so there's no visible
   // gap for them to fix. WEEK's singleShotTeam has no such screen either —
   // it must stay excluded too: a session that skips beginMatchIntro()
-  // entirely (weekController.js's isMatchStart gates it to A's own very
-  // first shot; B's first-ever aim never gets it, by design) would otherwise
-  // leave its stones stuck at this huddle spot forever instead of at
-  // startPositions, since nothing else ever un-stacks them for that session
-  // (bug report: B's board didn't match A's at the first shot of the match).
+  // entirely (weekPointStart false — see startGame's own comment: only
+  // this player's first-ever entry into the CURRENT point gets it) would
+  // otherwise leave its stones stuck at this huddle spot forever instead of
+  // at startPositions, since nothing else ever un-stacks them for that
+  // session (bug report: B's board didn't match A's at the first shot of
+  // the match).
   // externalManche (a WEEK reveal) needs the exact same exclusion, for the
   // exact same reason — applyExternalManche() only ever sets pendingVx/Vy,
   // never x/y (see its own comment), so whatever this block parked entities
@@ -2901,78 +2937,92 @@ export function startGame(opts = {}) {
     // there's only ever one viewer for a WEEK session, nothing to wait on.
     startOverlay.classList.add('hidden');
     controlsEnabled = true;
-    // The actual entry (intro-or-straight-to-aim, see the two branches
-    // below) — pulled into its own function so it can run either right now
-    // (the historical behavior, and still exactly what a reveal session
-    // gets: externalManche never passes weekEntryReady, see startGame's own
-    // comment on it) or once weekEntryReady resolves (a singleShotTeam aim
-    // session whose caller passed that gate — main.js's entry card, which
-    // covers the canvas until its own Play tap, so starting any earlier
-    // would just waste beginMatchIntro()'s animation behind it unseen).
+    // Ambient background audio (see requirement in conversation: it must
+    // survive every WEEK resume/reopen, not just the match's very first
+    // shot) — deliberately unconditional and separate from the
+    // weekPointStart-gated intro/sting below: this is "the rink has
+    // background ambience playing" continuity, not part of the "new point"
+    // ceremony. playAmbience() is already a no-op if it's already running
+    // (see audio.js), so this is harmless to call from every WEEK session,
+    // including one right after another in the same sitting.
+    audio.playAmbience();
+    // Board reconstruction (resumeManches/fastForwardManche) — deliberately
+    // NOT gated behind weekEntryReady below, unlike the actual entry
+    // (intro/aim-enable or the reveal starting). A player looking at the
+    // "Play"/"Watch the reveal" card must already see the CORRECT board
+    // behind its translucent scrim, not the bare default rack (bug report:
+    // stones visibly wrong behind the panel) — restoring the rink and
+    // enabling gameplay are two different moments, only the second one
+    // waits on the click.
+    //
+    // A *microtask* (Promise.resolve().then), not a direct call — this same
+    // resumeManches/fastForwardManche/physicsStep() read module-level
+    // consts declared further down this same closure (e.g. CORNERS):
+    // called synchronously from right here, before this closure has
+    // finished its own top-to-bottom setup, that's a temporal-dead-zone
+    // ReferenceError (already hit and fixed once for resumeManches's own
+    // eager call site — see that fix's comment). A microtask always drains
+    // before the next paint (unlike trackedTimeout(...,0), a macrotask not
+    // guaranteed to beat this closure's own requestAnimationFrame loop —
+    // see its own prior fix for the flicker that left uncorrected), so this
+    // still finishes before anything ever gets drawn. `!torn` mirrors
+    // trackedTimeout's own cancel-on-teardown guarantee (a bare Promise
+    // can't be cancelled, so it checks the same flag stopGame() sets
+    // instead). beginAimPhase() itself still carries its own
+    // resumeManchesApplied guard, so whichever of these two call sites (this
+    // one, or beginAimPhase() below once it eventually runs) gets there
+    // second is always a no-op.
+    Promise.resolve().then(() => {
+      if (!torn && resumeManches && !resumeManchesApplied) {
+        resumeManchesApplied = true;
+        resumeManches.forEach(fastForwardManche);
+      }
+    });
+    // The actual entry — enabling real interaction: either the huddle-
+    // slide-in + 'matchStart' sting (a fresh point, weekPointStart) or
+    // straight into aim/reveal (beginAimPhase(), which for externalManche
+    // dispatches into applyExternalManche() — literally "start the
+    // reveal"). Pulled into its own function so it can run either right now
+    // (the historical behavior — externalManche/singleShotTeam sessions the
+    // caller doesn't gate, see startGame's own weekEntryReady comment) or
+    // once weekEntryReady resolves (main.js's entry card, covering the
+    // canvas until its own tap, so starting any earlier would waste the
+    // animation — or start the reveal — behind it, unseen).
     const startWeekEntry = () => {
-      if (weekMatchStart) {
-        // The actual opening of the match — team A's very first shot, and
-        // only that (see weekController.js's own isMatchStart, computed off
-        // the match's real scoreA/scoreB/pointManches, not just this
-        // session's resumeManches: a later POINT starting fresh has an
-        // empty resumeManches too, exactly like the match's first point
-        // does, but per explicit feedback only the match's actual opening
-        // gets this, nothing more). Same huddle-slide-in + 'matchStart'
-        // sting every other mode's entry branch gets. Safe to call
-        // synchronously same as those branches: it defers its own
-        // beginAimPhase() call to the 'matchStart' clip's onEnded callback,
-        // well past this closure's own setup (see beginMatchIntro's own
-        // comment) — and, when gated, well past weekEntryReady resolving
-        // too, so no timing concern either way.
+      if (weekPointStart) {
+        // This player's first-ever entry into the CURRENT point (see
+        // startGame's own weekPointStart comment) — every point, not just
+        // the match's first. Same huddle-slide-in + 'matchStart' sting
+        // every other mode's entry branch gets. Safe to call synchronously
+        // same as those branches: it defers its own beginAimPhase() call to
+        // the 'matchStart' clip's onEnded callback, well past this
+        // closure's own setup (see beginMatchIntro's own comment) — and,
+        // when gated, well past weekEntryReady resolving too, so no timing
+        // concern either way.
         beginMatchIntro();
       } else {
-        // Every other WEEK entry — B's own first aim, a later point
-        // starting fresh, a mid-point reconnect with manches to
-        // fast-forward through (applied at the top of beginAimPhase(), see
-        // its own comment), or a reveal (externalManche). Straight to
-        // beginAimPhase(), deliberately NOT beginMatchIntro() here: it
-        // unconditionally snaps every stone back to its starting-rack
-        // position and slides them in first, which — stacked in front of a
-        // resumeManches fast-forward, or ahead of an externalManche shot
-        // that's about to launch from wherever the board already sits —
-        // reads as "the board just got reset" only to immediately
-        // reposition itself, a flash with nothing behind it (see
-        // conversation). Whatever resetPositions() set up at the very start
-        // of this closure (rack, same as always) is exactly what either
-        // needs to start from, no intro in between; and a fresh point with
-        // nothing to fast-forward just starts right there too, same as
-        // every other mode's own point-to-point transition
-        // (beginRoundReset), which never replays the match intro either.
+        // Every other WEEK entry — a later shot within the same still-open
+        // point, a mid-point reconnect, or a reveal (externalManche).
+        // Straight to beginAimPhase(), deliberately NOT beginMatchIntro()
+        // here: it unconditionally snaps every stone back to its
+        // starting-rack position and slides them in first, which would
+        // read as "the board just got reset" right after it was already
+        // correctly restored above (see conversation) — this point (or
+        // this specific reveal) was already entered once, no intro repeats
+        // for it. resumeManches (if any) is already applied by the
+        // unconditional microtask above by the time this runs, so this
+        // call's own top-of-function check is always a no-op here — this
+        // just proceeds straight to the real phase-machine work
+        // (externalManche's applyExternalManche(), or enabling aiming).
         //
-        // Deferred, not a direct call — beginAimPhase() (via resumeManches/
-        // fastForwardManche/physicsStep) reads module-level consts declared
-        // further down this same closure (e.g. CORNERS): called
-        // synchronously from right here, before this closure has finished
-        // its own top-to-bottom setup, that's a temporal-dead-zone
-        // ReferenceError (already hit and fixed once for resumeManches's own
-        // eager call site — see that fix's comment; calling beginAimPhase()
-        // straight from here reintroduces the exact same problem one level
-        // up). beginMatchIntro() never had this problem only because it
-        // always deferred its own beginAimPhase() call to an audio onEnded
-        // callback, well after setup finished.
-        //
-        // A *microtask* (Promise.resolve().then), not trackedTimeout(...,0)
-        // (a macrotask) — this closure's own requestAnimationFrame loop is
-        // already scheduled by the time this line runs, and a macrotask is
-        // not guaranteed to (and in practice usually doesn't) beat that
-        // loop's very next paint. With resumeManches to fast-forward, that
-        // meant one real frame of the canvas visibly at raw resetPositions()
-        // (the bare rack) before this fast-forwarded it to the board's
-        // actual current position — invisible on its own (still hidden
-        // under main.js's frozen boardSnapshot/spinner at that point), but
-        // main.js lifts that covering image the instant its own onMatchReady
-        // fires, racing independently against this same repositioning (bug
-        // report: a flicker between the frozen capture and the live board).
-        // A microtask always drains before the next paint, so this closes
-        // that gap outright rather than just narrowing it — `!torn` mirrors
-        // trackedTimeout's own cancel-on-teardown guarantee (stopGame()
-        // clears every tracked timeout; a bare Promise can't be cancelled,
-        // so it checks the same flag stopGame() sets instead).
+        // Still deferred via microtask, not a direct call — reachable
+        // synchronously (weekEntryReady omitted entirely: an ungated
+        // externalManche reveal, e.g. the auto-reveal right after this
+        // player's own shot in the same sitting, per explicit feedback that
+        // one never waits on a tap) before this closure has finished its
+        // own top-to-bottom setup, same temporal-dead-zone hazard as the
+        // resumeManches microtask above (see its own comment) — `!torn`
+        // guard for the same reason too.
         Promise.resolve().then(() => { if (!torn) beginAimPhase(); });
       }
     };
@@ -3807,6 +3857,7 @@ export function startGame(opts = {}) {
     barGlowSide = null; // bar stays lit through the whole pause/settle wait, cut right as the point is actually displayed below
     if (!isReplay) recorder.finishPoint(scoringTeam, isWipeout);
     if (scoringTeam === 'A') scoreA++; else scoreB++;
+    lastMancheScoringTeam = scoringTeam; // see its own declaration — WEEK's onMancheSettled reads this back out
     if (isReplay) {
         // "End of replay" is "we've played through the last recorded point",
         // never the live WIN_SCORE check — a single shared point, or a
@@ -3845,6 +3896,12 @@ export function startGame(opts = {}) {
       // maybeAdvanceRound() below) report the final score back out once
       // they've dismissed it, same as any other WEEK manche outcome.
       if (isMatchWin && !externalManche) {
+        // NIM-Curl Radar (see party/arbiter.js's 'matchOver' branch) — LIVE
+        // only (net is null for Pass & Play/AI/replay, and WEEK never
+        // reaches this branch at all, see the externalManche comment above).
+        // No-op on Duel LAN's arbiter (server/arbiter.js has no 'matchOver'
+        // handler, LAN is intentionally out of Radar's scope — see CLAUDE.md).
+        net?.sendMatchOver?.(scoreA, scoreB);
         showVictory();
       } else {
         if (!isMatchWin) round++;
@@ -3997,8 +4054,8 @@ export function startGame(opts = {}) {
       a.rel = 'noopener';
       a.style.left = `${(rect.tileX / TICKET_W) * 100}%`;
       a.style.width = `${(rect.tileW / TICKET_W) * 100}%`;
-      a.style.top = `${(POINTS_SECTION_Y / TICKET_H) * 100}%`;
-      a.style.height = `${(POINTS_SECTION_H / TICKET_H) * 100}%`;
+      a.style.top = `${(rect.tileY / TICKET_H) * 100}%`;
+      a.style.height = `${(rect.tileH / TICKET_H) * 100}%`;
       ticketWrap.appendChild(a);
     });
     // PLAY AGAIN: same matchConfig this instance was already started with
