@@ -1758,8 +1758,14 @@ export function startGame(opts = {}) {
   // there's no jump into place once both players tap ready. Solo/LAN/replay
   // skip straight past that screen (or, for replay, never show the stack at
   // all — see beginAimPhase's own isReplay branch), so there's no visible
-  // gap for them to fix.
-  if (!net && !aiTeam && !isReplay && !howTo) {
+  // gap for them to fix. WEEK's singleShotTeam has no such screen either —
+  // it must stay excluded too: a session that skips beginMatchIntro()
+  // entirely (weekController.js's isMatchStart gates it to A's own very
+  // first shot; B's first-ever aim never gets it, by design) would otherwise
+  // leave its stones stuck at this huddle spot forever instead of at
+  // startPositions, since nothing else ever un-stacks them for that session
+  // (bug report: B's board didn't match A's at the first shot of the match).
+  if (!net && !aiTeam && !isReplay && !howTo && !singleShotTeam) {
     for (const g of [...entities.A, ...entities.B]) {
       const idx = parseInt(g.id.slice(1), 10) || 0;
       const p = matchIntroHuddlePos(g.team, idx);

@@ -494,6 +494,24 @@ let pendingWeekCancel = null;
 // this one after.
 let activeWeekWaiting = null;
 
+// Safety net for the exact same message as activeWeekWaiting's own comment,
+// for the far more common way players actually leave this screen: not
+// through any in-app button at all, just closing the tab / backgrounding the
+// app / switching to another one (reported: A shared the match code then
+// left the tab without ever tapping Quit/Exit — the message stayed typed
+// locally and never reached B). `visibilitychange` fires the moment the tab
+// is hidden, while the WEEK socket (still just a plain open WebSocket at
+// this point, see net.js) is very much still alive to carry one last
+// best-effort send — unlike `beforeunload`/`pagehide`, which fire too late
+// for an in-flight request to reliably complete. Harmless to fire more than
+// once (e.g. flipping tabs back and forth): sendMessage always just
+// overwrites this recipient's one inbox slot with the same text.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden || !activeWeekWaiting) return;
+  const text = document.getElementById('weekMsgInput')?.value.trim();
+  if (text) activeWeekWaiting.sendMessage(text).catch(() => {});
+});
+
 // Nimiq logo is now purely decorative branding (see index.html's #navHome
 // comment, nimicurl arborescence rework) — the "back to menu" shortcut it
 // used to carry moved onto its own labeled sidebar nav entry below. Two
@@ -3080,9 +3098,13 @@ async function renderMyMatchesContent() {
     const code = codes[i];
     if (!code) return `<div class="week-match-row"><div class="week-match-card week-match-empty">Empty</div></div>`;
     const m = matches[code];
-    const opp = m.opponentAddress ? shortenAddressCompact(m.opponentAddress) : 'opponent';
     const label = getWeekMatchLabel(code);
-    const displayName = label ? escapeHtml(label) : `vs ${opp}`;
+    // Nobody to name yet while 'pending' (see TURN_LABELS) — show the code
+    // itself instead of a meaningless "vs opponent" placeholder, since the
+    // code is the one thing this row can actually offer at that stage (the
+    // whole reason to share it). Once opponentAddress exists (opponent has
+    // joined), switch to naming them, same as before.
+    const displayName = label ? escapeHtml(label) : (m.opponentAddress ? `vs ${shortenAddressCompact(m.opponentAddress)}` : code);
     const gameLabel = VIBE_LABELS[m.game] || m.game || '';
     const configLine = m.pointsToWin ? `${gameLabel} · First to ${m.pointsToWin}` : gameLabel;
     const left = m.status === 'abandoned';
