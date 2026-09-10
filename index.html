@@ -372,6 +372,20 @@
          plain screenshot pick up that exact same fade instead of showing a
          harder, flatter-looking edge than the live canvas ever does. -->
     <img id="weekBoardPanelBg" class="hidden" alt="">
+    <!-- WEEK's own lightweight "please wait" indicator (src/main.js's
+         showWeekSpinner/hideWeekSpinner) — a small spinner centered over the
+         rink's own hexagon, used instead of the branded full-screen
+         #loadingOverlay for WEEK's in-sitting transitions (a shot's server
+         round-trip, a reveal settling, the next session's own asset
+         warm-up): those moments have a perfectly correct frame already on
+         screen (the just-committed shot, the just-settled reveal) — no
+         legitimate reason to black it out like a fresh mode-select entry
+         does, and blacking it out anyway is exactly the "breaks the natural
+         match feel" complaint this exists to fix. Sits right after
+         #weekBoardPanelBg for the exact same reason that one is here and not
+         under #weekBoardPanel: both need to be actual #stage-wrap children
+         to line up with the canvas they're standing in for. -->
+    <div id="weekSpinner" class="hidden" aria-hidden="true"></div>
     <div id="toolbar-top" class="hidden">
       <!-- #mobileController state icons for chat/sound (see style.css's
            .mc-icon-overlay/.mc-icon-backdrop rules and main.js/game.js for
