@@ -1328,6 +1328,14 @@ export function startGame(opts = {}) {
   let selectedStone = null;
   let pendingTap = null;
   let joystickDrag = null;
+  // Whether `g` is the one currently "picked up" by the player — desktop's
+  // direct canvas drag, or mobile's tap-selected/joystick-armed stone (the
+  // joystick's own onJoystickDown calls beginDrag immediately, so during an
+  // active joystick pull both halves of this OR are simultaneously true).
+  // Drives the "lifted" visual (drawStone's liftT scale + drawContactShadow's
+  // shadow pull, see STONE_LIFT_SCALE below) independently of haloMode's own
+  // pulse, which stays gated behind g.used/phase logic this doesn't need.
+  function isLifted(g) { return (drag && drag.entity === g) || (mobile && selectedStone === g); }
   let readyA = false, readyB = false;
   // sweep.<team>.active: currently placed (visible only to that team while
   // aiming, or during 'sim' as the shared reveal — see sweepViewTeam/render).
@@ -1784,6 +1792,7 @@ export function startGame(opts = {}) {
       squishPhase: null, squishT: 0, squishPeak: 0,
       falling: false, fallScale: 1, rot: 0, rotVel: 0,
       hits: 0, dead: false, deadMix: 0, _hitCooldown: 0,
+      liftT: 0,
     };
   }
   function resetPositions() {
@@ -1994,9 +2003,14 @@ export function startGame(opts = {}) {
       beginDrag(g, pos.x, pos.y);
       return;
     }
-    // No stone at this point — check for a grab on the aiming team's own
-    // sweep patch (only reachable/visible to them, no placement restriction
-    // per feedback: it can sit anywhere, including under a stone/the ball).
+    // No stone at this point — mobile: tapping empty ice deselects whatever
+    // was tap-selected (see selectedStone above), same as picking a different
+    // stone would. Desktop has no equivalent tap-select state to clear here
+    // (its own "selected" is just the live drag, released via onPointerUp).
+    if (mobile) selectedStone = null;
+    // Check for a grab on the aiming team's own sweep patch (only
+    // reachable/visible to them, no placement restriction per feedback: it
+    // can sit anywhere, including under a stone/the ball).
     const team = aimingTeam();
     if (!team) return;
     const sw = sweep[team];
@@ -4227,7 +4241,7 @@ export function startGame(opts = {}) {
       g.vx = 0; g.vy = 0;
       g.used = false; g.pendingVx = 0; g.pendingVy = 0;
       g.hits = 0; g._hitCooldown = 0;
-      g.squish = 0; g.squishPhase = null; g.squishT = 0; g.squishPeak = 0;
+      g.squish = 0; g.squishPhase = null; g.squishT = 0; g.squishPeak = 0; g.liftT = 0;
       g._reviveFrom = g.dead ? 1 : g.deadMix;
       g.dead = false;
     }
@@ -4345,7 +4359,7 @@ export function startGame(opts = {}) {
       g.vx = 0; g.vy = 0;
       g.used = false; g.pendingVx = 0; g.pendingVy = 0;
       g.hits = target.hits; g._hitCooldown = 0;
-      g.squish = 0; g.squishPhase = null; g.squishT = 0; g.squishPeak = 0;
+      g.squish = 0; g.squishPhase = null; g.squishT = 0; g.squishPeak = 0; g.liftT = 0;
       g._reviveFrom = g.dead ? 1 : g.deadMix;
       g.dead = target.dead;
     }
@@ -5692,8 +5706,14 @@ export function startGame(opts = {}) {
     ctx.rect(FX1, GY0, BAR_RIGHT.x1 - FX1, GY1 - GY0);
     ctx.clip();
   }
-  function drawContactShadow(g, sprite, boost = 1) {
-    const cx = g.x + g.r * 0.1 * boost, cy = g.y + g.r * 0.16 * boost;
+  function drawContactShadow(g, sprite, boost = 1, lift = 0) {
+    // lift (0..1, see STONE_LIFT_* above): pulls the shadow further from the
+    // stone AND draws it bigger, in lockstep with drawStone's own liftT
+    // scale — a shadow that only grew in place would read as "heavier", not
+    // "picked up"; moving away from the stone is what actually sells lift.
+    const offsetMult = 1 + (STONE_LIFT_SHADOW_OFFSET_MULT - 1) * lift;
+    const sizeMult = 1 + (STONE_LIFT_SHADOW_SIZE_MULT - 1) * lift;
+    const cx = g.x + g.r * 0.1 * boost * offsetMult, cy = g.y + g.r * 0.16 * boost * offsetMult;
     // clip to the ice rect (+goal pockets) so the shadow tucks under the wood
     // frame at wall contact instead of spilling over it, but keeps following
     // a stone/ball down into the net instead of stopping dead at the goal
@@ -5709,7 +5729,7 @@ export function startGame(opts = {}) {
     // side the shadow actually pokes out past the stone — matching the bubble's
     // own compression there — and stays invisible on the opposite side.
     const shadowEntity = { x: cx, y: cy, r: g.r, squish: g.squish || 0, squishNX: g.squishNX, squishNY: g.squishNY };
-    const dw = sprite.logicalWidth, dh = sprite.logicalHeight;
+    const dw = sprite.logicalWidth * sizeMult, dh = sprite.logicalHeight * sizeMult;
     drawSquished(shadowEntity, () => {
       ctx.drawImage(sprite, cx - dw / 2, cy - dh / 2, dw, dh);
     });
@@ -5962,6 +5982,17 @@ export function startGame(opts = {}) {
   // This scales the ON-SCREEN SPRITE ONLY — STONE_R and all physics/collision
   // math are untouched.
   const STONE_VISUAL_SCALE = 0.90;
+  // "Lifted" feedback for whichever stone is currently selected/dragged (see
+  // isLifted above) — reads as the stone picked up off the ice, top-down:
+  // the stone itself grows a bit, and its contact shadow both grows AND
+  // pulls further from the stone (an offset shadow sells "elevated" much
+  // better than a same-spot shadow that's merely bigger/darker would).
+  // g.liftT (0..1, eased toward isLifted(g) once per frame — see the main
+  // loop) drives all three multipliers below in lockstep.
+  const STONE_LIFT_SCALE = 0.15;               // +15% stone draw diameter at full lift
+  const STONE_LIFT_SHADOW_OFFSET_MULT = 1.7;   // shadow offset distance at full lift
+  const STONE_LIFT_SHADOW_SIZE_MULT = 1.18;    // shadow sprite draw size at full lift
+  const STONE_LIFT_EASE_RATE = 10;             // higher = snappier grow/shrink
   // A soft glass glint over the stone's hex window, in world space (not the
   // stone's own rotated local frame) — same reasoning as drawBallHighlight:
   // drawn after the roll rotation is restored, so it stays fixed relative to
@@ -6022,7 +6053,7 @@ export function startGame(opts = {}) {
     }
     const halo = haloMode(g);
     if (halo !== 'off') drawAimHalo(g, halo);
-    drawContactShadow(g, stoneShadowSprite, STONE_SHADOW_BOOST);
+    drawContactShadow(g, stoneShadowSprite, STONE_SHADOW_BOOST, g.liftT || 0);
     drawSquished(g, () => {
       const sprites = bubbleSprites[g.team];
       const state = sprites && stoneLedState(g);
@@ -6033,7 +6064,8 @@ export function startGame(opts = {}) {
         // edges, and never more than 2 plain drawImage() calls regardless of
         // damage state — see stoneLedState/tryBakeBubble.
         // Scaled down from the full physics diameter — see STONE_VISUAL_SCALE.
-        const d = g.r * 2 * STONE_VISUAL_SCALE;
+        // Grown further while lifted (selected/dragged — see STONE_LIFT_SCALE).
+        const d = g.r * 2 * STONE_VISUAL_SCALE * (1 + STONE_LIFT_SCALE * (g.liftT || 0));
         ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
         ctx.save();
         ctx.translate(g.x, g.y);
@@ -7261,6 +7293,12 @@ export function startGame(opts = {}) {
     }
     if (isReplay) updateReplayBar();
     if (net) { maybeAutoSyncMute(); syncChatCompose(); }
+    // "Lifted" selection feedback (see isLifted/STONE_LIFT_SCALE above): eased
+    // every frame regardless of phase, not just during aiming — a stone still
+    // mid-grow/shrink when a phase transition interrupts it (e.g. beginDrag's
+    // own reset paths) should keep animating back to rest instead of holding.
+    for (const g of entities.A) g.liftT += ((isLifted(g) ? 1 : 0) - g.liftT) * Math.min(1, dt * STONE_LIFT_EASE_RATE);
+    for (const g of entities.B) g.liftT += ((isLifted(g) ? 1 : 0) - g.liftT) * Math.min(1, dt * STONE_LIFT_EASE_RATE);
     // Must run after the phase-updating block above, not before it: several
     // paths in there (runSimTick -> beginStraighten -> ... -> beginAimPhase,
     // updateRoundReset -> beginAimPhase, etc.) can flip `phase` into a fresh
