@@ -2020,8 +2020,10 @@ function showJoinCodeScreen(errorMsg) {
   hideRemoteMatchStack(); // see that function's own comment
   joinCodeContent.innerHTML = `
     <h2>Join with a code</h2>
-    <input id="joinCodeInput" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="XXXX" />
-    <button class="bigbtn" id="joinCodeSubmitBtn">Join</button>
+    <div class="join-code-row">
+      <input id="joinCodeInput" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="XXXX" />
+      <button class="bigbtn join-code-pill" id="joinCodeSubmitBtn">Join</button>
+    </div>
     ${errorMsg ? `<p class="lan-error">${errorMsg}</p>` : ''}
   `;
   const input = document.getElementById('joinCodeInput');
@@ -2635,12 +2637,22 @@ function buildShareText(code) {
   return `${taunt}\nCODE: ${code}`;
 }
 
+// Icon reflects what the button actually does on this device (see
+// shareOrCopyText below, same IS_MOBILE split) rather than a generic
+// "share" glyph — copy-to-clipboard icon on desktop, paper-plane send icon
+// on mobile (opens the native share sheet there). Same viewBox/stroke
+// convention as .config-back's inline SVGs elsewhere in this file.
+const CODE_SHARE_ICON_COPY = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const CODE_SHARE_ICON_SEND = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9Z"/></svg>';
+const CODE_SHARE_ICON_CHECK = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+const CODE_SHARE_ICON = IS_MOBILE ? CODE_SHARE_ICON_SEND : CODE_SHARE_ICON_COPY;
+
 // Per explicit request: mobile always uses the native share sheet, desktop
 // always copies — not "try share, fall back to copy" (some desktop browsers
 // do implement navigator.share, but a share-sheet popup reads as mobile-
 // native behavior on desktop, not what was asked for here). `btn` is a
-// small icon button (see .code-share-btn) — copy feedback is a checkmark
-// swap rather than a text-label swap.
+// small icon button (see .code-share-btn) — copy feedback swaps its icon to
+// a checkmark rather than a text label.
 async function shareOrCopyText(text, btn) {
   if (IS_MOBILE && navigator.share) {
     try { await navigator.share({ text }); } catch { /* cancelled by the user — no-op */ }
@@ -2648,9 +2660,8 @@ async function shareOrCopyText(text, btn) {
   }
   try {
     await navigator.clipboard.writeText(text);
-    const original = btn.textContent;
-    btn.textContent = '✓';
-    setTimeout(() => { btn.textContent = original; }, 1500);
+    btn.innerHTML = CODE_SHARE_ICON_CHECK;
+    setTimeout(() => { btn.innerHTML = CODE_SHARE_ICON; }, 1500);
   } catch { /* clipboard unavailable — the code is still on screen either way */ }
 }
 function shareLiveMatch(code, btn) {
@@ -2693,7 +2704,7 @@ function showMatchHostWaitingScreen(net, code, matchConfig) {
     <h2>Waiting for opponent…</h2>
     <div class="match-code-row">
       <div class="match-code">${code}</div>
-      <button class="code-share-btn" id="matchCodeShareBtn" aria-label="Share match">📤</button>
+      <button class="code-share-btn" id="matchCodeShareBtn" aria-label="Share match">${CODE_SHARE_ICON}</button>
     </div>
   `);
   document.getElementById('matchCodeShareBtn').addEventListener('click', (e) => {
@@ -3097,7 +3108,7 @@ function showWeekWaitingScreen(week, boardSnapshot) {
       ${messageField}
       <div class="match-code-row">
         <div class="match-code">${week.code}</div>
-        <button class="code-share-btn" id="weekShareBtn" aria-label="Share match">📤</button>
+        <button class="code-share-btn" id="weekShareBtn" aria-label="Share match">${CODE_SHARE_ICON}</button>
       </div>
     ` : `
       <div id="weekMsgArea" class="hidden">${messageField}</div>

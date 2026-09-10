@@ -1872,6 +1872,15 @@ button:disabled { opacity: 0.35; cursor: default; }
   transition: background .15s ease, border-color .15s ease;
 }
 #joinCodeOverlay .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
+/* Code input + Join button side by side (was stacked): on mobile, a stacked
+   Join button sits below the code field and gets hidden behind the on-screen
+   keyboard once the field is focused. Narrower field + a pill button to its
+   right keeps Join visible above the keyboard at all times. */
+.join-code-row { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; }
+#joinCodeOverlay .join-code-row input[type="text"] { width: 140px; }
+#joinCodeOverlay .join-code-pill {
+  border-radius: 999px; padding: 12px 22px; font-size: 15px; white-space: nowrap; flex-shrink: 0;
+}
 /* Same translucent-white treatment, mode-connect's own Nimiq Light Blue
    (see .config-panel.mode-connect above) needs it same as every other tint
    here — solid gold .bigbtn reads fine nowhere on this panel family. */
@@ -3051,9 +3060,10 @@ button:disabled { opacity: 0.35; cursor: default; }
 .code-share-btn {
   width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%;
   background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
-  font-size: 18px; display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: center;
   transition: background .15s ease, border-color .15s ease;
 }
+.code-share-btn svg { flex-shrink: 0; }
 .code-share-btn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
 
 /* Ticket point-QR tiles are also directly clickable on the same device that's
