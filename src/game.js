@@ -2944,22 +2944,36 @@ export function startGame(opts = {}) {
         // every other mode's own point-to-point transition
         // (beginRoundReset), which never replays the match intro either.
         //
-        // Deferred one tick (trackedTimeout(...,0), not a direct call) —
-        // beginAimPhase() (via resumeManches/fastForwardManche/physicsStep)
-        // reads module-level consts declared further down this same closure
-        // (e.g. CORNERS): called synchronously from right here, before this
-        // closure has finished its own top-to-bottom setup, that's a temporal-
-        // dead-zone ReferenceError (already hit and fixed once for
-        // resumeManches's own eager call site — see that fix's comment; calling
-        // beginAimPhase() straight from here reintroduces the exact same
-        // problem one level up). beginMatchIntro() never had this problem only
-        // because it always deferred its own beginAimPhase() call to an audio
-        // onEnded callback, well after setup finished — this is the same
-        // deferral, minus the animation. Harmless overkill once gated behind
-        // weekEntryReady (that alone already guarantees setup is long done
-        // by the time this runs), kept anyway so the ungated (reveal) path
-        // stays identical to before.
-        trackedTimeout(beginAimPhase, 0);
+        // Deferred, not a direct call — beginAimPhase() (via resumeManches/
+        // fastForwardManche/physicsStep) reads module-level consts declared
+        // further down this same closure (e.g. CORNERS): called
+        // synchronously from right here, before this closure has finished
+        // its own top-to-bottom setup, that's a temporal-dead-zone
+        // ReferenceError (already hit and fixed once for resumeManches's own
+        // eager call site — see that fix's comment; calling beginAimPhase()
+        // straight from here reintroduces the exact same problem one level
+        // up). beginMatchIntro() never had this problem only because it
+        // always deferred its own beginAimPhase() call to an audio onEnded
+        // callback, well after setup finished.
+        //
+        // A *microtask* (Promise.resolve().then), not trackedTimeout(...,0)
+        // (a macrotask) — this closure's own requestAnimationFrame loop is
+        // already scheduled by the time this line runs, and a macrotask is
+        // not guaranteed to (and in practice usually doesn't) beat that
+        // loop's very next paint. With resumeManches to fast-forward, that
+        // meant one real frame of the canvas visibly at raw resetPositions()
+        // (the bare rack) before this fast-forwarded it to the board's
+        // actual current position — invisible on its own (still hidden
+        // under main.js's frozen boardSnapshot/spinner at that point), but
+        // main.js lifts that covering image the instant its own onMatchReady
+        // fires, racing independently against this same repositioning (bug
+        // report: a flicker between the frozen capture and the live board).
+        // A microtask always drains before the next paint, so this closes
+        // that gap outright rather than just narrowing it — `!torn` mirrors
+        // trackedTimeout's own cancel-on-teardown guarantee (stopGame()
+        // clears every tracked timeout; a bare Promise can't be cancelled,
+        // so it checks the same flag stopGame() sets instead).
+        Promise.resolve().then(() => { if (!torn) beginAimPhase(); });
       }
     };
     if (weekEntryReady) weekEntryReady.then(startWeekEntry);
