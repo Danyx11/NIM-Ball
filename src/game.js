@@ -1550,7 +1550,14 @@ export function startGame(opts = {}) {
     for (let i = 0; i < 4000; i++) {
       // A goal/wipeout shouldn't fire on any manche but a point's last one by
       // definition — bail out early if it somehow does, rather than loop on.
-      if (physicsStep()) break;
+      // silent=true (this function's own doc comment above: "just
+      // silent/instant") — without it, every impact this replays (and the
+      // launch cue right along with it, see playLaunchEngine's own callers)
+      // fires audibly again, right as the next WEEK session starts up (bug
+      // report: launch/impact sounds repeating after the spinner) — the
+      // player already heard all of this live during the manche this is
+      // only reconstructing positions from.
+      if (physicsStep(entities, true)) break;
       if (allSettled()) break;
     }
     // Every manche this replays (WEEK's resumeManches, and replay's own
