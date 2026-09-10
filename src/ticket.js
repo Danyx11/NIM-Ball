@@ -8,18 +8,26 @@
 // using staged art rather than a real in-game photo for the templated part.
 import { getIdenticonCanvas } from './identicons.js';
 import QRCode from 'qrcode';
-import { buildReplayUrl, pointTileRect, MAX_POINTS_ON_TICKET, POINTS_SECTION_H, TICKET_W, TICKET_H } from './replay.js';
+import {
+  buildReplayUrl, pointTileRect, MAX_POINTS_ON_TICKET,
+  TICKET_W, TICKET_H, MARGIN_X, CONTENT_W, HEADER_H, CONTENT_Y,
+  PLAYERS_H, HERO_Y, HERO_H, QR_ROW_Y, QR_ROW_H,
+  STATS_Y, STATS_H, SPONSOR_LABEL_Y, BANNER_Y, BANNER_H, FOOTER_Y, FOOTER_H,
+} from './replay.js';
 import { COLORS } from './colors.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 const HERO_SRC = `${ASSET_BASE}ticket/hero.webp`;
+const BANNER_SRC = `${ASSET_BASE}ticket/banner-nimiq-space.webp`;
 
 const W = TICKET_W, H = TICKET_H;
 
 let heroImgPromise = null;
+let bannerImgPromise = null;
 export function preloadTicketAssets() {
   if (!heroImgPromise) heroImgPromise = loadImage(HERO_SRC);
-  return heroImgPromise;
+  if (!bannerImgPromise) bannerImgPromise = loadImage(BANNER_SRC);
+  return Promise.all([heroImgPromise, bannerImgPromise]);
 }
 
 function loadImage(src) {
@@ -75,7 +83,7 @@ function drawStatTile(ctx, cx, cy, icon, label, value) {
 
 export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner, stats, points = [] }) {
   await document.fonts.ready;
-  const [heroImg, identiconA, identiconB] = await Promise.all([
+  const [[heroImg, bannerImg], identiconA, identiconB] = await Promise.all([
     preloadTicketAssets(),
     getIdenticonCanvas(teamA.address),
     getIdenticonCanvas(teamB.address),
@@ -95,50 +103,48 @@ export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner, stats
   ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, W, H);
 
-  // ---------- Header: wordmark + "MATCH RESULT" ----------
-  drawCenteredText(ctx, 'NIM-CURL', W / 2, 90, `800 46px 'Mulish', Arial, sans-serif`, COLORS.accent);
-  drawCenteredText(ctx, 'MATCH RESULT', W / 2, 134, `700 24px 'Mulish', Arial, sans-serif`, COLORS.inkDim);
+  // ---------- Header: wordmark + "MATCH RESULT", full width ----------
+  drawCenteredText(ctx, 'NIM-CURL', W / 2, 36, `800 30px 'Mulish', Arial, sans-serif`, COLORS.accent);
+  drawCenteredText(ctx, 'MATCH RESULT', W / 2, 58, `700 15px 'Mulish', Arial, sans-serif`, COLORS.inkDim);
 
-  // ---------- Players row ----------
-  const avatarR = 78;
-  const rowY = 280;
-  const colAx = W * 0.27, colBx = W * 0.73;
+  // ---------- Players + score row (single row: avatar, score, avatar) ----------
+  const avatarR = 44;
+  const rowY = CONTENT_Y + PLAYERS_H / 2 + 4;
+  const colAx = MARGIN_X + CONTENT_W * 0.12, colBx = MARGIN_X + CONTENT_W * 0.88;
   for (const [team, cx, img, addr, color] of [
     ['A', colAx, identiconA, teamA.address, COLORS.teamA],
     ['B', colBx, identiconB, teamB.address, COLORS.teamB],
   ]) {
     if (team === winner) {
       ctx.beginPath();
-      ctx.arc(cx, rowY, avatarR + 8, 0, Math.PI * 2);
+      ctx.arc(cx, rowY, avatarR + 6, 0, Math.PI * 2);
       ctx.strokeStyle = color;
-      ctx.lineWidth = 5;
+      ctx.lineWidth = 3;
       ctx.stroke();
-      drawCenteredText(ctx, '\u{1F3C6}', cx, rowY - avatarR - 22, `40px 'Mulish', Arial, sans-serif`, color);
+      drawCenteredText(ctx, '\u{1F3C6}', cx, rowY - avatarR - 12, `24px 'Mulish', Arial, sans-serif`, color);
     }
     drawCircularImage(ctx, img, cx, rowY, avatarR);
-    drawCenteredText(ctx, shortenAddress(addr), cx, rowY + avatarR + 46, `600 26px 'Mulish', Arial, sans-serif`, COLORS.inkDim);
+    drawCenteredText(ctx, shortenAddress(addr), cx, rowY + avatarR + 26, `600 17px 'Mulish', Arial, sans-serif`, COLORS.inkDim);
   }
 
-  // ---------- Score ----------
-  const scoreY = 545;
-  ctx.font = `800 128px 'Mulish', Arial, sans-serif`;
+  ctx.font = `800 68px 'Mulish', Arial, sans-serif`;
   const scoreAText = String(scoreA), scoreBText = String(scoreB), sep = '  -  ';
   const wA = ctx.measureText(scoreAText).width;
   const wSep = ctx.measureText(sep).width;
   const wB = ctx.measureText(scoreBText).width;
-  const totalW = wA + wSep + wB;
-  let cursor = W / 2 - totalW / 2;
+  const scoreTotalW = wA + wSep + wB;
+  let cursor = W / 2 - scoreTotalW / 2;
   ctx.textAlign = 'left';
   ctx.fillStyle = COLORS.teamA;
-  ctx.fillText(scoreAText, cursor, scoreY); cursor += wA;
+  ctx.fillText(scoreAText, cursor, rowY + 22); cursor += wA;
   ctx.fillStyle = COLORS.inkDim;
-  ctx.fillText(sep, cursor, scoreY); cursor += wSep;
+  ctx.fillText(sep, cursor, rowY + 22); cursor += wSep;
   ctx.fillStyle = COLORS.teamB;
-  ctx.fillText(scoreBText, cursor, scoreY);
+  ctx.fillText(scoreBText, cursor, rowY + 22);
 
-  // ---------- Hero band (center-crop, no distortion) ----------
-  const heroY = 610, heroH = 620;
-  const heroTargetRatio = W / heroH;
+  // ---------- Hero band (center-crop, no distortion) — deliberately compact,
+  // not the dominant element (see conversation), full content width ----------
+  const heroTargetRatio = CONTENT_W / HERO_H;
   const srcRatio = heroImg.width / heroImg.height;
   let sx, sy, sw, sh;
   if (srcRatio > heroTargetRatio) {
@@ -147,88 +153,83 @@ export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner, stats
     sw = heroImg.width; sh = sw / heroTargetRatio; sx = 0; sy = (heroImg.height - sh) / 2;
   }
   ctx.save();
-  const heroRadius = 24;
   ctx.beginPath();
-  ctx.roundRect(0, heroY, W, heroH, heroRadius);
+  ctx.roundRect(MARGIN_X, HERO_Y, CONTENT_W, HERO_H, 18);
   ctx.clip();
-  ctx.drawImage(heroImg, sx, sy, sw, sh, 0, heroY, W, heroH);
+  ctx.drawImage(heroImg, sx, sy, sw, sh, MARGIN_X, HERO_Y, CONTENT_W, HERO_H);
   ctx.restore();
 
-  // ---------- Stats panel ----------
-  const statsY = heroY + heroH + 30;
-  const statsH = 280;
-  ctx.fillStyle = COLORS.panel;
-  ctx.beginPath();
-  ctx.roundRect(60, statsY, W - 120, statsH, 20);
-  ctx.fill();
-
-  const tileColX = [W * 0.28, W * 0.72];
-  const tileRowY = [statsY + 60, statsY + 150, statsY + 240];
-  const tilePositions = [
-    [tileColX[0], tileRowY[0]], [tileColX[1], tileRowY[0]],
-    [tileColX[0], tileRowY[1]], [tileColX[1], tileRowY[1]],
-    [W / 2, tileRowY[2]],
-  ];
-  const tiles = [
-    ['⏱', 'MATCH DURATION', formatDuration(stats.durationMs)],
-    ['\u{1F945}', 'GOALS SCORED', String(stats.goals)],
-    ['\u{1F4A5}', 'TOTAL COLLISIONS', String(stats.collisions)],
-    ['\u{1F3AF}', 'BEST SHOT SPEED', `${Math.round(stats.bestShotPercent)}%`],
-    ['\u{1FAA8}', 'STONES DESTROYED', String(stats.stonesDestroyed)],
-  ];
-  tiles.forEach(([icon, label, value], i) => drawStatTile(ctx, tilePositions[i][0], tilePositions[i][1], icon, label, value));
-
-  // ---------- Points section: up to MAX_POINTS_ON_TICKET clickable replay QR
-  // tiles (see CLAUDE.md replay vocabulary: manche < point < match, and
-  // src/replay.js for the layout constants + encoding). Reserves the same
-  // vertical space whether or not there are points to draw (see TICKET_H's
-  // own comment) so an uploaded ticket always crops at the same fixed rects.
-  const pointsY = statsY + statsH + 30;
-  if (points.length > 0) {
-    drawCenteredText(ctx, 'REPLAY — LES POINTS', W / 2, pointsY + 26, `700 24px 'Mulish', Arial, sans-serif`, COLORS.inkDim);
-    const shown = points.slice(0, MAX_POINTS_ON_TICKET);
-    for (let i = 0; i < shown.length; i++) {
-      const point = shown[i];
-      const rect = pointTileRect(i);
-      const url = buildReplayUrl(point);
-      const qrCanvas = await QRCode.toCanvas(url, {
-        width: rect.size, margin: 1, color: { dark: COLORS.bgDeep, light: '#ffffff' },
-      });
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.roundRect(rect.qrX - 6, rect.qrY - 6, rect.size + 12, rect.size + 12, 10);
-      ctx.fill();
-      ctx.drawImage(qrCanvas, rect.qrX, rect.qrY, rect.size, rect.size);
-      drawCenteredText(ctx, `Point ${point.index + 1}`, rect.tileX + rect.tileW / 2, rect.qrY + rect.size + 30, `700 20px 'Mulish', Arial, sans-serif`, COLORS.ink);
-    }
+  // ---------- Replay QR row, aligned directly under the hero image (same
+  // left/right bounds) — up to MAX_POINTS_ON_TICKET clickable tiles (see
+  // CLAUDE.md replay vocabulary: manche < point < match, and src/replay.js
+  // for the layout constants + encoding). Reserves the same fixed row
+  // whether or not there are points to draw, so an uploaded ticket always
+  // crops at the same fixed rects. ----------
+  const shown = points.slice(0, MAX_POINTS_ON_TICKET);
+  for (let i = 0; i < shown.length; i++) {
+    const point = shown[i];
+    const rect = pointTileRect(i);
+    const url = buildReplayUrl(point);
+    const qrCanvas = await QRCode.toCanvas(url, {
+      width: rect.size, margin: 1, color: { dark: COLORS.bgDeep, light: '#ffffff' },
+    });
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.roundRect(rect.qrX - 6, rect.qrY - 6, rect.size + 12, rect.size + 12, 10);
+    ctx.fill();
+    ctx.drawImage(qrCanvas, rect.qrX, rect.qrY, rect.size, rect.size);
+    drawCenteredText(ctx, `Point ${point.index + 1}`, rect.tileX + rect.tileW / 2, rect.qrY + rect.size + 26, `700 15px 'Mulish', Arial, sans-serif`, COLORS.ink);
   }
 
-  // ---------- Partner zone (fixed height, reserved for future sponsor) ----------
-  const partnerY = pointsY + POINTS_SECTION_H + 30;
-  const partnerH = 70;
-  ctx.strokeStyle = 'rgba(159,184,188,0.25)';
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(160, partnerY); ctx.lineTo(W - 160, partnerY); ctx.stroke();
-  drawCenteredText(ctx, 'Powered by Nimiq', W / 2, partnerY + partnerH / 2 + 8, `700 26px 'Mulish', Arial, sans-serif`, COLORS.inkDim);
-  ctx.beginPath(); ctx.moveTo(160, partnerY + partnerH); ctx.lineTo(W - 160, partnerY + partnerH); ctx.stroke();
+  // ---------- Stats row: single row of 5 tiles, content width ----------
+  ctx.fillStyle = COLORS.panel;
+  ctx.beginPath();
+  ctx.roundRect(MARGIN_X, STATS_Y, CONTENT_W, STATS_H, 16);
+  ctx.fill();
 
-  // ---------- Footer: logo + "Play Nim-Curl" + QR (no bare URL) ----------
-  const footerY = partnerY + partnerH + 30;
-  drawCenteredText(ctx, 'NIM-CURL', W / 2, footerY + 24, `800 26px 'Mulish', Arial, sans-serif`, COLORS.accent);
-  drawCenteredText(ctx, 'Play Nim-Curl', W / 2, footerY + 56, `600 20px 'Mulish', Arial, sans-serif`, COLORS.inkDim);
+  const tileFracs = [0.1, 0.3, 0.5, 0.7, 0.9];
+  const statsTileY = STATS_Y + STATS_H / 2 - 8;
+  const tiles = [
+    ['⏱', 'DURATION', formatDuration(stats.durationMs)],
+    ['\u{1F945}', 'GOALS', String(stats.goals)],
+    ['\u{1F4A5}', 'COLLISIONS', String(stats.collisions)],
+    ['\u{1F3AF}', 'BEST SHOT', `${Math.round(stats.bestShotPercent)}%`],
+    ['\u{1FAA8}', 'DESTROYED', String(stats.stonesDestroyed)],
+  ];
+  tiles.forEach(([icon, label, value], i) => drawStatTile(ctx, MARGIN_X + CONTENT_W * tileFracs[i], statsTileY, icon, label, value));
 
-  const qrSize = 150;
+  // ---------- "Sponsored by" caption (English, small caps), then the
+  // sponsor banner strip, full width, bottom-cropped (no letterboxing) to
+  // keep the source art's logo/text — see BANNER_H's comment in replay.js. ----------
+  drawCenteredText(ctx, 'THIS MATCH WAS SPONSORED BY', W / 2, SPONSOR_LABEL_Y, `700 15px 'Mulish', Arial, sans-serif`, COLORS.inkDim);
+
+  const bannerTargetRatio = W / BANNER_H;
+  const bsh = bannerImg.width / bannerTargetRatio;
+  const bsy = bannerImg.height - bsh;
+  ctx.drawImage(bannerImg, 0, bsy, bannerImg.width, bsh, 0, BANNER_Y, W, BANNER_H);
+
+  // ---------- Footer: slim horizontal bar — small game QR + "Play Nim-Curl" ----------
+  const qrSize = 64; // small, fixed short URL — see the point-QR comment above for why size floors differ by payload length
   const qrCanvas = await QRCode.toCanvas(location.href, {
     width: qrSize,
     margin: 1,
     color: { dark: COLORS.bgDeep, light: '#ffffff' },
   });
-  const qrX = W / 2 - qrSize / 2, qrY = footerY + 78;
+  const footerCy = FOOTER_Y + FOOTER_H / 2;
+  const qrX = W / 2 - 130, qrY = footerCy - qrSize / 2;
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
-  ctx.roundRect(qrX - 10, qrY - 10, qrSize + 20, qrSize + 20, 14);
+  ctx.roundRect(qrX - 6, qrY - 6, qrSize + 12, qrSize + 12, 10);
   ctx.fill();
   ctx.drawImage(qrCanvas, qrX, qrY, qrSize, qrSize);
+  const textX = qrX + qrSize + 22;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = COLORS.accent;
+  ctx.font = `800 20px 'Mulish', Arial, sans-serif`;
+  ctx.fillText('NIM-CURL', textX, footerCy - 4);
+  ctx.fillStyle = COLORS.inkDim;
+  ctx.font = `600 15px 'Mulish', Arial, sans-serif`;
+  ctx.fillText('Play Nim-Curl', textX, footerCy + 18);
 
   return canvas;
 }

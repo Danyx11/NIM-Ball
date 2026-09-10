@@ -15,7 +15,8 @@
 // (constructor → onStart, this.room.broadcast → this.broadcast, onMessage's
 // (connection, message) argument order) but the matchmaking logic itself is
 // unchanged.
-import { Server } from 'partyserver';
+import { Server, getServerByName } from 'partyserver';
+import { RADAR_ROOM_NAME } from './radar.js';
 
 const CHAT_COOLDOWN_MS = 30000;
 
@@ -93,6 +94,33 @@ export class Arbiter extends Server {
     this.mancheIndex = 0;
     this.pendingMancheIndex = null;
     this.mancheResults = { A: null, B: null };
+    // NIM-Curl Radar (see party/radar.js) — wallet address (or null for a
+    // guest, see src/nimiq.js's getIdentity) each connection announced via
+    // its own connect URL's `?address=`, purely informational for Radar's
+    // stats, never used for matchmaking/trust here. startedNotified/
+    // completedNotified guard against notifying Radar twice: this Durable
+    // Object instance is not persisted (see this file's own header comment —
+    // "always starts blank"), so a plain instance field is enough for the
+    // life of one match; Radar itself also dedupes by match code as a second
+    // safety net (see recordMatchStarted/recordMatchCompleted).
+    this.addresses = { A: null, B: null };
+    this.radarStartedNotified = false;
+    this.radarCompletedNotified = false;
+  }
+
+  radarNotify(method, payload) {
+    if (!this.env?.RadarCollector) return; // e.g. local `npm run wrangler:dev` without the binding configured
+    // getServerByName is itself async (Promise<DurableObjectStub>, not the
+    // stub directly — see node_modules/partyserver/dist/index.d.ts), so it
+    // must be awaited before calling a method on its result. Calling
+    // [method](payload) straight off the un-awaited promise throws
+    // synchronously ("is not a function") — a real bug found live: it was
+    // crashing onConnect/onMessage themselves, not just failing to notify
+    // Radar. .then/.catch here keeps this call fire-and-forget (no `await`
+    // needed at any call site) while fixing the ordering.
+    getServerByName(this.env.RadarCollector, RADAR_ROOM_NAME)
+      .then((radar) => radar[method](payload))
+      .catch((err) => console.error(`[radar] ${method} failed:`, err));
   }
 
   send(connection, msg) {
@@ -124,7 +152,7 @@ export class Arbiter extends Server {
     }
   }
 
-  onConnect(connection) {
+  onConnect(connection, ctx) {
     if (this.closed) {
       this.send(connection, { type: 'closed' });
       connection.close();
@@ -141,6 +169,10 @@ export class Arbiter extends Server {
     // partyserver's connection.setState) — used in onMessage/onClose below
     // instead of re-deriving team from the raw ws connection identity.
     connection.setState({ team });
+    // Optional, Radar-only (see this.addresses' own comment above) — src/net.js's
+    // connectMatch() appends this when the local player has a connected
+    // wallet, omits it entirely for a guest.
+    this.addresses[team] = new URL(ctx.request.url).searchParams.get('address') || null;
     // Team A (creator) reads back null here (it hasn't sent its config yet
     // at this point — it already knows its own choice locally, see main.js)
     // and team B (joiner) gets whatever A already stored, assuming the
@@ -150,6 +182,18 @@ export class Arbiter extends Server {
     if (opponent) {
       this.send(opponent, { type: 'opponentJoined' });
       this.send(connection, { type: 'opponentJoined' });
+      // "Match started" = both players actually present, not just a code
+      // generated (see CLAUDE.md's Radar section — an unshared/unjoined code
+      // isn't a real match). Fires once per DO instance (see the field's own
+      // comment) even though both connections reaching here on a reconnect
+      // race would otherwise call this twice.
+      if (!this.radarStartedNotified) {
+        this.radarStartedNotified = true;
+        this.radarNotify('recordMatchStarted', {
+          matchId: this.name, mode: 'live', timestampMs: Date.now(),
+          players: [{ address: this.addresses.A }, { address: this.addresses.B }],
+        });
+      }
     }
   }
 
@@ -225,6 +269,17 @@ export class Arbiter extends Server {
         const payload = { type: 'bothReady' };
         this.send(this.players.A, payload);
         this.send(this.players.B, payload);
+      }
+    } else if (msg.type === 'matchOver') {
+      // Sent once by src/game.js's showVictory() path (src/net.js's
+      // sendMatchOver) — both clients independently detect the win locally
+      // and will each send this, so radarCompletedNotified (not the message
+      // itself) is what makes this one-shot, same pattern as
+      // radarStartedNotified above. Nothing to relay to the other player —
+      // Radar-only, no gameplay effect.
+      if (!this.radarCompletedNotified) {
+        this.radarCompletedNotified = true;
+        this.radarNotify('recordMatchCompleted', { matchId: this.name, mode: 'live', timestampMs: Date.now() });
       }
     }
   }

@@ -39,8 +39,14 @@ export function connectLan(base) {
 // lan-server + npm run dev -- --host).
 const PARTY_HOST = import.meta.env.DEV ? 'ws://localhost:1999' : 'wss://nim-ball.nim-ball.workers.dev';
 
-export function connectMatch(code) {
-  return connectSocket(`${PARTY_HOST}/parties/arbiter/${code}`);
+// `address` is optional and purely informational (NIM-Curl Radar, see
+// party/arbiter.js/party/radar.js) — a connected wallet's address, or
+// omitted entirely for a guest (see src/main.js's getIdentity()). Never
+// gates matchmaking the way WEEK's own address requirement does — LIVE stays
+// guest-playable either way.
+export function connectMatch(code, address = null) {
+  const suffix = address ? `?address=${encodeURIComponent(normalizeAddress(address))}` : '';
+  return connectSocket(`${PARTY_HOST}/parties/arbiter/${code}${suffix}`);
 }
 
 // ---------------------------------------------------------------------
@@ -150,14 +156,19 @@ function weekMatchHandle(socket, snapshot) {
     },
     // Reports the locally-computed outcome of a revealed manche (this game
     // never runs physics server-side, see CLAUDE.md) so the persisted match
-    // state (score/round) advances for whoever reconnects next. `manche`
-    // ({stonesA, sweepA, stonesB, sweepB} — the shot data just revealed) is
-    // appended server-side to pointManches unless this manche just scored a
-    // point, see party/weekArbiter.js's own completeRound handler — needed
-    // so the *next* manche of the same point (could be seconds or days
-    // later) can reconstruct the board via resumeManches.
-    async completeRound(scoreA, scoreB, manche) {
-      return socket.request({ type: 'completeRound', scoreA, scoreB, ...manche });
+    // state (score/round/lastManche) advances. `scoredTeam` ('A'|'B'|null)
+    // is a delta, not an absolute score — the server owns scoreA/scoreB and
+    // accumulates it server-side (see party/weekArbiter.js's own
+    // completeRound handler and its comment on the score-persistence bug
+    // this replaced: a client-computed absolute total reset to whatever a
+    // fresh, freshly-zeroed game.js session happened to compute locally).
+    // Also doubles as "I've now personally watched the match's last
+    // manche" for a team who's independently catching up on one the other
+    // side already reported — see that same handler for why this needed
+    // splitting from "clear pendingShots for the next manche" in the first
+    // place (each side's own reveal progress must stay independent).
+    async completeRound(scoredTeam) {
+      return socket.request({ type: 'completeRound', scoredTeam });
     },
     // Either side can abandon at any point before the match is already over
     // (see party/weekArbiter.js's own 'abandon' handler) — frees this
@@ -292,6 +303,15 @@ function connectSocket(url) {
       // (see game.js's maybeAutoSyncMute).
       sendChatMute(muted) {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'chatMute', muted }));
+      },
+      // NIM-Curl Radar only (see party/arbiter.js's 'matchOver' branch) — no
+      // gameplay effect, nothing relayed back. Sent once by src/game.js right
+      // where showVictory() fires; safe to call on Duel LAN's arbiter too
+      // (server/arbiter.js has no 'matchOver' case, so it's just ignored
+      // there — LAN is dev-only and intentionally not wired into Radar, see
+      // CLAUDE.md).
+      sendMatchOver(scoreA, scoreB) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matchOver', scoreA, scoreB }));
       },
       onLaunch(cb) { launchCb = cb; },
       onOpponentJoined(cb) { opponentJoinedCb = cb; },

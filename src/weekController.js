@@ -1,8 +1,9 @@
 // WEEK orchestration — pure orchestration on top of the existing engine
 // (src/game.js), not a second game engine. game.js never learns "this is
-// WEEK": it only ever sees the 5 generic hooks documented at the top of
+// WEEK": it only ever sees the generic hooks documented at the top of
 // startGame() (singleShotTeam/onShotCommitted/externalManche/
-// onMancheSettled/resumeManches) — the same primitives a future caller
+// onMancheSettled/resumeManches/weekPointStart/weekEntryReady/
+// weekStartScoreA/weekStartScoreB) — the same primitives a future caller
 // other than WEEK could reuse. See the WEEK design conversation for the
 // full architecture rationale and the two things verified before relying on
 // them: fastForwardManche() has no isReplay-only coupling (it's a pure
@@ -37,32 +38,13 @@ function revealToManche(week) {
 // isn't team-relative).
 function resumeManchesFor(week) { return week.pointManches || null; }
 
-// True only for A's own very first shot of a brand new match — no point has
-// been scored yet AND this point itself has no manches yet either (a later
-// point starting fresh, after the last one scored, also has an empty
-// resumeManchesFor(week), which is why that alone isn't enough here — see
-// game.js's own weekMatchStart comment). Deliberately gated on team === 'A'
-// too: B's own first aim session hits this exact same "scoreless, no
-// manches yet" state (it's still the match's first point) but per explicit
-// feedback should never replay the intro either — B is joining a match
-// already in progress, not opening one. Only ever passed to playSingleShot
-// below, never to playReveal — a reveal is two already-known shots about to
-// resolve, never "the match opening", regardless of team or score (see
-// playReveal's own comment on why it omits this opt entirely; passing
-// isMatchStart(week) there too, for whichever side reveals the match's
-// first-ever manche, was the actual bug behind stones resetting and the
-// intro replaying between a shot and its reveal).
-function isMatchStart(week) {
-  return week.team === 'A' && week.scoreA === 0 && week.scoreB === 0 && !(week.pointManches && week.pointManches.length);
-}
-
 // "Your turn" — runs a single-team aim session (no timer, no opponent
 // visible, same 'lanAim' gating LAN already uses) and resolves once that
 // shot is committed. Tears the session down itself before resolving —
 // callers never need their own stopGame() for this half of WEEK.
 // boardSnapshot: a plain data-URL freeze-frame of the canvas at the exact
 // instant the shot commits (before stopGame() clears it) — main.js's
-// post-commit "YOUR SHOT IS ON THE ICE" screen shows this as its background
+// post-commit "Your shot is ready" screen shows this as its background
 // instead of keeping the whole engine alive just to display a static board,
 // per the WEEK flow-simplification conversation (rink-as-background, not a
 // second live session).
@@ -72,7 +54,24 @@ export function playSingleShot(week, engineOpts) {
       ...engineOpts,
       singleShotTeam: week.team,
       resumeManches: resumeManchesFor(week),
-      weekMatchStart: isMatchStart(week),
+      // week.enteredPoint is party/weekArbiter.js's own authoritative
+      // computation (see its snapshotFor comment) — true exactly when this
+      // team has never yet played a shot or watched a reveal in the CURRENT
+      // point, false the instant they have, forever until the point
+      // actually ends (scored). Per explicit requirement: PLAY + the
+      // point-start animation are shown once per player per NEW point —
+      // not just the match's very first one, and never again within the
+      // same still-open point regardless of how many times this player
+      // leaves and reconnects mid-point.
+      weekPointStart: !week.enteredPoint,
+      // Seeds this session's own local score with the match's real running
+      // total (see startGame's own comment on why a fresh session would
+      // otherwise always start counting from 0) — needed here too, not
+      // just in playReveal below, so a session that itself scores (a
+      // reveal that just happened to be chained straight into this aim
+      // screen, see main.js) still has the right baseline for its own
+      // local win-check/scoreboard.
+      weekStartScoreA: week.scoreA, weekStartScoreB: week.scoreB,
       matchConfig: week.config,
       vibe: week.game,
       onShotCommitted: (stones, sweep) => {
@@ -97,16 +96,19 @@ export function playReveal(week, engineOpts) {
       ...engineOpts,
       externalManche: manche,
       resumeManches: resumeManchesFor(week),
-      // No weekMatchStart here — see isMatchStart's own comment: a reveal
-      // never shows the match-intro huddle/sting, regardless of team or
-      // score, only ever playSingleShot does.
+      // No weekPointStart here — a reveal never shows the match-intro
+      // huddle/sting, regardless of team, score, or whether this happens to
+      // be this player's first look at the point (see startGame's own
+      // comment: entering a point and watching a reveal are different
+      // things — only the former gets the ceremony).
+      weekStartScoreA: week.scoreA, weekStartScoreB: week.scoreB,
       matchConfig: week.config,
       vibe: week.game,
       // `manche` rides along on the resolved result (not just
-      // scoreA/scoreB/matchOver) so the caller can report the exact same
-      // shot data back to party/weekArbiter.js's completeRound without
-      // recomputing the team-relative -> A/B mapping itself (see
-      // revealToManche above) — main.js's showWeekRevealScreen does exactly
+      // scoreA/scoreB/scoredTeam/matchOver) so the caller can report the
+      // exact same shot data back to party/weekArbiter.js's completeRound
+      // without recomputing the team-relative -> A/B mapping itself (see
+      // revealToManche above) — main.js's playWeekReveal does exactly
       // that. boardSnapshot: same freeze-frame idea as playSingleShot's own
       // (captured right before stopGame(), same reason — main.js shows this
       // as the background behind its lightweight spinner while completeRound

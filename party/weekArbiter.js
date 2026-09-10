@@ -32,6 +32,7 @@
 // unlike Arbiter, which always starts blank, a WEEK match must survive this
 // Durable Object being evicted between two visits that can be days apart.
 import { Server, getServerByName } from 'partyserver';
+import { RADAR_ROOM_NAME } from './radar.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const JOIN_WINDOW_MS = DAY_MS;        // A's code stays open for B to join
@@ -52,21 +53,42 @@ export class WeekArbiter extends Server {
 
   playerIndex(address) { return getServerByName(this.env.PlayerIndex, address); }
 
-  // Compact, redacted view sent to a connecting client. The opponent's shot
-  // for the in-progress round is withheld until both sides have submitted —
-  // enough gating to keep "watch the reveal" feeling like a real reveal, not
-  // a proof against a client that inspects its own network traffic (this
-  // arbiter already trusts every client-sent field exactly like
-  // party/arbiter.js does, see that file's own comments — same posture
-  // here, this game has no stakes that would justify more). Deliberately
-  // does NOT include a message — see this.match.inbox/consumeInbox below,
-  // a message is delivered once, at connect time, to its recipient only,
+  // Compact, redacted view sent to a connecting client. Deliberately does
+  // NOT include a message — see this.match.inbox/consumeInbox below, a
+  // message is delivered once, at connect time, to its recipient only,
   // never bundled into the reveal (see conversation: a message belongs to
   // its recipient, not to the reveal both sides eventually watch together).
+  //
+  // reveal has two possible sources, not one — a manche goes through two
+  // states before anyone's seenBy is even relevant: (1) both sides have
+  // submitted (bothIn) but nobody has simulated/reported it yet — the raw
+  // shot data has to come from pendingShots itself here, there is nothing
+  // else yet to source it from (a client needs exactly this to go simulate
+  // it and later call completeRound at all); (2) already resolved (see
+  // completeRound's own comment — pendingShots already moved on to the next
+  // manche) but THIS team specifically hasn't watched it — sourced from
+  // lastManche instead, independently per team (per explicit requirement:
+  // "each player has their own reveal progress... do not collapse this
+  // into one generic state") — a team only stops being offered a given
+  // reveal once THEY, personally, have reported watching it; the other
+  // team having already moved on never affects this team's own copy.
   snapshotFor(team) {
     const m = this.match;
     const opp = otherTeam(team);
     const bothIn = !!(m.pendingShots.A && m.pendingShots.B);
+    const lm = m.lastManche;
+    let reveal = null;
+    if (bothIn) {
+      reveal = {
+        mine: team === 'A' ? { stones: m.pendingShots.A.stones, sweep: m.pendingShots.A.sweep } : { stones: m.pendingShots.B.stones, sweep: m.pendingShots.B.sweep },
+        opponent: team === 'A' ? { stones: m.pendingShots.B.stones, sweep: m.pendingShots.B.sweep } : { stones: m.pendingShots.A.stones, sweep: m.pendingShots.A.sweep },
+      };
+    } else if (lm && !lm.seenBy[team]) {
+      reveal = {
+        mine: team === 'A' ? { stones: lm.stonesA, sweep: lm.sweepA } : { stones: lm.stonesB, sweep: lm.sweepB },
+        opponent: team === 'A' ? { stones: lm.stonesB, sweep: lm.sweepB } : { stones: lm.stonesA, sweep: lm.sweepA },
+      };
+    }
     return {
       game: m.game, config: m.config, status: m.status,
       round: m.round, scoreA: m.scoreA, scoreB: m.scoreB,
@@ -74,7 +96,7 @@ export class WeekArbiter extends Server {
       createdAt: m.createdAt, joinDeadline: m.joinDeadline, joinedAt: m.joinedAt, expiresAt: m.expiresAt,
       mySubmitted: !!m.pendingShots[team],
       opponentSubmitted: !!m.pendingShots[opp],
-      reveal: bothIn ? { mine: m.pendingShots[team], opponent: m.pendingShots[opp] } : null,
+      reveal,
       // Manches already played earlier in the current, not-yet-scored point
       // (see completeRound's own comment) — src/weekController.js feeds
       // these into game.js's resumeManches so an aim or reveal session
@@ -82,6 +104,17 @@ export class WeekArbiter extends Server {
       // whether that's a reconnect days later or simply the point's 2nd
       // manche a minute after the 1st.
       pointManches: m.pointManches,
+      // Has this team already played (or watched a reveal) at least once
+      // in the CURRENT point — the "first entry into a new point gets
+      // PLAY + the point-start animation, a later return within the same
+      // point never does" rule (see src/main.js's showWeekAimScreen/
+      // playWeekReveal and game.js's weekPointStart). Derivable from
+      // existing fields, no extra persisted flag needed: any manche
+      // already appended to pointManches necessarily included this team's
+      // shot (a manche only exists once BOTH sides have submitted), and a
+      // live pendingShots[team] means they've already submitted the
+      // point's current (not yet resolved) manche.
+      enteredPoint: (m.pointManches && m.pointManches.length > 0) || !!m.pendingShots[team],
     };
   }
 
@@ -109,13 +142,22 @@ export class WeekArbiter extends Server {
 
   // 'yourTurn' / 'waiting' / 'revealReady' — differs per team (mirrors
   // snapshotFor's own reveal gating), used for this player's own "My
-  // Matches" row (main.js). Terminal statuses pass through as-is.
+  // Matches" row (main.js: both 'yourTurn' and 'revealReady' render as
+  // "Your turn" there — either way this team has something actionable to
+  // come back and do; 'waiting' is the only genuinely idle state).
+  // Deliberately keyed off the same lastManche/pendingShots fields
+  // snapshotFor reads, not a separate computation — see that function's own
+  // comment on why a second source of truth for "is my reveal ready" would
+  // be wrong (this team's own unseen reveal is real even after the other
+  // team has already moved on to their next shot).
   turnLabelFor(team) {
     const m = this.match;
     if (m.status !== 'active') return m.status;
+    if (m.pendingShots.A && m.pendingShots.B) return 'revealReady'; // both submitted — see snapshotFor's own comment
+    const lm = m.lastManche;
+    if (lm && !lm.seenBy[team]) return 'revealReady';
     if (!m.pendingShots[team]) return 'yourTurn';
-    if (!m.pendingShots[otherTeam(team)]) return 'waiting';
-    return 'revealReady';
+    return 'waiting';
   }
 
   async pushIndexUpdate(team) {
@@ -143,6 +185,23 @@ export class WeekArbiter extends Server {
     await idx.remove(this.name);
   }
 
+  // NIM-Curl Radar (see party/radar.js) — reached over Durable Object RPC,
+  // not HTTP, same as PlayerIndex above. Every call site below is already a
+  // naturally one-shot transition (guarded by this.match.status checks that
+  // exist for gameplay reasons, not added for this), so no extra dedup flag
+  // is needed here the way party/arbiter.js needs one for its own
+  // (not-persisted, reconnect-prone) instance lifecycle.
+  radarNotify(method, payload) {
+    if (!this.env?.RadarCollector) return;
+    // See party/arbiter.js's identical radarNotify comment — getServerByName
+    // returns Promise<DurableObjectStub>, not the stub itself, and must be
+    // awaited before calling a method on it (a real bug found live: calling
+    // [method](payload) on the un-awaited promise threw synchronously).
+    getServerByName(this.env.RadarCollector, RADAR_ROOM_NAME)
+      .then((radar) => radar[method](payload))
+      .catch((err) => console.error(`[radar] ${method} failed:`, err));
+  }
+
   async onConnect(connection, ctx) {
     await this.ready();
     const url = new URL(ctx.request.url);
@@ -167,6 +226,13 @@ export class WeekArbiter extends Server {
         createdAt: now, joinDeadline: now + JOIN_WINDOW_MS, joinedAt: null, expiresAt: null,
         round: 0, scoreA: 0, scoreB: 0,
         pendingShots: { A: null, B: null },
+        // The most recently resolved manche, kept around independently of
+        // pendingShots (which already moves on to the next manche the
+        // instant this one resolves) specifically so each team's OWN
+        // "have I watched this yet" progress (seenBy) can outlive the other
+        // team having already moved on — see snapshotFor/completeRound's
+        // own comments.
+        lastManche: null,
         // Manches already played in the current, not-yet-scored point — see
         // snapshotFor's own comment and completeRound below.
         pointManches: [],
@@ -197,7 +263,23 @@ export class WeekArbiter extends Server {
     // abandoning already removed both players' PlayerIndex entries, so
     // nothing points back at this code anymore except someone re-typing it.
     if (this.match.status === 'expired' || this.match.status === 'abandoned') { this.send(connection, { type: 'expired' }); connection.close(); return; }
-    if (this.match.status === 'completed') { this.send(connection, { type: 'notFound' }); connection.close(); return; }
+    if (this.match.status === 'completed') {
+      // Known gap (see completeRound's own comment): whichever side reports
+      // a manche's outcome first can flip the match straight to
+      // 'completed' before the other side has watched that same reveal at
+      // all. Rather than lock them out of ever seeing the match's own
+      // final reveal, let them connect this one more time — same shape as
+      // any other returning player — if they're a real participant with an
+      // unseen lastManche; anyone else (or a team that's already seen it)
+      // gets the normal terminal response.
+      const team = address === this.match.playerA ? 'A' : address === this.match.playerB ? 'B' : null;
+      const lm = this.match.lastManche;
+      if (!team || !lm || lm.seenBy[team]) { this.send(connection, { type: 'notFound' }); connection.close(); return; }
+      connection.setState({ team });
+      const inboxMessage = await this.consumeInbox(team);
+      this.send(connection, { type: 'connected', ...this.snapshotFor(team), inboxMessage });
+      return;
+    }
 
     if (address === this.match.playerA) {
       connection.setState({ team: 'A' });
@@ -226,6 +308,16 @@ export class WeekArbiter extends Server {
     await this.persist();
     await this.ctx.storage.setAlarm(this.match.expiresAt);
     connection.setState({ team: 'B' });
+    // "Match started" = B actually joining (status pending -> active), same
+    // definition LIVE uses ("both players present" — see party/arbiter.js).
+    // This branch only ever runs once per match (playerB is checked/set
+    // right above, and a later reconnect never reaches this far — see this
+    // function's own address-match branches earlier), so no extra dedup flag
+    // is needed the way LIVE's radarStartedNotified is.
+    this.radarNotify('recordMatchStarted', {
+      matchId: this.name, mode: 'week', timestampMs: now,
+      players: [{ address: this.match.playerA }, { address: this.match.playerB }],
+    });
     await Promise.all([this.pushIndexUpdate('A'), this.pushIndexUpdate('B')]);
     // B's very first-ever connection to this match — still a legitimate
     // delivery moment: A could already have left a message for B before B
@@ -253,6 +345,12 @@ export class WeekArbiter extends Server {
       if ((this.match.status !== 'active' && this.match.status !== 'pending') || this.match.pendingShots[team]) return;
       this.match.pendingShots[team] = { stones: msg.stones, sweep: msg.sweep || null };
       await this.persist();
+      // Per-turn activity, independent of match start/end (see radarNotify's
+      // own comment and CLAUDE.md's Radar/WEEK section) — this is what lets
+      // a WEEK match spanning several days count each player as "active
+      // today" on every day they actually play, without re-counting the
+      // match itself as started again.
+      this.radarNotify('recordPlayerActive', { address: team === 'A' ? this.match.playerA : this.match.playerB, timestampMs: Date.now() });
       await Promise.all([this.pushIndexUpdate('A'), this.pushIndexUpdate('B')]);
       this.send(connection, { type: 'shotAccepted', ...this.snapshotFor(team) });
       return;
@@ -278,31 +376,56 @@ export class WeekArbiter extends Server {
       return;
     }
 
+    // Two genuinely different things used to be one: "report what this
+    // manche's outcome was" and "clear the shared slot so the next manche
+    // can start" happened together, on whichever team's client called this
+    // first — which silently dropped the OTHER team's own reveal (their
+    // pendingShots got cleared under them; reconnecting later, `reveal` was
+    // already null, they never got to watch what happened). Split here:
+    // - bothIn (this team's own pendingShots pair is the not-yet-resolved
+    //   one): first-ever report for this exact manche. Commits its outcome
+    //   (score, pointManches) authoritatively server-side — scoreA/scoreB
+    //   are accumulated here (+1 to whichever team the client says scored,
+    //   never overwritten by a client-sent absolute total — see the WEEK
+    //   score-persistence bug in conversation), snapshots it into
+    //   lastManche for whichever side hasn't watched it yet, and frees
+    //   pendingShots immediately so THIS team (who just watched it live)
+    //   can carry straight on to their next shot without waiting on the
+    //   other side at all.
+    // - !bothIn but lastManche exists and this team hasn't seen it: a
+    //   straggler independently catching up on an already-resolved manche
+    //   (possibly one the other team has since moved several shots past) —
+    //   just marks their own seenBy, touches nothing else.
     if (msg.type === 'completeRound') {
-      if (this.match.status !== 'active' || !this.match.pendingShots.A || !this.match.pendingShots.B) return;
-      const scoreA = Math.max(0, Math.min(99, msg.scoreA | 0));
-      const scoreB = Math.max(0, Math.min(99, msg.scoreB | 0));
-      // A point just scored iff either score moved — the same manche/point
-      // distinction game.js's own onGoal already makes (see CLAUDE.md's
-      // "manche"/"point" vocabulary). Scored: the next manche starts a fresh
-      // point, nothing to carry forward. Not scored: append this manche so a
-      // later aim/reveal (same point, could be the very next turn or a
-      // reconnect days later) can fast-forward the board back to here — see
-      // snapshotFor's own pointManches comment.
-      const pointScored = scoreA !== this.match.scoreA || scoreB !== this.match.scoreB;
-      this.match.pointManches = pointScored ? [] : [...this.match.pointManches, {
-        stonesA: this.match.pendingShots.A.stones, sweepA: this.match.pendingShots.A.sweep,
-        stonesB: this.match.pendingShots.B.stones, sweepB: this.match.pendingShots.B.sweep,
-      }];
-      this.match.scoreA = scoreA;
-      this.match.scoreB = scoreB;
-      this.match.round += 1;
-      this.match.pendingShots = { A: null, B: null };
+      if (this.match.status !== 'active') return;
+      const bothIn = !!(this.match.pendingShots.A && this.match.pendingShots.B);
+      if (bothIn) {
+        const scoredTeam = msg.scoredTeam === 'A' || msg.scoredTeam === 'B' ? msg.scoredTeam : null;
+        if (scoredTeam === 'A') this.match.scoreA += 1;
+        else if (scoredTeam === 'B') this.match.scoreB += 1;
+        const pointScored = !!scoredTeam;
+        this.match.pointManches = pointScored ? [] : [...this.match.pointManches, {
+          stonesA: this.match.pendingShots.A.stones, sweepA: this.match.pendingShots.A.sweep,
+          stonesB: this.match.pendingShots.B.stones, sweepB: this.match.pendingShots.B.sweep,
+        }];
+        this.match.lastManche = {
+          stonesA: this.match.pendingShots.A.stones, sweepA: this.match.pendingShots.A.sweep,
+          stonesB: this.match.pendingShots.B.stones, sweepB: this.match.pendingShots.B.sweep,
+          seenBy: { A: team === 'A', B: team === 'B' },
+        };
+        this.match.round += 1;
+        this.match.pendingShots = { A: null, B: null };
+      } else if (this.match.lastManche && !this.match.lastManche.seenBy[team]) {
+        this.match.lastManche.seenBy[team] = true;
+      } else {
+        return; // nothing pending for this team to report or ack right now
+      }
       const target = this.match.config?.pointsToWin || 3;
-      const matchOver = scoreA >= target || scoreB >= target;
-      if (matchOver) {
+      const matchOver = this.match.scoreA >= target || this.match.scoreB >= target;
+      if (matchOver && this.match.status !== 'completed') {
         this.match.status = 'completed';
         await this.ctx.storage.deleteAlarm();
+        this.radarNotify('recordMatchCompleted', { matchId: this.name, mode: 'week', timestampMs: Date.now() });
       }
       await this.persist();
       if (matchOver) {

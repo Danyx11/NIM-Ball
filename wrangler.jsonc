@@ -10,6 +10,11 @@
       // can't affect the existing LIVE binding above.
       { "name": "WeekArbiter", "class_name": "WeekArbiter" },
       { "name": "PlayerIndex", "class_name": "PlayerIndex" },
+      // NIM-Curl Radar's single counter/report store (party/radar.js) — a
+      // fourth class added the same way WEEK's two were: alongside the
+      // existing bindings above, never folded into them, so this change
+      // can't affect LIVE or WEEK.
+      { "name": "RadarCollector", "class_name": "RadarCollector" },
     ],
   },
   // new_sqlite_classes (not new_classes) — required for Durable Objects on
@@ -18,10 +23,18 @@
   // which is what made this rewrite necessary in the first place.
   //
   // v1 (Arbiter) is untouched, on purpose — a migrations entry is a one-time
-  // deploy record, not something to edit after the fact. v2 adds the two new
-  // WEEK classes as their own migration step.
+  // deploy record, not something to edit after the fact. v2 adds the two
+  // WEEK classes as their own migration step; v3 does the same for Radar.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Arbiter"] },
     { "tag": "v2", "new_sqlite_classes": ["WeekArbiter", "PlayerIndex"] },
+    { "tag": "v3", "new_sqlite_classes": ["RadarCollector"] },
   ],
+  // Drives RadarCollector#maybeSendDailyReport (party/radar.js) — a coarse
+  // 15-minute tick is enough since that method itself re-checks the current
+  // Europe/Paris wall-clock date on every call and only ever sends once per
+  // day (see its own comment for the DST/downtime reasoning).
+  "triggers": {
+    "crons": ["*/15 * * * *"],
+  },
 }
