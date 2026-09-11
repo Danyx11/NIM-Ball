@@ -268,6 +268,17 @@
           <rect width="100%" height="100%" fill="#fff"/>
           <rect id="howToCorridorBar" fill="url(#howToCorridorGrad)" filter="url(#howToCorridorBlur)"/>
           <circle id="howToCorridorSpot" r="0" fill="url(#howToSpotGrad)"/>
+          <!-- Goal-bar danger callout (see game.js's howToShowGoalBarWarning)
+               — 2 more shapes in this same mask, alongside the spot above,
+               rather than a second independent dim layer: stacking two
+               separate darkened layers double-dims instead of cleanly
+               revealing (see conversation on howToCorridorSpot's own
+               addition, same reasoning). Flat black fill (mask-revealed), a
+               soft edge via the same blur filter as the corridor bar rather
+               than a hard cutoff. Zero-sized by default, positioned/sized in
+               JS only while this step is up (see howToSyncGoalBarRect). -->
+          <rect id="howToBarLeft" width="0" height="0" fill="#000" filter="url(#howToCorridorBlur)"/>
+          <rect id="howToBarRight" width="0" height="0" fill="#000" filter="url(#howToCorridorBlur)"/>
         </mask>
       </defs>
       <rect width="100%" height="100%" fill="rgba(4,10,14,0.78)" mask="url(#howToCorridorMask)"/>
