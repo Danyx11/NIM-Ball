@@ -26,6 +26,7 @@ export const SFX_SRC = {
   stoneDead: `${ASSET_BASE}sfx/stone dead.m4a`, // a knocked-out stone's shrink-into-the-void animation starts
   stoneFall: `${ASSET_BASE}sfx/stone fall 3.m4a`, // a stone (not the ball) drops into the goal mouth
   pointOk: `${ASSET_BASE}sfx/Point ok.m4a`,   // the +1 point-result panel appearing (mid-match, non-deciding point) — also used for the final winning point, see showVictory in game.js
+  pointOk2: `${ASSET_BASE}sfx/point ok 2.m4a`, // howTo tutorial only: the small green-check badge confirming a step is done (see game.js's howTo block) — a distinct sibling clip, not pointOk itself, so it doesn't sound like a real scored point
   sweepAppear: `${ASSET_BASE}sfx/ice sphere 3.m4a`, // balai patch placed, played right after the toolbar's button.m4a, see sweepBtn in game.js
   chatIn: `${ASSET_BASE}sfx/message IN.m4a`,   // a real chat message arrives from the opponent (not our own echo, not the mute toggle) — see net.onChat in game.js
   chatOut: `${ASSET_BASE}sfx/message OUT.m4a`, // local player's own chat message send, played optimistically at submit time

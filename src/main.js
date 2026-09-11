@@ -2983,19 +2983,26 @@ function shareWeekMatch(week, message, btn) {
 // timer, no phase-machine changes beyond the generic hooks documented in
 // startGame()). Starts the real board immediately (per the flow-
 // simplification conversation).
-// showNotice: computed from !week.enteredPoint (party/weekArbiter.js's own
-// authoritative "has this team already played or watched a reveal in the
-// CURRENT point" — see its snapshotFor comment), NOT a caller-supplied
-// flag — per explicit requirement, PLAY (the entry card — the opponent's
-// message, if one arrived, otherwise just PLAY, blocking dragging until
-// dismissed) is shown exactly once per player per NEW point, never again
-// on a later shot within that same still-open point, no matter how many
-// times this player leaves and reconnects mid-point. This also means a
-// point that was just scored gets PLAY again even when continuing straight
-// through in the same sitting (playWeekReveal's own continuation, right
-// after a scoring manche) — a genuinely new point, not a resumed one.
-async function showWeekAimScreen(week) {
-  const showNotice = !week.enteredPoint;
+// showNotice decides whether the entry card (Play, blocking dragging until
+// dismissed) shows at all. Two things gate it, not one:
+//   - chained: true only when this call is playWeekReveal's own
+//     continuation, right after this player watched a reveal in this same
+//     sitting (see its own comment) — always skips the card, matching
+//     explicit requirement: watching a reveal (whatever it was — a plain
+//     settle, or one that happened to end a point) already IS this
+//     player's "entering" beat; a second PLAY gate right after it would be
+//     redundant, not a genuine new arrival. This is what actually fixes the
+//     bug report ("PLAY appears again for B" right after their own first
+//     reveal) — enteredPoint() itself was already correct (proven), the
+//     bug was using it to gate a same-sitting continuation at all.
+//   - week.enteredPoint (party/weekArbiter.js's own authoritative "has this
+//     team already played or watched a reveal in the CURRENT point" — see
+//     its snapshotFor comment): only consulted for a genuine fresh
+//     entry/reconnect (chained=false, i.e. reached via enterWeekMatch) —
+//     PLAY shows exactly once per player per NEW point on THAT path, never
+//     again on a later reconnect mid-point.
+async function showWeekAimScreen(week, chained = false) {
+  const showNotice = !chained && !week.enteredPoint;
   hideNetPanel();
   // Same bug/fix as showLobby()'s own modeOverlay.classList.add('hidden')
   // (see that function's own comment) — #modeOverlay's arena-illustration
@@ -3226,12 +3233,14 @@ async function playWeekReveal(week, chained = false) {
       document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
       return;
     }
-    // Straight back into the aim screen, which decides for itself whether
-    // this is a genuinely new point (PLAY again, see showWeekAimScreen's
-    // own showNotice comment) or a continuation within the same one (no
-    // panel) — either way it inherits this same spinner (still up) rather
-    // than showing its own black overlay, see its own comment.
-    showWeekAimScreen(mergeWeek(week, snapshot));
+    // Straight back into the aim screen, chained=true unconditionally —
+    // this player just watched a reveal in this same sitting (however they
+    // got to it: playWeekReveal's own chained param only describes how the
+    // REVEAL itself started, not what follows it), so no PLAY card here
+    // regardless of enteredPoint (see showWeekAimScreen's own comment) —
+    // it also means this always inherits the spinner (still up) rather
+    // than showing its own black overlay, same call either way.
+    showWeekAimScreen(mergeWeek(week, snapshot), true);
   } catch (err) {
     hideWeekSpinner();
     week.close();
