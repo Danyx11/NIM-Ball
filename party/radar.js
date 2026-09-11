@@ -109,8 +109,13 @@ function dayReportNumbers(day) {
 
 // `active` ({live, week}) is RadarCollector's running "started - completed"
 // gauge, not a per-day figure — see recordMatchStarted/recordMatchCompleted's
-// own comments for exactly what it does and doesn't capture.
-function formatReport({ title, dateLabel, n, active, trendLine }) {
+// own comments for exactly what it does and doesn't capture. `allTime`
+// ({wallets, guestSlots, matches}) is likewise since-the-beginning, never
+// reset — see this.cumulative/this.wallets and their own comments. Kept as
+// two separate lines (wallets vs. guest sessions), never summed — a guest
+// "count" isn't a player count (no identity to dedupe by), so adding it to
+// the wallet figure would misleadingly imply it was.
+function formatReport({ title, dateLabel, n, active, allTime, trendLine }) {
   const peakLine = n.peakCount > 0 ? `\n\n📈 Peak: ${String(n.peakHour).padStart(2, '0')}:00–${String((n.peakHour + 1) % 24).padStart(2, '0')}:00` : '';
   return [
     `📡 ${title}`,
@@ -132,6 +137,11 @@ function formatReport({ title, dateLabel, n, active, trendLine }) {
     `• Connections: ${n.walletSlots} wallet · ${n.guestSlots} guest`,
     '',
     `⏱ Active now — Live: ${active?.live ?? 0} · Week: ${active?.week ?? 0}`,
+    '',
+    'ALL-TIME',
+    `• Wallets ever seen: ${allTime?.wallets ?? 0}`,
+    `• Guest sessions: ${allTime?.guestSlots ?? 0}`,
+    `• Matches: ${allTime?.matches ?? 0}`,
   ].join('\n') + peakLine + (trendLine || '');
 }
 
@@ -144,6 +154,14 @@ export class RadarCollector extends Server {
       // figure (see recordMatchStarted/recordMatchCompleted). Best-effort —
       // see those methods' own comments for the known drift this has.
       this.activeCounts = (await this.ctx.storage.get('activeCounts')) || { live: 0, week: 0 };
+      // Since-the-beginning totals, never reset by a daily rollover (unlike
+      // the per-day docs) — matches: every real match ever recorded (LIVE +
+      // WEEK, deduped the same way day.modes[mode].started already is);
+      // guestSlots: every guest match-slot ever (not a player count, guests
+      // have no identity to dedupe by — see formatReport's own comment).
+      // "Wallets ever seen" needs no separate counter: it's just
+      // Object.keys(this.wallets).length, already tracked above.
+      this.cumulative = (await this.ctx.storage.get('cumulative')) || { matches: 0, guestSlots: 0 };
     })();
     // Plain in-memory promise chain serializing every day-document
     // read-modify-write below (recordMatchStarted/Completed/PlayerActive) —
@@ -171,6 +189,8 @@ export class RadarCollector extends Server {
 
   async persistWallets() { await this.ctx.storage.put('wallets', this.wallets); }
   async persistActiveCounts() { await this.ctx.storage.put('activeCounts', this.activeCounts); }
+  async persistCumulative() { await this.ctx.storage.put('cumulative', this.cumulative); }
+  allTimeNumbers() { return { wallets: Object.keys(this.wallets).length, guestSlots: this.cumulative.guestSlots, matches: this.cumulative.matches }; }
   async loadDay(date) { return (await this.ctx.storage.get(`day:${date}`)) || emptyDay(date); }
   async saveDay(day) { await this.ctx.storage.put(`day:${day.date}`, day); }
 
@@ -203,15 +223,23 @@ export class RadarCollector extends Server {
       if (day.modes[mode].started.includes(matchId)) return { ok: true, duplicate: true }; // idempotent replay
       day.modes[mode].started.push(matchId);
       day.hourly[hour] += 1;
+      let newGuestSlots = 0;
       for (const p of players || []) {
         if (p && p.address) {
           day.walletSlots += 1;
           await this.touchWallet(day, mode, await hashAddress(p.address, this.salt()), date);
         } else {
           day.guestSlots += 1;
+          newGuestSlots += 1;
         }
       }
       await this.saveDay(day);
+      // Since-the-beginning totals (see onStart's own comment) — incremented
+      // here, in the same dedup-guarded branch as the per-day counters just
+      // above, so a duplicate/retried event can't inflate these either.
+      this.cumulative.matches += 1;
+      this.cumulative.guestSlots += newGuestSlots;
+      await this.persistCumulative();
       // "Active now" gauge (see formatReport's own comment) — best-effort:
       // there is no "abandoned"/"expired" event wired from WeekArbiter to
       // Radar (party/weekArbiter.js's onAlarm/'abandon' handlers), and LIVE
@@ -289,13 +317,13 @@ export class RadarCollector extends Server {
     const today = parisDate(Date.now());
     if (cmd === '/radar' || cmd === '/radar today') {
       const day = await this.loadDay(today);
-      await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: 'Today', n: dayReportNumbers(day), active: this.activeCounts }));
+      await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: 'Today', n: dayReportNumbers(day), active: this.activeCounts, allTime: this.allTimeNumbers() }));
       return;
     }
     if (cmd === '/radar yesterday') {
       const yDate = shiftDate(today, -1);
       const day = await this.loadDay(yDate);
-      await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: formatDateLabel(yDate), n: dayReportNumbers(day), active: this.activeCounts }));
+      await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: formatDateLabel(yDate), n: dayReportNumbers(day), active: this.activeCounts, allTime: this.allTimeNumbers() }));
     }
     // Unrecognized command: silently ignored (see party/index.js's chat-id
     // check for who can even reach this).
@@ -323,7 +351,7 @@ export class RadarCollector extends Server {
       const pct = Math.round(((n.matches - prevMatches) / prevMatches) * 1000) / 10;
       trendLine = `\n\nYesterday: ${prevMatches} matches\n${pct > 0 ? '+' : ''}${pct}%`;
     }
-    await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: formatDateLabel(targetDate), n, active: this.activeCounts, trendLine }));
+    await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: formatDateLabel(targetDate), n, active: this.activeCounts, allTime: this.allTimeNumbers(), trendLine }));
     this.lastReportedDate = targetDate;
     await this.ctx.storage.put('lastReportedDate', this.lastReportedDate);
   }

@@ -4563,6 +4563,7 @@ export function startGame(opts = {}) {
   // lesson).
   const HOWTO_ALLOWED_ACTIONS = {
     meetStone: [],
+    goalBar: [],
     ready: [],
     select: ['stone'],
     aim: ['stone'],
@@ -4641,6 +4642,8 @@ export function startGame(opts = {}) {
   const howToCorridorGradEl = document.getElementById('howToCorridorGrad');
   const howToCorridorBlurEl = document.getElementById('howToCorridorBlurPrimitive');
   const howToCorridorSpotEl = document.getElementById('howToCorridorSpot');
+  const howToBarLeftEl = document.getElementById('howToBarLeft');
+  const howToBarRightEl = document.getElementById('howToBarRight');
   const howToTileEl = document.getElementById('howToTile');
   const howToTileCountEl = document.getElementById('howToTileCount');
   const howToTileTitleEl = document.getElementById('howToTileTitle');
@@ -4651,13 +4654,6 @@ export function startGame(opts = {}) {
   // as its 1s wait begins (see syncHowTo's own howToStepDone branch) — reset
   // in advanceHowTo() so the next step can show/play it again for its own wait.
   let howToCheckShown = false;
-  // performance.now() timestamp until which syncHowTo() must NOT hide the
-  // badge on its own — set by howToGotItBtnEl's click handler below, whose
-  // step advances instantly (no 1s wait to show the badge during, see that
-  // handler's own comment), so it shows/plays it directly and holds it
-  // visible for a fixed beat instead of relying on the wait-driven path
-  // every other step uses.
-  let howToCheckHoldUntil = 0;
   // Desktop-only targets (see index.html's own comment on these 4 elements
   // and ROCK_ZONES above) — mobile has real DOM buttons (tbtn-play etc.) to
   // point howToShowDomTarget at directly; desktop's "play"/"ice"/"laser"/
@@ -4724,6 +4720,49 @@ export function startGame(opts = {}) {
       stone.hits = stage === 4 ? STONE_MAX_HITS - 1 : stage * STONE_HITS_PER_LED;
     }
   }
+  // "Watch out" (goal-bar danger) step's own demo — a plain 2-state blink
+  // (full <-> dead), not the LED demo's 5-stage progression above: this step
+  // isn't about the LEDs counting down, just "this is what losing your stone
+  // looks like".
+  const HOWTO_DEAD_BLINK_MS = 900;
+  function howToUpdateDeadBlinkDemo(stone) {
+    const dead = Math.floor(performance.now() / HOWTO_DEAD_BLINK_MS) % 2 === 1;
+    if (dead) { stone.hits = STONE_MAX_HITS; stone.dead = true; stone.deadMix = 1; }
+    else { stone.hits = 0; stone.dead = false; stone.deadMix = 0; }
+  }
+  // Positions/sizes one goal-bar mask rect (see index.html's howToBarLeft/
+  // howToBarRight) to match its live on-screen footprint — same
+  // canvas-rect-to-screen-rect conversion as howToSyncRockTarget above,
+  // just reading BAR_LEFT/BAR_RIGHT (already used for the real goal-bar
+  // collision, see reflectOffBar) instead of ROCK_ZONES.
+  // Padded well past the bar's own literal rect (12px wide in canvas space —
+  // lighting exactly that read as a thin sliver, per explicit feedback:
+  // "des eclairages bien plus larges"). Weighted toward X: the bar's own
+  // height already roughly spans the goal mouth, width is the dimension
+  // that needed the room.
+  const HOWTO_BAR_HIGHLIGHT_PAD_X = 100;
+  const HOWTO_BAR_HIGHLIGHT_PAD_Y = 20;
+  function howToSyncGoalBarRect(el, bar) {
+    const p0 = howToCanvasToScreen(bar.x0 - HOWTO_BAR_HIGHLIGHT_PAD_X, bar.y0 - HOWTO_BAR_HIGHLIGHT_PAD_Y);
+    const p1 = howToCanvasToScreen(bar.x1 + HOWTO_BAR_HIGHLIGHT_PAD_X, bar.y1 + HOWTO_BAR_HIGHLIGHT_PAD_Y);
+    el.setAttribute('x', Math.min(p0.x, p1.x));
+    el.setAttribute('y', Math.min(p0.y, p1.y));
+    el.setAttribute('width', Math.abs(p1.x - p0.x));
+    el.setAttribute('height', Math.abs(p1.y - p0.y));
+  }
+  // "Watch out" step: stone + both goal bars lit, everything else dark — 3
+  // shapes at once in the corridor's own SVG mask (the stone via the shared
+  // howToCorridorSpot circle, the bars via their own 2 rects), not a second
+  // independent dim layer (see howToBarLeft/howToBarRight's own comment in
+  // index.html for why).
+  function howToShowGoalBarWarning(stone) {
+    howToHoleEl.classList.add('hidden');
+    howToCorridorEl.classList.remove('hidden');
+    const p = howToCanvasToScreen(stone.x, stone.y);
+    howToShowCorridorSpot(p.x, p.y, stone.r * p.scale + 24);
+    howToSyncGoalBarRect(howToBarLeftEl, BAR_LEFT);
+    howToSyncGoalBarRect(howToBarRightEl, BAR_RIGHT);
+  }
   // Shared by both of the tutorial's un-gated info steps ('meetStone' and
   // 'ready') — dismissed by this one tap alone, no extra guard needed since
   // the button itself is only ever shown on those two (see howToRenderTile's
@@ -4735,18 +4774,13 @@ export function startGame(opts = {}) {
     audio.play('button'); // same click as the toolbar's own buttons
     const stone = entities.A[0];
     if (stone) { stone.hits = 0; stone.dead = false; stone.deadMix = 0; }
-    // Same confirmation badge/sound every other step shows during its 1s
-    // wait (see syncHowTo's own howToStepDone branch) — but this step
-    // advances immediately, with no wait to show it during (per explicit
-    // feedback), so it's shown directly here and held for a fixed beat via
-    // howToCheckHoldUntil instead, so syncHowTo()'s own per-frame hide
-    // (howToStepDone is already back to false by the time advanceHowTo()
-    // below returns) doesn't erase it before it's even been seen.
-    howToTileCheckEl.classList.remove('hidden');
-    audio.play('pointOk2', { volume: 0.25 });
-    howToCheckHoldUntil = performance.now() + 500;
-    // advanceHowTo() itself resets howToStepDone — no separate 1s wait here.
-    advanceHowTo();
+    // Same 1s wait (scheduleHowToAdvance) every other step gets, now that
+    // it's doing something — the confirmation badge/sound (see syncHowTo's
+    // own howToStepDone branch) — rather than the instant advance this used
+    // to do, back when that wait would've just sat there empty (per
+    // explicit feedback).
+    howToStepDone = true;
+    scheduleHowToAdvance();
   }, { signal });
   // See howToJoystickWasDown's own comment — a real listener, not frame
   // polling, so a very quick tap-and-release on the stick can't slip past
@@ -4783,6 +4817,18 @@ export function startGame(opts = {}) {
     howToHoleEl.classList.add('hidden');
     howToCorridorEl.classList.add('hidden');
     howToCorridorSpotEl.setAttribute('r', 0);
+    howToClearGoalBars();
+  }
+  // Zeroes both goal-bar rects (see index.html's howToBarLeft/howToBarRight)
+  // — called whenever anything else claims the corridor SVG's mask, so a
+  // stale sized rect from the 'goalBar' step can't leak into a later one
+  // (e.g. 'slide', which reuses this same SVG for its own corridor/spot but
+  // never touches these two itself).
+  function howToClearGoalBars() {
+    howToBarLeftEl.setAttribute('width', 0);
+    howToBarLeftEl.setAttribute('height', 0);
+    howToBarRightEl.setAttribute('width', 0);
+    howToBarRightEl.setAttribute('height', 0);
   }
   // Circular spot layered inside the corridor's own SVG mask, alongside
   // howToCorridorBar — see index.html's howToCorridorSpot/howToSpotGrad for
@@ -4814,7 +4860,7 @@ export function startGame(opts = {}) {
   // smallest control-button spotlights with a visible gap and doesn't leave
   // the biggest (the stone's) looking disconnected either.
   const HOWTO_TARGET_TILE_GAP_PX = 55;
-  const HOWTO_TILE_WIDTH_PX = 285; // was 190 (before that, 170) — whole tile +50% per explicit feedback ("trop petit"), see style.css's matching font/padding bump
+  const HOWTO_TILE_WIDTH_PX = 238; // landed halfway between the +50% pass (190 -> 285) and the original (170), per explicit feedback ("un entre deux entre avant et maintenant") — see style.css's matching font/padding bump
   function howToPositionTileNear(cx, cy) {
     howToTileEl.style.transform = 'translateY(-50%)';
     howToTileEl.style.width = `${HOWTO_TILE_WIDTH_PX}px`;
@@ -4825,7 +4871,7 @@ export function startGame(opts = {}) {
       howToTileEl.style.left = '';
       howToTileEl.style.right = `${window.innerWidth - cx + HOWTO_TARGET_TILE_GAP_PX}px`;
     }
-    const halfH = 82; // rough half-height guess (was 55, bumped with the tile's own +50% size) — just to keep it from clipping off the top/bottom edge
+    const halfH = 68; // rough half-height guess, halfway between the +50% pass (82) and the original (55) — just to keep it from clipping off the top/bottom edge
     howToTileEl.style.top = `${Math.min(Math.max(cy, halfH), window.innerHeight - halfH)}px`;
   }
   function howToShowDomTarget(id, show) {
@@ -4876,6 +4922,7 @@ export function startGame(opts = {}) {
   function howToShowCorridor(stone) {
     howToHoleEl.classList.add('hidden');
     howToCorridorEl.classList.remove('hidden');
+    howToClearGoalBars(); // defensive — see that function's own comment
     const sw = sweep.A;
     // Extends past the ice zone all the way to the arena edge in the aim
     // direction (per explicit request — "allonge jusqu'au bout de l'arène
@@ -5014,17 +5061,29 @@ export function startGame(opts = {}) {
       // avant ice").
     } else {
       howToStepDone = false;
-      howToOverlayEl.classList.remove('hidden');
-      // Positioned once here, right before the tile is ever unhidden —
-      // without this it briefly renders at its un-positioned CSS default
-      // (top-left of the viewport, since #howToTile sets no top/left/right
-      // of its own, only howToPositionTileNear does) for a frame or two,
-      // until syncHowTo()'s very next call recomputes the real per-step
-      // position (per explicit feedback — a real, visible flash there,
-      // caught on screen capture).
+      // Everything below is fully prepared — position, text, AND the
+      // spotlight/dim itself — while #howToOverlay/#howToTile both stay
+      // hidden, then revealed together in the same tick (per explicit
+      // feedback: shadow + panel + "Got it?" + text + the corner × all at
+      // once). Calling the step's own case dispatch here directly (not
+      // syncHowTo(), which unhides the tile itself as a side effect) is
+      // what makes that possible — normally the dim/spotlight only gets
+      // computed on syncHowTo()'s next real frame, after the reveal below
+      // already ran, which is exactly the staggered "panel appears on a
+      // still-lit board, dim and text catch up a beat later" this fixes.
+      // Only ever reached at howToStep === 0 (every later re-entry into
+      // aimA goes through the howToShotAdvancePending branch above
+      // instead), so calling the mobile/desktop step 0 case here is safe —
+      // it's the exact same idempotent, side-effect-free spotlight-on-the-
+      // stone call syncHowTo() would make for it anyway.
       howToPositionTileDefault();
-      howToTileEl.classList.remove('hidden');
       howToRenderTile();
+      const stone = entities.A[0];
+      if (stone) {
+        if (mobile) howToSyncStepMobile(stone); else howToSyncStepDesktop(stone);
+      }
+      howToOverlayEl.classList.remove('hidden');
+      howToTileEl.classList.remove('hidden');
     }
   }
   // "Basic laser" step: rather than have the player hunt for a wall bounce
@@ -5124,10 +5183,7 @@ export function startGame(opts = {}) {
       }
       return;
     }
-    // Respects howToGotItBtnEl's own hold window (see its own comment) —
-    // that step advances immediately, so without this the very next frame
-    // here would erase the badge before it had even been visible.
-    if (performance.now() >= howToCheckHoldUntil) howToTileCheckEl.classList.add('hidden');
+    howToTileCheckEl.classList.add('hidden');
     if (mobile) howToSyncStepMobile(stone); else howToSyncStepDesktop(stone);
   }
   // Mobile's 9 steps: select (tap the stone) and aim (drag the joystick) are
@@ -5141,13 +5197,20 @@ export function startGame(opts = {}) {
         howToShowEntityTarget(stone, true);
         howToUpdateLedDemo(stone);
         break;
-      case 1: // "ready" transition step — same as case 0 above (no game
+      case 1: // "watch out" goal-bar danger callout — no game action gates
+        // it, dismissed by its own pill (see howToRenderTile's
+        // actionLabel). Blinks the stone full<->dead (howToUpdateDeadBlinkDemo)
+        // while highlighting it plus both goal bars (howToShowGoalBarWarning).
+        howToShowGoalBarWarning(stone);
+        howToUpdateDeadBlinkDemo(stone);
+        break;
+      case 2: // "ready" transition step — same as case 0 above (no game
         // action gates it, dismissed by its own pill, see howToRenderTile's
         // actionLabel), just without the LED demo — that was specifically
         // about the LEDs case 0 was teaching, not relevant here.
         howToShowEntityTarget(stone, true);
         break;
-      case 2: { // select — advances only on the real tap-release (selectedStone,
+      case 3: { // select — advances only on the real tap-release (selectedStone,
         // set by onPointerUp's pendingTap branch), never mid-gesture.
         // Completion checked before ever calling howToShowEntityTarget, not
         // after — calling it unconditionally first (the false branch clears
@@ -5161,7 +5224,7 @@ export function startGame(opts = {}) {
         else howToShowEntityTarget(stone, true);
         break;
       }
-      case 3: { // aim — advances on release (the 2s lock is just a bonus
+      case 4: { // aim — advances on release (the 2s lock is just a bonus
         // callout, not required — see howToJoystickWasDown's own comment).
         // Three distinct states, checked in this order on purpose: showing
         // the spotlight is only correct for "not touched yet" — checking it
@@ -5182,10 +5245,10 @@ export function startGame(opts = {}) {
         }
         break;
       }
-      case 4: // play — advances on tap, see onValidate's howTo branch
+      case 5: // play — advances on tap, see onValidate's howTo branch
         howToShowDomTarget(howToTargetId('play'), true);
         break;
-      case 5: { // ice boost — same reordering as case 2 above and for the
+      case 6: { // ice boost — same reordering as case 3 above and for the
         // same reason: checking sweep.A.active first, instead of calling
         // howToShowDomTarget unconditionally and letting its own false
         // branch clear the hole, keeps this from blanking the spotlight one
@@ -5202,10 +5265,10 @@ export function startGame(opts = {}) {
         }
         break;
       }
-      case 6:
+      case 7:
         howToSyncStepPositionIce();
         break;
-      case 7: { // slide on the ice — advances on tap, see onValidate's howTo
+      case 8: { // slide on the ice — advances on tap, see onValidate's howTo
         // branch. Corridor stays up the whole step (persistent until the
         // shot fires) AND, at once, a circular spot walks the same
         // stick-then-play sequence steps already taught — spotlighting the
@@ -5226,10 +5289,10 @@ export function startGame(opts = {}) {
         }
         break;
       }
-      case 8:
+      case 9:
         howToSyncStepLaser(stone);
         break;
-      case 9: // quit — real exit button, no advance needed (ends the
+      case 10: // quit — real exit button, no advance needed (ends the
         // session). Tapping it doesn't tear anything down right away — it
         // opens main.js's own "Quit the match?" Yes/No confirm first (see
         // triggerExit, shared #overlay) — per explicit feedback, the
@@ -5253,12 +5316,17 @@ export function startGame(opts = {}) {
         howToShowEntityTarget(stone, true);
         howToUpdateLedDemo(stone);
         break;
-      case 1: // "ready" transition step — same as case 0 above (no game
+      case 1: // "watch out" goal-bar danger callout — same as mobile's own
+        // case (see its own comment).
+        howToShowGoalBarWarning(stone);
+        howToUpdateDeadBlinkDemo(stone);
+        break;
+      case 2: // "ready" transition step — same as case 0 above (no game
         // action gates it, dismissed by its own pill, see howToRenderTile's
         // actionLabel), just without the LED demo.
         howToShowEntityTarget(stone, true);
         break;
-      case 2: { // aim (merged select+aim) — same three-states-checked-in-
+      case 3: { // aim (merged select+aim) — same three-states-checked-in-
         // order reasoning as mobile's own 'aim' case: dragging / just-
         // released / not-yet-touched. `drag` is the same live drag state a
         // real match uses (see beginDrag/releaseDrag above), not a howTo-
@@ -5277,10 +5345,10 @@ export function startGame(opts = {}) {
         }
         break;
       }
-      case 3: // play
+      case 4: // play
         howToShowDomTarget(howToTargetId('play'), true);
         break;
-      case 4: { // ice boost — same as mobile's own case
+      case 5: { // ice boost — same as mobile's own case
         if (sweep.A.active) {
           howToClearHole();
           howToStepDone = true;
@@ -5290,13 +5358,13 @@ export function startGame(opts = {}) {
         }
         break;
       }
-      case 5:
+      case 6:
         howToSyncStepPositionIce();
         break;
-      case 6: { // slide on the ice — same corridor idea as mobile's own case,
+      case 7: { // slide on the ice — same corridor idea as mobile's own case,
         // adapted for having no joystick to spotlight while not yet aimed
         // (aiming already happened by dragging the stone directly, see case
-        // 2 above). Mobile puts a circular spot on the joystick for that
+        // 3 above). Mobile puts a circular spot on the joystick for that
         // state, a completely separate spot on screen from the corridor —
         // but desktop's aim gesture starts right on the stone, exactly
         // where the corridor itself already visually starts, so a second
@@ -5325,10 +5393,10 @@ export function startGame(opts = {}) {
         }
         break;
       }
-      case 7:
+      case 8:
         howToSyncStepLaser(stone);
         break;
-      case 8: // quit
+      case 9: // quit
         howToShowDomTarget(howToTargetId('exit'), overlay.classList.contains('hidden'));
         break;
     }

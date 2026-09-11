@@ -12,6 +12,10 @@ export const HOWTO_STEPS_MOBILE = [
   // actionLabel button instead, appended to `text` as its own pill rather
   // than baked into this copy.
   { id: 'meetStone', title: 'Your stone', text: 'Your stone’s 4 LEDs show how many hits from your opponent it can take before it’s knocked out.', actionLabel: 'Got it?' },
+  // Highlights the stone (blinking full<->dead, see game.js's
+  // howToUpdateDeadBlinkDemo) plus both goal bars, everything else dark —
+  // see game.js's howToShowGoalBarWarning.
+  { id: 'goalBar', title: 'Watch out', text: 'Your stone will be lost if it touches one of the two goal bars.', actionLabel: 'Got it?' },
   { id: 'ready', title: 'Let’s go', text: 'Now we gonna learn how to control your stone', actionLabel: 'Ready' },
   { id: 'select', title: 'Select', text: 'Tap your stone' },
   { id: 'aim', title: 'Aim', text: 'Drag the stick — hold 2s to lock' },
@@ -37,6 +41,10 @@ export const HOWTO_STEPS_MOBILE = [
 // way mobile's joystick needs).
 export const HOWTO_STEPS_DESKTOP = [
   { id: 'meetStone', title: 'Your stone', text: 'Your stone’s 4 LEDs show how many hits from your opponent it can take before it’s knocked out.', actionLabel: 'Got it?' },
+  // Highlights the stone (blinking full<->dead, see game.js's
+  // howToUpdateDeadBlinkDemo) plus both goal bars, everything else dark —
+  // see game.js's howToShowGoalBarWarning.
+  { id: 'goalBar', title: 'Watch out', text: 'Your stone will be lost if it touches one of the two goal bars.', actionLabel: 'Got it?' },
   { id: 'ready', title: 'Let’s go', text: 'Now we gonna learn how to control your stone', actionLabel: 'Ready' },
   { id: 'aim', title: 'Aim', text: 'Click and drag your stone to aim' },
   { id: 'play', title: 'Play', text: 'Click Play to launch your stone' },
