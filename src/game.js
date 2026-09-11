@@ -4462,7 +4462,36 @@ export function startGame(opts = {}) {
         // short instead of just going quiet.
         volume: howTo ? 0 : 0.562, // was 1 (default), -5dB
         onEnded: () => {
-          if (phase === 'matchIntro') beginAimPhase(true);
+          if (phase !== 'matchIntro') return;
+          // WEEK only (singleShotTeam — see startGame's own comment):
+          // guarantee every stone is exactly at its settled startPositions
+          // spot before aiming becomes possible here, rather than trusting
+          // that updateMatchIntro()'s own rAF-driven tween has already
+          // gotten there by this exact moment — normally true well before
+          // this audio-driven callback fires (MATCH_INTRO_MOVE_MS plus its
+          // own safety-net margin comfortably beat the clip's own
+          // duration), but "normally" isn't a guarantee, and this callback
+          // is the one moment that flips phase to an aimable one (see
+          // beginAimPhase's own firstAimPhase() call): a stone still
+          // mid-tween right here would let a shot launch from that stale,
+          // not-yet-settled position instead of the real one (bug report:
+          // WEEK stones launching from the wrong origin after a
+          // reconnect). Harmless no-op once the tween already finished on
+          // its own — mirrors updateMatchIntro()'s own moveT>=1 finalize
+          // branch exactly, and its top-of-function matchIntroAnimDone
+          // guard already no-ops any later redundant call (the safety-net
+          // timeout included). Scoped to WEEK specifically, not applied to
+          // every mode this same callback drives, per explicit request not
+          // to touch LIVE/AI/Pass & Play's own behavior here even though
+          // this guard would be a no-op for them in practice too.
+          if (singleShotTeam && !matchIntroAnimDone) {
+            for (const g of [...entities.A, ...entities.B]) {
+              g.x = g._resetToX; g.y = g._resetToY;
+              g._resetFromX = g._resetFromY = g._resetToX = g._resetToY = undefined;
+            }
+            matchIntroAnimDone = true;
+          }
+          beginAimPhase(true);
         },
       });
       // Safety net mirroring beginRoundReset's own: updateMatchIntro() only
