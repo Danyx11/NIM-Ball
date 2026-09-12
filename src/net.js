@@ -1,8 +1,10 @@
 // Thin client wrapper around the two arbiter backends this game can talk to:
 // the local relay for Duel LAN (server/arbiter.js, plain `ws`, mounted at
 // ARBITER_PATH by both server/lan-server.js and server/duel-server.js — see
-// CLAUDE.md "LAN mode") and the hosted one for Match Réseau (party/arbiter.js
-// on PartyKit — see CLAUDE.md "Network match"). Both speak the exact same
+// CLAUDE.md "LAN mode") and the hosted one for LIVE (party/arbiter.js, a
+// Durable Object on Cloudflare via partyserver + wrangler — NOT PartyKit,
+// which this migrated off; see CLAUDE.md "Production remote backend" and the
+// PARTY_HOST comment below). Both speak the exact same
 // message protocol (party/arbiter.js is a straight port of
 // server/arbiter.js) — which team we were assigned, and each round's shot
 // vectors once both sides have submitted, no physics/state sync, the two

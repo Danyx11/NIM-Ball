@@ -20,12 +20,14 @@ const MODE_SELECT_BG_SRC = `${ASSET_BASE}home/mode-select-bg.webp`;
 const MODE_SELECT_BG_NIMICURL_SRC = `${ASSET_BASE}home/mode-select-bg-nimicurl.webp`;
 const MODE_SELECT_BG_CURLING_SRC = `${ASSET_BASE}home/mode-select-bg-curling.webp`;
 const VIBE_MODE_SELECT_BG_SRC = { hockey: MODE_SELECT_BG_NIMICURL_SRC, curling: MODE_SELECT_BG_CURLING_SRC };
-// nature-pinede.webp/arbres-ombres.webp (#bg-nature/#fg-ombres) intentionally
-// NOT wired up anymore: the V2 arena art bakes its own forest scene in, so
-// both containers are display:none (see style.css) — loading these ~1.1MB
-// combined would just be wasted network/decode time for images that never
-// paint. DOM/CSS left in place (not deleted) in case a future skin goes back
-// to a small inset board with visible margins, per the CSS comment.
+// #bg-nature/#fg-ombres intentionally NOT wired up anymore: the V2 arena art
+// bakes its own forest scene in, so both containers are display:none (see
+// style.css) — loading their ~1.1MB of images would just be wasted network/
+// decode time for layers that never paint. DOM/CSS left in place (not
+// deleted) in case a future skin goes back to a small inset board with
+// visible margins, per the CSS comment; the images themselves have now been
+// dropped from public/, their source layers still live under
+// design/bg/nature-pinede.png and design/bg/arbres-ombres.png.
 // The old animated constellation background (#bg-stage, fond-v4/v42/v43/v44)
 // was removed entirely for the same reason (V2 arena art occludes it — see
 // git history for the CSS/DOM/preload it used to need); its source layers

@@ -7,8 +7,8 @@
 //     the last cached copy when offline;
 //   - same-origin GET requests (JS/CSS/images/audio) go cache-first, with a
 //     background re-fetch to keep the cache warm for next time.
-// Cross-origin requests (Nimiq Mini App SDK calls, the PartyKit/wrangler
-// network-match host) and non-GET requests are left untouched — this worker
+// Cross-origin requests (Nimiq Mini App SDK calls, the LIVE/WEEK Cloudflare
+// Worker host) and non-GET requests are left untouched — this worker
 // never intercepts them.
 const CACHE_NAME = 'nim-curl-v1';
 

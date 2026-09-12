@@ -2498,8 +2498,9 @@ export function startGame(opts = {}) {
   // `if (net)` would make it look dead/unresponsive outside net play.
   chatBtn.addEventListener('click', () => {
     pressChatBtn();
+    // No else branch: outside net play there's no chat to open, and the
+    // press animation from pressChatBtn() above is the whole response.
     if (net && CHAT_ENABLED) toggleChatMask();
-    else console.log('[toolbar] chat pressed — no chat available');
   }, { signal });
   chatExitBtn.addEventListener('click', () => { toggleChatMask(); }, { signal });
   if (net && CHAT_ENABLED) {
@@ -6133,10 +6134,6 @@ export function startGame(opts = {}) {
     ctx.fillStyle = grad;
     ctx.fillRect(iceX - CREASE_R, CY - CREASE_R, CREASE_R * 2, CREASE_R * 2);
     ctx.restore();
-  }
-  function isAimingTeamStone(g) {
-    if (net) return phase === 'lanAim' && g.team === myTeam && !g.falling;
-    return ((phase === 'aimA' && g.team === 'A') || (phase === 'aimB' && g.team === 'B')) && !g.falling;
   }
   // Damage LEDs are baked directly into the stone body art per how many are
   // still alive (see LED_STATE_SRC/tryBakeBubble above) — index i is
