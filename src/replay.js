@@ -18,54 +18,142 @@ const SCALE_V = 1000;
 const SCALE_POS = 10;
 
 // ---------- Ticket layout (also used by ticket.js to draw QR tiles) ----------
-// Landscape, single-column composition, matching the game's own landscape
-// canvas ratio (~1.75:1, see CLAUDE.md) instead of a tall portrait: header,
-// score row, a compact hero band, the replay QR row aligned directly under
-// it, a stats row, a "sponsored by" caption, the sponsor banner strip, and a
-// slim footer play-QR bar. TICKET_H is always this fixed value, whether or
-// not a given ticket actually has points to show — decodePointsFromTicketImage()
-// below normalizes any uploaded image to exactly TICKET_W x TICKET_H before
-// cropping the fixed tile rects, so the layout (and this height) must never
-// vary per-ticket.
+// public/ticket/polaroid.webp (baked from design/Polaroid ticket 4.png, a
+// hand-designed template — see conversation) IS the ticket, full-bleed: the
+// polaroid photo, stat icons/labels, the separator, 5 dashed QR placeholders
+// (each pre-numbered) and a dashed sponsor banner slot (with the "THIS MATCH
+// WAS SPONSORED BY" notch already baked in) are all static art. ticket.js
+// draws every *dynamic* piece into the empty slots/areas this art reserves:
+// identicons/addresses + score, the 3 stat values, the "upload to relive"
+// label (ticket 4 ships this blank — ticket 3 had different wording baked
+// in), the QR codes, and the sponsor banner image. Every position below is
+// hand-measured against that same 1448x1086 art (same pattern as game.js's
+// arena FX0/FY0/etc — see CLAUDE.md's Coordinate system section), scaled by
+// SCALE. Only the numbers decodePointsFromTicketImage() actually needs (to
+// normalize an uploaded ticket and crop the same fixed QR rects) are
+// load-bearing for decode; the rest is purely where things get drawn.
 export const MAX_POINTS_ON_TICKET = 5;
-export const TICKET_W = 1600;
-export const MARGIN_X = 40;
-export const CONTENT_W = TICKET_W - MARGIN_X * 2; // 1520 — shared width for hero/QR row/stats
 
-export const HEADER_H = 64;
-export const CONTENT_Y = HEADER_H;
+const NATIVE_W = 1448, NATIVE_H = 1086; // exactly 4:3
+export const SCALE = 1.2; // drawn a bit above native res for crisper text/QR
+export const TICKET_W = Math.round(NATIVE_W * SCALE);
+export const TICKET_H = Math.round(NATIVE_H * SCALE);
 
-// Score + avatars row, then a deliberately compact hero band (not the
-// dominant element anymore — see conversation), then the QR row right under it.
-export const PLAYERS_H = 140;
-export const HERO_Y = CONTENT_Y + PLAYERS_H + 10;
-export const HERO_H = 250;
-export const QR_ROW_Y = HERO_Y + HERO_H + 16;
-export const QR_ROW_H = 170;
-// Tested empirically against the real qrcode/jsQR round-trip (see git history):
-// fixed pixel widths below ~130px start failing unpredictably for longer
-// points (more manches => more QR modules => seam artifacts at non-integer
-// module-to-pixel scale). 130 is the smallest width that decoded reliably
-// across every manche-count tested (1 to 10) — do not shrink without re-testing.
-const POINT_QR_SIZE = 130;
+const s = (n) => Math.round(n * SCALE);
 
-export const STATS_Y = QR_ROW_Y + QR_ROW_H + 16;
-export const STATS_H = 86;
+// ---- Identicon/guest-icon + score row (between the photo and the stats
+// row) — bleue/jaune/tiret are hidden XCF layers (design/ticket-guest-*.png,
+// this file's own dash) marking where the guest hexagon icons and the score
+// dash go; a real identicon reuses the same icon slot. ----
+export const ICON_A_CX = s(581), ICON_A_CY = s(563), ICON_A_R = s(37);
+export const ICON_B_CX = s(866), ICON_B_CY = s(565), ICON_B_R = s(40);
+export const DASH_CX = s(724), DASH_CY = s(565), DASH_W = s(32), DASH_H = s(4);
+// The icon-to-stats-row gap is too tight (~10-15px native) for a text line
+// underneath the icon, so the address/handle/guest-code sits beside it
+// instead — see ticket.js, which anchors it off ICON_A_CX-ICON_A_R (right-
+// aligned) / ICON_B_CX+ICON_B_R (left-aligned), vertically centered on the
+// icon itself.
+export const ADDR_GAP = s(14);
 
-export const SPONSOR_LABEL_Y = STATS_Y + STATS_H + 36;
-export const BANNER_Y = SPONSOR_LABEL_Y + 20;
-export const BANNER_H = 110;
-export const FOOTER_Y = BANNER_Y + BANNER_H + 10;
-export const FOOTER_H = 70;
-export const TICKET_H = FOOTER_Y + FOOTER_H;
+// ---- Stats row (duration / collisions / destroyed) — icons + labels are
+// baked in; only the value line below each label is drawn at runtime. ----
+export const STATS_COL_CX = [s(469), s(725), s(987)];
+export const STATS_VALUE_Y = s(722); // baseline
+
+// ---- Replay QR row — 5 dashed placeholder boxes, pre-numbered in the art
+// (hand-measured per-box outline: ~100x87 native, top edge at y=787). The
+// white backing fill is a few px larger than that on every side (but capped
+// short of the number badge baked in just below each box) so it fully
+// occludes the dashed outline — see conversation: it used to leave a sliver
+// of dash showing since the fill was smaller than the real box. The QR code
+// itself is rendered at the largest *integer* qrcode "scale" (pixels per
+// module) that still fits inside QR_CODE_SIZE, centered — tested empirically
+// against the real qrcode/jsQR round-trip (see git history): fixed
+// non-integer pixel widths cause seam artifacts that fail unpredictably, but
+// an integer module scale never does, at any size. ----
+const QR_BOX_W_N = 100, QR_BOX_H_N = 87, QR_BOX_TOP_N = 787, QR_BOX_LEFT0_N = 364, QR_BOX_STEP_N = 155.25;
+const QR_FILL_PAD_SIDE_N = 3, QR_FILL_PAD_TOP_N = 3, QR_FILL_PAD_BOTTOM_N = 2; // bottom stays clear of the badge
+export const QR_FILL_W = s(QR_BOX_W_N + QR_FILL_PAD_SIDE_N * 2);
+export const QR_FILL_H = s(QR_BOX_H_N + QR_FILL_PAD_TOP_N + QR_FILL_PAD_BOTTOM_N);
+export const QR_CODE_SIZE = s(78);
+const QR_BOX_STEP = s(QR_BOX_STEP_N);
 
 export function pointTileRect(i) {
-  const tileW = CONTENT_W / MAX_POINTS_ON_TICKET;
-  const tileX = MARGIN_X + i * tileW;
-  const qrX = Math.round(tileX + (tileW - POINT_QR_SIZE) / 2);
-  const qrY = QR_ROW_Y;
-  return { tileX, tileY: QR_ROW_Y, tileW, tileH: QR_ROW_H, qrX, qrY, size: POINT_QR_SIZE };
+  const tileLeftN = QR_BOX_LEFT0_N + i * QR_BOX_STEP_N;
+  const boxCxN = tileLeftN + QR_BOX_W_N / 2, boxCyN = QR_BOX_TOP_N + QR_BOX_H_N / 2;
+  const tileX = s(tileLeftN);
+  return {
+    tileX, tileY: s(QR_BOX_TOP_N), tileW: QR_BOX_STEP, tileH: QR_FILL_H,
+    fillX: s(tileLeftN - QR_FILL_PAD_SIDE_N), fillY: s(QR_BOX_TOP_N - QR_FILL_PAD_TOP_N), fillW: QR_FILL_W, fillH: QR_FILL_H,
+    qrX: s(boxCxN) - QR_CODE_SIZE / 2, qrY: s(boxCyN) - QR_CODE_SIZE / 2, size: QR_CODE_SIZE,
+  };
 }
+
+// ---- Sponsor banner — the box itself is a plain rounded rect; the banner
+// image fills it edge-to-edge, full height, at its own true ratio (no crop,
+// no stretch). The "THIS MATCH WAS SPONSORED BY" tab is *not* carved out of
+// the banner or avoided by it — the dashed placeholder's own tab visibly
+// overlaps/intrudes into the box's top edge (see conversation: "il doit
+// recouvrir une partie de la banniere... être intrusif"), so it's redrawn
+// from the original template ON TOP of the banner, clipped to that same
+// small trapezoid, exactly reproducing that overlap. ----
+const BOX_LEFT_N = 328, BOX_RIGHT_N = 1120;
+const BOX_TOP_N = 936;
+// Bottom extended a bit past the dashed box's own footprint (1008) into
+// blank matching background, still short of the card's real edge (solid
+// content runs out around y=1032, see conversation: "pas collée au bord").
+const BOX_BOTTOM_N = 1028;
+const BOX_RADIUS_N = 11;
+
+const BANNER_RATIO = 4; // banner-nimiq-space.webp is exactly 1200x300
+const BANNER_H_N = BOX_BOTTOM_N - BOX_TOP_N;
+const BANNER_W_N = BANNER_H_N * BANNER_RATIO;
+const BANNER_CX_N = (BOX_LEFT_N + BOX_RIGHT_N) / 2; // box's own horizontal center
+export const BANNER_X = s(BANNER_CX_N - BANNER_W_N / 2), BANNER_Y = s(BOX_TOP_N);
+export const BANNER_W = s(BANNER_W_N), BANNER_H = s(BANNER_H_N);
+export const BANNER_RADIUS = s(10); // the banner image itself is clipped to rounded corners
+
+// A few px of margin beyond the box's own measured bounds — its dash stroke
+// is centered *on* that boundary, so a wipe sized to match it exactly still
+// leaves half the stroke width peeking out (see conversation).
+const WIPE_PAD_N = 4;
+export const BANNER_WIPE_X = s(BOX_LEFT_N - WIPE_PAD_N), BANNER_WIPE_Y = s(BOX_TOP_N - WIPE_PAD_N);
+export const BANNER_WIPE_W = s(BOX_RIGHT_N - BOX_LEFT_N + WIPE_PAD_N * 2);
+export const BANNER_WIPE_H = s(BOX_BOTTOM_N - BOX_TOP_N + WIPE_PAD_N * 2);
+export const BANNER_WIPE_RADIUS = s(BOX_RADIUS_N + WIPE_PAD_N);
+
+// The "sponsored by" tab: redrawn from the original template on top of the
+// banner so it overlaps into the box's top edge exactly like the dashed
+// placeholder's own tab does. Its two sides are one continuous S-curve each
+// (a cubic bezier with a horizontal tangent at both ends — smoothly leaving
+// the flat top edge, smoothly arriving on the flat shelf) rather than a
+// straight diagonal with small corner fillets, which still read as
+// "multi-angle" (see conversation) — this matches the soft, single-curve
+// transition in the original chatgpt mockup instead. Anchor points are
+// hand-measured off the art pixel by pixel: top edge sits a few px above the
+// box's own top edge (936) — the text's cap-height itself pokes a couple px
+// above it — down to the shelf where the text/tab dashes actually sit.
+const TAB_TOP_Y_N = 930, TAB_SHELF_Y_N = 957;
+const TAB_TOP_LEFT_N = 579, TAB_SHELF_LEFT_N = 599;
+const TAB_SHELF_RIGHT_N = 851, TAB_TOP_RIGHT_N = 871;
+export function traceBannerTabPath(ctx) {
+  const topY = s(TAB_TOP_Y_N), shelfY = s(TAB_SHELF_Y_N);
+  const tl = s(TAB_TOP_LEFT_N), sl = s(TAB_SHELF_LEFT_N);
+  const sr = s(TAB_SHELF_RIGHT_N), tr = s(TAB_TOP_RIGHT_N);
+  const kL = (sl - tl) / 2, kR = (tr - sr) / 2;
+  ctx.beginPath();
+  ctx.moveTo((tr + tl) / 2, topY);
+  ctx.lineTo(tl, topY);
+  ctx.bezierCurveTo(tl + kL, topY, sl - kL, shelfY, sl, shelfY);
+  ctx.lineTo(sr, shelfY);
+  ctx.bezierCurveTo(sr + kR, shelfY, tr - kR, topY, tr, topY);
+  ctx.closePath();
+}
+
+// ---- "Upload to relive" label — public/ticket/polaroid.webp (design/
+// Polaroid ticket 4.png) ships with this text area left blank, unlike the
+// version before it, so this is drawn at runtime like everything else here. ----
+export const UPLOAD_LABEL_CX = s(724), UPLOAD_LABEL_Y = s(775);
 
 // ---------- base64url <-> bytes ----------
 function bytesToBase64Url(bytes) {

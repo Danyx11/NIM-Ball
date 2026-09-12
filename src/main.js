@@ -11,7 +11,7 @@ import '@fontsource/mulish/800.css';
 import '@fontsource/fira-mono/500.css';
 import { startGame, preloadCoreAssets } from './game.js';
 import { playSingleShot, playReveal } from './weekController.js';
-import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendClaimTransaction } from './nimiq.js';
+import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendClaimTransaction, getGuestCode } from './nimiq.js';
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets, setModeSelectVibeBackground } from './background.js';
@@ -708,7 +708,9 @@ function identityLabelOverride(team) {
     const handle = handleCache.get(hubAddress)?.handle;
     return handle ? { [team]: `@${handle}` } : {};
   }
-  if (getIdentity()?.type === 'guest') return { [team]: 'Guest' };
+  // "Guest 4821" — see src/ticket.js, which detects this exact "Guest "
+  // prefix to swap in the guest hexagon icon instead of an identicon.
+  if (getIdentity()?.type === 'guest') return { [team]: `Guest ${getGuestCode()}` };
   return {};
 }
 // The corner pill is now a pure display of the resolved identity (address,

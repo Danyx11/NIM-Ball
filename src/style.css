@@ -1234,6 +1234,7 @@ canvas { position: relative; z-index: 1; }
      (see the `canvas` rule below), so this only needs to agree with that
      ratio for the card to be filled exactly, no gap or overflow. */
   aspect-ratio: 2218 / 1295;
+  height: auto;
 }
 
 /* Zooms the whole scene (constellation + forest + board) in together,
@@ -1338,32 +1339,19 @@ canvas { position: relative; z-index: 1; }
      baked into the canvas backing buffer instead of the full 3312x1896 —
      see the .mobile-layout #scene rule above, kept in sync with these. */
   left: -6.49%;
-  /* -26.03%, not -6.31%: that old value (and a -56.31% one tried in between,
-     see git history/conversation) both leaned on the CSS comment's "scale
-     about origin" shorthand (top = oy×(1−s)×100%), which silently assumes
-     #game-card has the SAME aspect ratio as the canvas crop (2218/1295) —
-     true only by coincidence, never on a real phone: #game-card is
-     width:100vw/height:100dvh, so its ratio is whatever the phone's own
-     landscape ratio is (confirmed: restoring the exact pre-existing pixel
-     position via that shorthand's math still read as "too high" on a real
-     device). Re-derived instead from real pixel geometry, ratio-independent
-     of that shortcut:
-       - MOBILE_CROP (game.js) is 2217x1294; the ice field (FX0..FY1 in
-         game.js, full-canvas coords) sits at y 626..1274 there, center
-         y=950, i.e. (950-286)/1294 = 51.31% down the crop — and since the
-         canvas is a 1:1 render of that crop (canvas{width:100%;height:auto}
-         inside this same element), that's also 51.31% down THIS element's
-         own rendered box.
-       - This box's rendered width is 108.94% of #game-card's own width (see
-         `width` below); its height instead follows the canvas's own
-         intrinsic 2217:1294 ratio at that width (independent of #game-card's
-         height — the two only coincide when #game-card happens to share the
-         crop's aspect ratio, which it doesn't here).
-       - Solved for a landscape 852x343 reference (matches #mobileController's
-         own calibration viewport above) targeting the ice's center dead on
-         mid-screen (tuned down from an initial 5%, then 3%, per explicit
-         request — no Nimiq Pay chrome offset after all). */
-  top: -31.03%;
+  /* top/left/width all follow the same "scale s about origin (ox,oy)"
+     formula as .mobile-layout #scene's transform-origin/scale (72.57%,
+     70.64%, 1.0894 — see that rule): width = s×100%, left = ox×(1−s)×100%,
+     top = oy×(1−s)×100%. This only holds when #game-card and this box's own
+     rendered ratio (canvas{width:100%;height:auto}, locked to the
+     MOBILE_CROP 2217:1294 crop) actually match — for a while they didn't
+     (#game-card was width:100vw/height:100dvh, so its ratio was whatever the
+     phone's own landscape ratio happened to be), so `top` was re-derived by
+     hand against one real 852x343 device instead (see git history). Now that
+     .mobile-layout #game-card locks aspect-ratio:2218/1295 with height:auto,
+     the two ratios match again and the plain formula applies to all three
+     values, same as it always has for left/width. */
+  top: -6.32%;
   width: 108.94%;
   z-index: 0;
 }
@@ -2055,7 +2043,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    opaque even for the one frame before the vibe-specific image (see
    src/background.js's setModeSelectVibeBackground) has painted, so a slow
    decode never lets the just-quit match's frozen canvas show through. */
-#modeOverlayBg { position: absolute; top: 0; left: -10vw; width: 100vw; height: 100dvh; background-color: #000; background-size: cover; background-position: center; }
+#modeOverlayBg { position: absolute; top: calc((100% - 100dvh) / 2); left: -10vw; width: 100vw; height: 100dvh; background-color: #000; background-size: cover; background-position: center; }
 /* Same recentering trick as the desktop rule above, just re-derived for
    mobile's own reserved column: -10vw is exactly half of DESKTOP's fixed
    20vw #menuStage margin, which doesn't mean anything on mobile — there the
