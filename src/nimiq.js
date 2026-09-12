@@ -120,6 +120,23 @@ export function clearIdentity() {
   localStorage.removeItem(GUEST_KEY);
 }
 
+const GUEST_CODE_KEY = 'nimball-guest-code';
+const GUEST_CODE_TTL_MS = 24 * 60 * 60 * 1000;
+
+// A short per-visitor label ("Guest 4821", see src/ticket.js) — not an
+// identity, just something to tell two guests apart on a shared ticket.
+// Stable across a day of visits, then regenerated, so it doesn't linger
+// forever (see conversation).
+export function getGuestCode() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(GUEST_CODE_KEY) || 'null');
+    if (stored && Date.now() - stored.createdAt < GUEST_CODE_TTL_MS) return stored.code;
+  } catch { /* fall through to regenerate */ }
+  const code = String(Math.floor(1000 + Math.random() * 9000));
+  localStorage.setItem(GUEST_CODE_KEY, JSON.stringify({ code, createdAt: Date.now() }));
+  return code;
+}
+
 // ---- NimConnect @handle claim (see src/nimconnect.js for read/lookup) --
 // buildClaimPayload() (nimconnect.js) only builds {recipient, extraData,
 // extraDataBytes} — signing and broadcasting is our job, via whichever

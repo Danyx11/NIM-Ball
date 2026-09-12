@@ -4040,8 +4040,8 @@ export function startGame(opts = {}) {
     const ticketPoints = allPoints.length <= MAX_POINTS_ON_TICKET ? allPoints : allPoints.slice(-MAX_POINTS_ON_TICKET);
     const ticketCanvas = await renderTicket({
       scoreA, scoreB,
-      teamA: { address: IDENTICON_ADDRESS.A },
-      teamB: { address: IDENTICON_ADDRESS.B },
+      teamA: { address: IDENTICON_ADDRESS.A, label: IDENTICON_LABEL.A },
+      teamB: { address: IDENTICON_ADDRESS.B, label: IDENTICON_LABEL.B },
       winner: winningTeam,
       stats,
       points: ticketPoints,
@@ -4182,8 +4182,8 @@ export function startGame(opts = {}) {
     };
     const ticketCanvas = await renderTicket({
       scoreA, scoreB,
-      teamA: { address: IDENTICON_ADDRESS.A },
-      teamB: { address: IDENTICON_ADDRESS.B },
+      teamA: { address: IDENTICON_ADDRESS.A, label: IDENTICON_LABEL.A },
+      teamB: { address: IDENTICON_ADDRESS.B, label: IDENTICON_LABEL.B },
       winner: winningTeam,
       stats,
       points: [], // a replay of a replay doesn't offer further point QRs
@@ -5898,11 +5898,17 @@ export function startGame(opts = {}) {
   }
   function drawContactShadow(g, sprite, boost = 1, lift = 0) {
     // lift (0..1, see STONE_LIFT_* above): pulls the shadow further from the
-    // stone AND draws it bigger, in lockstep with drawStone's own liftT
-    // scale — a shadow that only grew in place would read as "heavier", not
-    // "picked up"; moving away from the stone is what actually sells lift.
+    // stone — moving away from the stone is what actually sells "picked up".
+    // Deliberately NOT also scaling the sprite's own draw size here (an
+    // earlier version did, via a size multiplier on dw/dh below): stretching
+    // this raster past its baked size re-triggers the exact mobile dpr-cap
+    // problem bakeContactShadowSprite's own comments already warn about (the
+    // accent layer's thin blur reading as a harder, denser edge once
+    // stretched further on top of mobile's own canvas-to-CSS upscale) —
+    // confirmed on-device: the lifted shadow looked noticeably harder/more
+    // opaque on mobile than desktop. Offset-only avoids touching the raster
+    // at all, so it stays exactly as soft as the resting shadow everywhere.
     const offsetMult = 1 + (STONE_LIFT_SHADOW_OFFSET_MULT - 1) * lift;
-    const sizeMult = 1 + (STONE_LIFT_SHADOW_SIZE_MULT - 1) * lift;
     const cx = g.x + g.r * 0.1 * boost * offsetMult, cy = g.y + g.r * 0.16 * boost * offsetMult;
     // clip to the ice rect (+goal pockets) so the shadow tucks under the wood
     // frame at wall contact instead of spilling over it, but keeps following
@@ -5919,7 +5925,7 @@ export function startGame(opts = {}) {
     // side the shadow actually pokes out past the stone — matching the bubble's
     // own compression there — and stays invisible on the opposite side.
     const shadowEntity = { x: cx, y: cy, r: g.r, squish: g.squish || 0, squishNX: g.squishNX, squishNY: g.squishNY };
-    const dw = sprite.logicalWidth * sizeMult, dh = sprite.logicalHeight * sizeMult;
+    const dw = sprite.logicalWidth, dh = sprite.logicalHeight;
     drawSquished(shadowEntity, () => {
       ctx.drawImage(sprite, cx - dw / 2, cy - dh / 2, dw, dh);
     });
@@ -6174,14 +6180,14 @@ export function startGame(opts = {}) {
   const STONE_VISUAL_SCALE = 0.90;
   // "Lifted" feedback for whichever stone is currently selected/dragged (see
   // isLifted above) — reads as the stone picked up off the ice, top-down:
-  // the stone itself grows a bit, and its contact shadow both grows AND
-  // pulls further from the stone (an offset shadow sells "elevated" much
-  // better than a same-spot shadow that's merely bigger/darker would).
+  // the stone itself grows a bit, and its contact shadow pulls further away
+  // (an offset shadow sells "elevated" much better than a same-spot shadow
+  // that's merely bigger/darker would — see drawContactShadow's own comment
+  // on why the shadow's draw SIZE deliberately isn't also scaled here).
   // g.liftT (0..1, eased toward isLifted(g) once per frame — see the main
-  // loop) drives all three multipliers below in lockstep.
+  // loop) drives both multipliers below in lockstep.
   const STONE_LIFT_SCALE = 0.15;               // +15% stone draw diameter at full lift
   const STONE_LIFT_SHADOW_OFFSET_MULT = 1.7;   // shadow offset distance at full lift
-  const STONE_LIFT_SHADOW_SIZE_MULT = 1.18;    // shadow sprite draw size at full lift
   const STONE_LIFT_EASE_RATE = 10;             // higher = snappier grow/shrink
   // A soft glass glint over the stone's hex window, in world space (not the
   // stone's own rotated local frame) — same reasoning as drawBallHighlight:
