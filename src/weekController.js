@@ -49,7 +49,19 @@ function resumeManchesFor(week) { return week.pointManches || null; }
 // instead of keeping the whole engine alive just to display a static board,
 // per the WEEK flow-simplification conversation (rink-as-background, not a
 // second live session).
-export function playSingleShot(week, engineOpts) {
+// onSessionStart(stopGame) (optional): handed the engine's own teardown
+// function the instant it exists — synchronously, before this promise ever
+// resolves. The engine is alive (rAF loop running, canvas.dataset.nbStarted
+// set) for the player's whole aim turn, including any time spent looking at
+// main.js's own "Play" card before tapping it — a window this promise does
+// NOT resolve during. Without this hook, nothing outside this closure has a
+// way to tear that down if the player quits mid-turn instead of committing
+// a shot (main.js's activeStopGame stayed null for WEEK the whole time,
+// which is the exact softlock this hook exists to close — see CLAUDE.md's
+// WEEK section / the architecture recon). main.js assigns activeStopGame
+// from this callback, the same variable every other mode's own startGame()
+// call already feeds directly.
+export function playSingleShot(week, engineOpts, onSessionStart) {
   return new Promise((resolve) => {
     const stopGame = startGame({
       ...engineOpts,
@@ -81,6 +93,7 @@ export function playSingleShot(week, engineOpts) {
         resolve({ stones, sweep, boardSnapshot });
       },
     });
+    onSessionStart?.(stopGame);
   });
 }
 
@@ -90,7 +103,11 @@ export function playSingleShot(week, engineOpts) {
 // manche has fully settled, including — if it scored — the player
 // dismissing the result panel. Tears the session down itself before
 // resolving, same as playSingleShot above.
-export function playReveal(week, engineOpts) {
+// onSessionStart(stopGame): see playSingleShot's own comment — same reason,
+// same contract. A reveal session is just as alive (and just as quittable
+// mid-flight, e.g. from the "Watch the reveal" card before it's tapped, or
+// while the manche is still playing out) as an aim session is.
+export function playReveal(week, engineOpts, onSessionStart) {
   const manche = revealToManche(week);
   return new Promise((resolve) => {
     const stopGame = startGame({
@@ -121,5 +138,6 @@ export function playReveal(week, engineOpts) {
         resolve({ ...result, manche, boardSnapshot });
       },
     });
+    onSessionStart?.(stopGame);
   });
 }
