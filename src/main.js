@@ -3024,12 +3024,21 @@ async function showWeekAimScreen(week, chained = false) {
   // their turn" the moment aiming actually becomes possible: immediately
   // for a chained continuation (no panel at all), or on the Play tap below.
   if (!showNotice) activeWeekAiming = week;
+  // activeStopGame, same variable every other mode's own startGame() call
+  // already feeds directly (see rockHandlers' own comment) — WEEK is the
+  // one mode that goes through weekController.js instead of calling
+  // startGame() itself, so it needs this one extra hop to reach the same
+  // variable. Assigned the instant the engine exists (weekController's own
+  // onSessionStart, fired synchronously, well before this promise settles)
+  // so a quit anywhere during this aim turn — including while the "Play"
+  // card above is still up, unanswered — actually tears the engine down
+  // instead of leaving it running (see CLAUDE.md's WEEK section).
   const shotPromise = playSingleShot(week, {
     ...rockHandlers, mobile: IS_MOBILE,
     identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
     onMatchReady: showNotice ? hideLoadingOverlay : hideWeekSpinner,
     weekEntryReady,
-  });
+  }, (stop) => { activeStopGame = stop; });
   if (showNotice) {
     showWeekBoardPanel(week.inboxMessage ? `
       <h2>${week.opponentAddress ? shortenAddressCompact(week.opponentAddress) : 'Your opponent'} left you a message</h2>
@@ -3176,12 +3185,14 @@ async function playWeekReveal(week, chained = false) {
   await preloadCoreAssets(IS_MOBILE);
   let resolveWeekEntry = null;
   const weekEntryReady = chained ? null : new Promise((res) => { resolveWeekEntry = res; });
+  // activeStopGame — see showWeekAimScreen's own comment on the identical
+  // assignment; same reasoning, same contract, for the reveal half of WEEK.
   const revealPromise = playReveal(week, {
     ...rockHandlers, mobile: IS_MOBILE,
     identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
     onMatchReady: chained ? hideWeekSpinner : hideLoadingOverlay,
     weekEntryReady,
-  });
+  }, (stop) => { activeStopGame = stop; });
   if (!chained) {
     showWeekBoardPanel(`<button class="bigbtn" id="weekEntryWatchBtn">Watch the reveal</button>`);
     document.getElementById('weekEntryWatchBtn').addEventListener('click', () => {
