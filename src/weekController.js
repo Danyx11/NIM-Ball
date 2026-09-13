@@ -17,9 +17,10 @@
 // reveal session — not their DOM/HTML. Rendering (the message/skip screen,
 // the waiting screen, etc.) stays in src/main.js, consistent with how every
 // other screen in this app is built (main.js owns 100% of the DOM outside
-// the canvas) — the functions below take a `startGame`/`preloadCoreAssets`-
-// shaped `engine` plus rendering options and resolve a plain result object,
-// they never touch the DOM themselves.
+// the canvas) — the functions below take the caller's engine options, import
+// startGame() directly, and resolve a plain result object; apart from the
+// canvas freeze-frame each one grabs on the way out (see boardSnapshot), they
+// never touch the DOM themselves.
 import { startGame } from './game.js';
 
 // Both teams' shots, in the engine's absolute A/B shape — week.reveal is

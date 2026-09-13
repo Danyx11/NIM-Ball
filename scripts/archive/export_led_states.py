@@ -1,4 +1,14 @@
-"""Reference export: the stone body (colori design) at each of its 5 possible
+"""ARCHIVED — kept for reference only, no longer part of any workflow.
+
+The identifiers this script says it mirrors (src/game.js's drawStoneLeds,
+LED_ANGLES, LED_ARC_HALF_SPAN, LED_ARC_INNER_FRAC/OUTER_FRAC, LED_LIT_RGB,
+LED_OFF_GRAY) no longer exist: the damage LEDs became pre-baked sprites
+(public/identicons/stone-*-leds*.webp, see game.js's LED_STATE_SRC), so
+there is nothing left for this to stay in sync with.
+
+--- original docstring below ---
+
+Reference export: the stone body (colori design) at each of its 5 possible
 LED states (0..4 quadrants knocked out), for both teams — flat colors, no
 glow (that pass is being done by hand in GIMP on these exports, see
 conversation). Not wired into the game; a design reference sheet only.

@@ -294,11 +294,16 @@ export async function decodePointsFromTicketImage(imgOrBlob) {
   return points;
 }
 
+// Revokes the object URL on both paths once the decode has settled — the
+// bitmap is already in memory by then, so the blob URL is dead weight the
+// browser would otherwise hold until the page unloaded (one leak per
+// uploaded ticket). Same pattern as src/identicons.js's own rasterize().
 function blobToImage(blob) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = (err) => { URL.revokeObjectURL(url); reject(err); };
+    img.src = url;
   });
 }

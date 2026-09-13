@@ -16,12 +16,6 @@ window.NIMIQ_IDENTICONS_SVG_PATH = identiconsSvgUrl;
 // address share one render instead of racing.
 const canvasCache = new Map();
 
-// Raw SVG markup for an address, viewBox 0 0 160 160 (@nimiq/identicons is a
-// fixed-size vector identicon, not a raster one).
-export function getIdenticonSvg(address) {
-  return Identicons.svg(address);
-}
-
 // Rasterized identicon at `size`x`size`, cached per address (size is fixed at
 // first request — this game only ever needs one size per address).
 export function getIdenticonCanvas(address, size = 512) {

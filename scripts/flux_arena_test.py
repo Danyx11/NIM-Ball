@@ -215,7 +215,10 @@ def run_contrast_test(num_images=3):
     save_result_images("contrast", result)
 
 
-TEMPERATURE_REF = ROOT / "public" / "bg" / "nature-pinede.webp"
+# Reads the design/ source, not a public/ copy: this is a dev-only helper and
+# public/bg/nature-pinede.webp was removed once the V2 arena art made the
+# #bg-nature layer dead (see src/background.js). PIL reads the PNG just fine.
+TEMPERATURE_REF = ROOT / "design" / "bg" / "nature-pinede.png"
 
 IDEATION_PROMPT = f"""{MASTER_PROMPT}
 

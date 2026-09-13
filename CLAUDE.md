@@ -23,7 +23,9 @@ Two players on separate machines on the same wifi can play a "Duel LAN" instead 
 
 **Simple path — one command, one link:** `npm run duel` (starts `server/duel-server.js`) runs the Vite dev server and the WebSocket arbiter in a single process on one port, and prints a link like `http://192.168.1.28:5173/?duel`. Send that link to player 2 and open it yourself too — the `?duel` query param (handled in `src/main.js`) skips the mode-select/address-entry screens entirely and auto-connects both sides straight to the arbiter, so nobody types an address.
 
-**Advanced path — two processes:** useful when iterating on code and you want the arbiter decoupled from the dev server. `npm run lan-server` (starts `server/lan-server.js`) prints its own LAN address, e.g. `ws://192.168.1.23:8787`; separately run `npm run dev -- --host` as usual, both players open the dev server URL, pick "Duel LAN" in the mode-select screen, and enter that printed `ws://` address (the address field defaults to the current page's own host, which is only correct for the simple path above — edit it for this flow).
+**Advanced path — two processes:** useful when iterating on code and you want the arbiter decoupled from the dev server. `npm run lan-server` (starts `server/lan-server.js`) prints its own LAN address, e.g. `ws://192.168.1.23:8787`; separately run `npm run dev -- --host` as usual.
+
+Note that there is **no "Duel LAN" tile in mode-select any more** — the whole mode is reachable only through the `?duel` magic link above. The manual address-entry screen (`showLanJoinScreen` in `main.js`) still exists but is now only reached as the retry screen when a `?duel` connection fails; that's where you'd paste the `ws://` address for this two-process flow (the field defaults to the current page's own host, which is only correct for the simple path).
 
 Both paths share the same arbiter logic (`server/arbiter.js`, mounted at the fixed `/duel-ws` path so it doesn't collide with Vite's own HMR websocket when sharing a port — `src/net.js`'s `connectLan()` appends that path automatically, so addresses are always typed/printed without it). The arbiter is a pure relay, not a physics authority: it assigns the first connection team A and the second team B, then relays each round's chosen shot vectors and, once both sides have submitted, broadcasts both to both clients (`{type:'launch', shotsA, shotsB}`). Each client then runs the exact same deterministic `physicsStep()` locally from those shots. No matchmaking, multiple concurrent games, or reconnection handling — single in-memory 2-player session, by design (this exists for local testing, not the public competitive mode).
 
@@ -66,13 +68,27 @@ curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://ni
 
 ## Architecture
 
-This is a 2-player physics game rendered on a single `<canvas>`, either same-device pass-and-play or networked over LAN (see "LAN mode" above). Almost all logic lives in one file, `src/game.js` (~1200 lines), structured as one big `startGame()` closure with no external state/rendering libraries — it's plain Canvas2D + `requestAnimationFrame`. `src/main.js` bootstraps the animated background (`initBackground()`), drives the mode-select/LAN-lobby flow, calls `startGame()` (plain for local mode, or `startGame({ net, myTeam })` once a LAN opponent is connected), and separately fires off the optional Nimiq Pay handshake; `src/net.js` is the WebSocket client wrapper for LAN mode (talks to `server/lan-server.js`); `src/nimiq.js` is a thin, non-blocking wrapper around `@nimiq/mini-app-sdk`; `src/audio.js` is a WebAudio SFX/ambience manager; `src/identicons.js` wraps `@nimiq/identicons`.
+This is a 2-player physics game rendered on a single `<canvas>`, playable locally (Pass & Play, vs AI) or against a remote opponent (LIVE, WEEK — see "Production remote backend" below; Duel LAN is a dev-only extra, see "LAN mode"). Almost all gameplay logic lives in one file, `src/game.js` (~7,500 lines), structured as one big `startGame()` closure with no external state/rendering libraries — it's plain Canvas2D + `requestAnimationFrame`.
 
-The canvas itself is a fixed-size "board" (`#stage-wrap`, CSS-sized to fit within the viewport on both axes, see `min(92vw, 92vh * 1200/905, 1100px)` in `style.css`) floating over a full-viewport animated starfield background — not edge-to-edge like the original V1 layout. That background (`#bg-stage` in `index.html`, wired up by `src/background.js`) is a separate DOM/CSS layer behind the canvas, not drawn on it: 4 mirrored constellation images cross-fade on a 160s loop with CSS-keyframed twinkle/pulse-dot overlays, ported from `design-lab/design_handoff_scintillement_constellation/`. Keeping it off the Canvas2D render loop avoids repainting large images every frame for a purely decorative effect.
+`src/main.js` (~3,400 lines) owns essentially all DOM outside the canvas: the home/splash screen, the mode-select tree, the Classic/Custom settings screens, the LIVE and WEEK lobbies and panels, the identity pill, and the How To hub. It calls `startGame()` once a mode is picked, and separately fires off the optional Nimiq Pay handshake. `src/game.js` is meant to stay canvas-and-rules; the two exceptions that still build DOM inside the closure are the replay playback bar and the goal/victory result panels.
+
+Supporting modules: `src/net.js` (WebSocket/fetch client for Duel LAN, LIVE and WEEK), `src/weekController.js` (WEEK orchestration on top of `startGame()`'s generic hooks), `src/ai.js` (vs-AI shot picking), `src/matchConfig.js` (Classic preset + Custom rules), `src/recorder.js` / `src/replay.js` / `src/ticket.js` (the replay + shareable-ticket chain), `src/howto.js` (tutorial step lists), `src/audio.js` (WebAudio SFX/ambience), `src/identicons.js` (`@nimiq/identicons`), `src/nimiq.js` (`@nimiq/mini-app-sdk` + Nimiq Hub wallet identity), `src/nimconnect.js` (NimConnect @handle read/claim), `src/background.js`, `src/colors.js`, `src/settings.js`, `src/preload.js`.
+
+### Vibes (hockey / curling)
+
+"Vibe" is the top level of the mode-select tree and is **not** the same axis as mode: `hockey` (NimiCurl — there's a ball, you score in a goal) and `curling` (Pure Curling — no ball, closest stone to center after `curlingCycles` manches wins the point). It is passed into `startGame({ vibe })`, relayed to the other player by both remote backends, and branches about a dozen places in `game.js` (arena art, score digits, stone HP, the timer widget, ball rendering, scoring). Both vibes can be played with either the Classic preset or Custom rules.
+
+### Layout
+
+The canvas is a fixed-size "board" (`#stage-wrap`) inside `#game-card`, sized off `--card-w` / `--stable-vh` in `style.css` rather than a fixed aspect ratio in CSS. `main.js` detaches `#stage-wrap` (plus `#overlay`, `#modeOverlay`, `#replayUploadOverlay`, `#replayBar`, `#syncToast`) out from under `#scene`'s transform-scaled subtree at startup — see the long comment at that detachment block for why. Desktop additionally hosts the menu screens in `#menuStage`.
+
+`src/background.js` only wires the logo and the home/mode-select backdrops (including the per-vibe swap). The animated constellation starfield that used to sit behind the board (`#bg-stage`) and the `#bg-nature`/`#fg-ombres` parallax layers are **both gone** — the V2 arena art occludes them, so they were unwired and their images removed from `public/`. The `#fg-stage` DOM and its CSS are deliberately left in place (`display:none`) in case a future skin goes back to a small inset board; source layers live in `design/bg/`.
 
 ### Turn/phase state machine
 
-A single `phase` variable drives everything (input handling, rendering, physics): `start → aimA → aimB → pending → sim → goal → gameover`. Team A drags & releases its 3 "stones" to set pending velocities, then team B does the same, then a fixed `PRE_SIM_DELAY` beat, then `sim` runs `physicsStep()` every frame until everything settles, resolving into a goal/round-end or back to `aimA`. Goals and wipeouts (all 3 stones of one team fallen into the goal) both score.
+A single `phase` variable drives everything (input handling, rendering, physics). The local baseline is `start → matchIntro → aimA → aimB → pending → sim → straighten → goal → roundReset → gameover`. Team A drags & releases its stones (3 by default, `matchConfig.stonesPerTeam`) to set pending velocities, then team B does the same, then a fixed `PRE_SIM_DELAY` beat, then `sim` runs `physicsStep()` every frame until everything settles, resolving into a goal/round-end or back to `aimA`. Goals and wipeouts (all of one team's stones fallen into the goal) both score.
+
+The full phase set is 16 values; besides those above, `lanAim` / `lanWait` (LIVE and WEEK, see below), `handoffA` / `handoffB` / `handoffWatch` (Pass & Play), `mancheRollback` (LIVE desync recovery) and `replayAim` (replay playback).
 
 LAN mode swaps in two more phases instead of the `aimA`/`aimB` pair: `lanAim` (both clients sit here at once — a client only ever reads/drags `entities[myTeam]`, see `currentTeamStones`/`isAimingPhase` in `game.js`) and `lanWait` (local shot already sent, waiting on `net.onLaunch`, which fires once the arbiter has both sides' shots and applies both teams' velocities before dropping into `pending → sim` exactly like the local flow). `firstAimPhase()` picks which pair a fresh round starts in, based on whether `net` was passed to `startGame()`.
 
@@ -86,9 +102,13 @@ Squash-and-stretch deformation (`triggerSquish`/`drawSquished`) and contact shad
 
 ### Coordinate system tied to the artwork
 
-The playing field bounds (`FX0/FY0/FX1/FY1`, goal mouth `GY0/GY1`) are pixel coordinates hand-measured against the illustrated arena background (`public/arena/frame.webp`, 1200x905, 1:1 with the canvas's logical size). The center line, hexagon, goal-crease lines, wood frame, goal posts, and the wood scoreboard plaque are all baked directly into that one image — not drawn at runtime — so moving the physics bounds means re-checking alignment against the art, not just adjusting numbers. Same pattern for the score digit/icon positions and the PLAY button's pixel bounds (`SCORE_SLOT_*`, `PLAY_CAP_*`), which are positioned against fixed pixel coordinates measured relative to that same 1200x905 space.
+The canvas's logical coordinate space is **3312x1896** (`W`/`H` in `game.js`), 1:1 with the V2 arena art (`public/arena/frame.webp`, also 3312x1896 — the fal.ai upscale, see `ART_V2_SCALE`). The playing field bounds (`FX0 = 1086, FY0 = 626, FX1 = 2262, FY1 = 1274`, goal mouth `GY0/GY1`) are pixel coordinates hand-measured against that image. The center line, hexagon, goal-crease lines, wood frame, goal posts, the HUD "rocks" and the wood scoreboard plaque are all baked directly into it — not drawn at runtime — so moving the physics bounds means re-checking alignment against the art, not just adjusting numbers. The same applies to the under-ice score digits, the hex/circle timer ring, and the six `ROCK_GLOW` overlay rects, all measured against that same 3312x1896 space.
 
-`frame.webp` itself is generated, not hand-painted as one flat image: `scripts/bake_arena.py` composites it from `design/arena/xcf-*.png` — flattened layer exports pulled straight out of the validated `design-lab/nimball-designlab-current.xcf` session file (via the `gimpformats` PyPI package, since neither Pillow nor GIMP itself reads `.xcf`) — placed with one uniform scale + origin shift onto the fixed `FX0..FY1` physics rect. Composite the layers in GIMP first and re-export any that changed to `design/arena/xcf-*.png` (see the script's docstring for which named layers/groups to pull and their `.xcf`-space offsets), then re-run `python3 scripts/bake_arena.py` (needs Pillow, `pip install pillow`). An earlier version of this script instead hand-reconstructed the ice crop/alignment/tail-shadow math from individual pre-blend assets — it drifted from what was actually validated in the lab (stale corner cropping, a stale pre-goal-notch tail-shadow source); compositing the lab's own already-correct flattened layers avoids re-deriving that math at all.
+Mobile loads `frame-mobile.webp`, a pre-crop of the same pixels to the `MOBILE_CROP` sub-rect the phone actually shows, so it downloads/decodes far less image for art that would be cropped away anyway. There are four desktop frames in total — `frame.webp`, `frame-winter.webp`, `frame-curling.webp`, `frame-curling-winter.webp` — one per vibe x season, each with a `-mobile` twin. Only one is ever loaded per match (`game.js` picks by `vibe` + `matchConfig.skin`).
+
+**Regenerating the arena:** the current frames come from the V2 pipeline — the upscaled base art in `design/arena/` composited by `scripts/bake_curling_arena.py` (curling) and the equivalent V2 steps for hockey. The downstream scripts `bake_mobile_frame.py`, `bake_hex_timer.py`, `bake_score_digits.py`, `bake_handoff_mask.py`, `bake_waiting_label.py` and `bake_chat_rock.py` all read `public/arena/frame.webp` as their input, so they must be re-run after the frame changes.
+
+> **Do not run `scripts/archive/bake_arena.py`.** That is the V1 pipeline: it writes a 1200x905 `frame.webp` and would silently replace the production 3312x1896 art, invalidating every pixel bound above and poisoning all six downstream scripts. It has been moved to `scripts/archive/` and hard-guarded (it refuses to write unless the existing frame is already 1200x905, with no override flag). It is also no longer reproducible — its source layers came from the gitignored `design-lab/`.
 
 ### Sprite baking pipeline
 
@@ -109,48 +129,82 @@ Playback itself is `startGame({ replayPoints })`: `beginAimPhase()` branches to 
 ## Project structure
 
 ```
-index.html        Vite entry (game markup: bg-stage + canvas + mode-select/start/ready overlays)
-scripts/
-  bake_arena.py   Python/Pillow build script: composites design/arena/ source layers
-                  into public/arena/frame.webp (see Coordinate system section above)
-server/
-  duel-server.js    one-command LAN flow: Vite dev middleware + the arbiter on one port,
-                    run via `npm run duel` (see "LAN mode" above)
-  lan-server.js     standalone arbiter for the advanced two-process flow, run via
-                    `npm run lan-server` — neither server file is part of the browser build
+index.html        Vite entry: inline branded loading overlay + canvas + every
+                  menu/match overlay's markup
+scripts/          Python/Pillow asset-baking helpers — run by hand, never part of
+                  `npm run build`. See "Coordinate system" above for the arena chain.
+  bake_curling_arena.py  builds the 4 curling arena frames + curling score digits
+  bake_mobile_frame.py   crops frame.webp to the mobile sub-rect
+  bake_hex_timer.py      hex turn-timer ring, baked off the arena art
+  bake_score_digits.py   under-ice score digits (hockey)
+  bake_handoff_mask.py   Pass & Play hand-off ice mask
+  bake_waiting_label.py  under-ice "waiting" label
+  bake_chat_rock.py      the 6th HUD rock + unread badge
+  bake_stones.py         stone body sprites
+  bake_hud_field_lines.py, crop_score_digits.py, make_*_icon.py
+  flux_*.py, upscale_*.py  one-off fal.ai generation/upscale helpers (need FAL_KEY)
+  archive/        superseded scripts kept for reference only — NOT part of any
+                  workflow. bake_arena.py (V1 1200x905 arena bake, hard-guarded so
+                  it can't clobber the V2 art) and export_led_states.py.
+server/           Duel LAN only (dev). Node-only, never in the browser build.
+  duel-server.js    one-command LAN flow: Vite dev middleware + arbiter on one port
+  lan-server.js     standalone arbiter for the two-process flow
   arbiter.js        WebSocket arbiter logic shared by both servers above
-  lan-addresses.js  small os.networkInterfaces() helper shared by both servers
+  lan-addresses.js  small os.networkInterfaces() helper
+party/            Cloudflare Worker + Durable Objects (LIVE, WEEK, Radar) — see
+                  "Production remote backend" above
 src/
-  main.js         bootstraps the animated background + game, drives mode-select/LAN-lobby
-                  flow (including the `?duel` magic-link auto-connect), + Nimiq Mini App
-                  SDK connection
-  background.js   wires the animated constellation background + logo to their asset URLs
-  game.js         canvas game: physics, rendering, input, turn flow (see Architecture above)
-  net.js          WebSocket client wrapper for LAN mode, talks to server/arbiter.js
+  main.js         all DOM outside the canvas: splash, mode-select tree, Classic/Custom
+                  settings, LIVE + WEEK lobbies/panels, identity pill, How To hub,
+                  the ?duel / ?replay magic links, + the Nimiq Mini App SDK handshake
+  game.js         canvas game: physics, rendering, input, turn flow (see Architecture)
+  weekController.js  WEEK orchestration on top of startGame()'s generic hooks
+  net.js          client for all three backends: Duel LAN + LIVE (WebSocket relay)
+                  and WEEK (one-shot request/reply sockets + PlayerIndex fetches)
+  ai.js           vs-AI shot picking (hockey only)
+  matchConfig.js  Classic preset, Custom rules, per-mode localStorage persistence
+  howto.js        How To tutorial step lists (separate mobile/desktop orders)
+  recorder.js     records manche/point shot data during a live match (see Replay)
+  replay.js       replay point encode/decode, ticket QR layout, ?replay= parsing
+  ticket.js       renders the shareable end-of-match Polaroid "ticket" image
   audio.js        WebAudio SFX + background ambience loop manager
   identicons.js   thin wrapper around @nimiq/identicons
-  nimiq.js        thin wrapper around @nimiq/mini-app-sdk
-  ticket.js       renders the shareable end-of-match "ticket" image (see showVictory in game.js)
-  recorder.js     records manche/point shot data during a live match (see Replay section above)
-  replay.js       replay point encode/decode, ticket QR layout, ?replay= link/image parsing
-  style.css       game styles + the ported constellation background animation
-public/           only assets actually loaded by the game (kept lean — this ships)
-  identicons/     team bubble avatar art, baked into bubble sprites at load
-  arena/          illustrated arena background (frame.webp, generated — see scripts/bake_arena.py)
-                  + PLAY button cap sprite
-  bg/             animated constellation background images + logo (see src/background.js)
-  ball/           ball sprite
-  ticket/         static hero-band art baked into every ticket (see src/ticket.js)
-  sfx/            SFX clips + background ambience loop (see src/audio.js)
+  nimiq.js        Nimiq Pay Mini App SDK + Nimiq Hub wallet identity / guest mode
+  nimconnect.js   NimConnect @handle lookup + claim (?fakeHandles for UI testing)
+  background.js   wires the logo + home/mode-select backdrops (incl. per-vibe swap)
+  colors.js       the 7 colors shared by style.css's :root and ticket.js's canvas
+  settings.js     shared prefs that outlive a match instance (basic-laser flag)
+  preload.js      shared image-preload helper
+  style.css       all game + menu styles
+public/           only assets actually loaded by the game (kept lean — this ships,
+                  verbatim: Vite copies public/ as-is, so .gitignore does NOT keep
+                  a file out of the build)
+  arena/          4 arena frames + their -mobile crops, + PLAY button cap sprite
+  identicons/     stone body art per damage-LED state + the light-layer decal
+  home/           splash + mode-select backdrops (default, nimicurl, curling)
+  bg/             logo wordmarks (see src/background.js)
+  ball/           ball sprite (hockey only)
+  rocks/          HUD rock glow sprites (flou/light pairs) + chat badge
+  ui/             toolbar button art (base + pressed cap) + mobile controller body
+  score-digits/   under-ice score digits, hockey + curling variants
+  hex-timer/      turn-timer ring art
+  handoff/        Pass & Play hand-off ice mask
+  waiting-label/  under-ice "waiting" label + animated dots
+  rules/          How To rules illustrations, one per vibe
+  ticket/         Polaroid ticket template + banner + guest hex icons
+  sfx/            SFX clips (.m4a) + background ambience loop (see src/audio.js)
+  icons/, favicon.png, apple-touch-icon.png, manifest.json, sw.js   PWA shell
 design/           source art not wired into the game (drafts, superseded versions,
-                  raw generations) — never imported by code, safe to ignore for gameplay work.
-                  design/arena, design/identicons and design/bg hold the specific source
-                  layers scripts/bake_arena.py and the public/ assets above were built from.
-design-lab/       local-only Vite sandbox (gitignored) for testing new visual layers against
-                  real assets before they're baked/ported into design/ + public/ + src/ — see
-                  the lab-to-main workflow below
-physics-lab/      local-only sandbox (gitignored) for prototyping physics tuning before
-                  porting fixes into src/game.js
+                  raw generations) — never imported by code, safe to ignore for
+                  gameplay work. design/arena, design/identicons and design/bg hold
+                  the specific source layers public/ was built from.
+design-lab/       local-only Vite sandbox (gitignored) for testing new visual layers
+                  against real assets before they're baked/ported into design/ +
+                  public/ + src/ — see the lab-to-main workflow below
+physics-lab/      local-only sandbox (gitignored) for prototyping physics tuning
+curling-lab/      local-only sandbox (gitignored) for the curling vibe's art
+audio-lab/        local-only sandbox (gitignored) for SFX work; audio-lab/rejects/
+                  holds the non-shipped takes that used to sit in public/sfx/
 prototypes/       earlier single-file HTML explorations kept for reference/diffing;
                   none are part of the build (see prototypes/README.md)
 ```
@@ -160,7 +214,7 @@ prototypes/       earlier single-file HTML explorations kept for reference/diffi
 `design-lab/` and `physics-lab/` are local scratch space (gitignored, never pushed) for trying out visual/physics changes against real assets without touching the shipped game. Migrate one validated piece at a time, not a wholesale copy:
 
 1. Prototype and validate the change in the lab.
-2. Port only the specific proven piece into `src/` — physics fixes go straight into `game.js`'s constants/functions (see the physics-lab-ported comments already in `physicsStep`/`resolveCollision` for the pattern); visual layers get their winning source art copied into `design/` (so it survives even if the lab folder is cleared) and either baked into `public/arena/frame.webp` via `scripts/bake_arena.py` (static, physics-box-aligned art) or wired up as their own asset + code path (animated/interactive pieces, like the constellation background or bubble sprites).
+2. Port only the specific proven piece into `src/` — physics fixes go straight into `game.js`'s constants/functions (see the physics-lab-ported comments already in `physicsStep`/`resolveCollision` for the pattern); visual layers get their winning source art copied into `design/` (so it survives even if the lab folder is cleared) and either baked into the arena frames via the V2 bake scripts (static, physics-box-aligned art — see "Coordinate system" above, and **not** the archived `bake_arena.py`) or wired up as their own asset + code path (animated/interactive pieces, like the stone sprites).
 3. Verify in the browser (dev server), then commit the migration on its own, separate from unrelated changes.
 
 ## Dev-only debug hook

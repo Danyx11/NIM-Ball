@@ -2176,7 +2176,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    .config-back's own base color:#fff would otherwise go unreadable on gold. */
 #vibeSubOverlay.mode-curling #modeMatch .config-back { color: var(--bg-deep); }
 /* Per-tile line-art icon, one per mode (players-at-console, linked devices,
-   robot-on-curling-stone, replay document) — ported from "Modes tuiles
+   robot-on-curling-stone, replay document) — ported from design/"Modes tuiles
    design ref.png"'s outlined icon set, redrawn as inline stroke SVGs so
    they recolor with the tile's white text instead of shipping as raster
    assets. Fixed height (not cqw-scaled, same convention as .tag/.sub's
@@ -2688,7 +2688,6 @@ button:disabled { opacity: 0.35; cursor: default; }
 #weekBoardPanelBox.mode-curling h2 { color: var(--bg-deep); }
 #weekBoardPanelBox.mode-curling p { color: rgba(11, 31, 42, 0.75); }
 #weekBoardPanelBox.mode-curling .week-quote { background: rgba(11, 31, 42, 0.12); color: var(--bg-deep); }
-#weekBoardPanelBox.mode-curling .week-sent-note { color: rgba(11, 31, 42, 0.6); }
 /* Translucent-white .bigbtn (base rule below) reads poorly on this light
    gold tint — same dark-ink swap every other translucent-white button on a
    gold/light backdrop already gets in this app. */
@@ -2717,7 +2716,6 @@ button:disabled { opacity: 0.35; cursor: default; }
   border: none; font-size: 14px; color: var(--bg-deep); background: #fff;
 }
 #weekBoardPanelBox input[type="text"]::placeholder { color: rgba(31,35,72,0.5); }
-#weekBoardPanelBox .week-sent-note { margin: 0; font-size: 12px; color: rgba(255,255,255,0.55); }
 /* #weekBoardPanelBg (index.html's own comment) lives inside #stage-wrap, not
    under #weekBoardPanel — sized/positioned exactly like the canvas it sits
    above (see canvas's own z-index:1 rule further up), just later in source
@@ -2961,7 +2959,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    scene) and land somewhere noticeably smaller than what was validated. */
 
   /* 130% (was 108%, validated at .scene scale 1.25): object-fit:contain fits
-     nature-pinede.webp by height, so its own top/bottom picture edges sit
+     the nature-pinede art by height, so its own top/bottom picture edges sit
      right at this box's top/bottom — at 108% those edges landed just
      inside the card's fixed bounds instead of bleeding past them, showing
      up as a visible seam where the picture stops and the card's plain

@@ -9,8 +9,6 @@
     "preview": "vite preview",
     "duel": "node server/duel-server.js",
     "lan-server": "node server/lan-server.js",
-    "party:dev": "partykit dev",
-    "party:deploy": "partykit deploy",
     "wrangler:dev": "wrangler dev --port 1999",
     "wrangler:deploy": "wrangler deploy"
   },
@@ -27,7 +25,6 @@
     "ws": "^8.21.1"
   },
   "devDependencies": {
-    "partykit": "^0.0.115",
     "vite": "^8.1.0",
     "wrangler": "^4.123.0"
   },
