@@ -3285,7 +3285,35 @@ export function startGame(opts = {}) {
   // or double-count a stat. g.dead/deadMix (real physics state, needed for
   // the checksum) are set either way.
   function killStoneOnBar(g, bar, silent = false) {
-    if (g.dead) return;
+    // Repeat contact from an ALREADY-dead stone still has to behave like a
+    // wall. A dead stone keeps its velocity and stays in the physics list
+    // until the WHOLE manche settles (see the deadPending block in
+    // physicsStep), so it very commonly reaches a bar with g.dead already
+    // set — knocked out mid-ice by its 4th hit (registerStoneHit) and still
+    // gliding into the goal mouth, or bounced off this very bar a tick ago
+    // and shoved back into it by another stone. This used to `return` right
+    // here, which silently dropped the ENTIRE wall response for that tick:
+    // no reflection, no depenetration, and — because physicsStep's caller
+    // sets barHit purely from collideBar() and then `continue`s — no
+    // flat-wall, corner, goal-side or recess check either. The stone
+    // therefore kept its full velocity while overlapping the bar, hit this
+    // same empty branch again every following tick, and slid clean through
+    // the bar and out past the playfield, caught only by the deliberately
+    // generous SAFE_X0..SAFE_Y1 backstop far outside the rink — which is
+    // exactly the "dead stones overlap the bar / leave the field" report.
+    // Live stones never showed it because their first bar contact both
+    // reflects AND kills, so only a dead stone could ever re-enter here.
+    // Reflecting instead closes that escape while leaving everything that is
+    // strictly one-shot-per-death (the dead flag, stonesDestroyed,
+    // the stoneFall cue, stoneBarFlash) to the first-contact path below.
+    // The wall-hit SFX is deliberately NOT forced silent on this path:
+    // playWallHit is already double-gated — MIN_AUDIBLE_IMPACT drops the
+    // near-zero |v·n| of a stone merely resting/pinned against the bar, and
+    // the 'impact' audio group collapses anything inside IMPACT_DEDUPE_MS
+    // into a single voice — so a sustained contact can't spam it, and a dead
+    // stone already sounds its normal impacts elsewhere (resolveCollision
+    // skips only the damage tally for it, never the hit itself).
+    if (g.dead) { reflectOffBar(g, bar, silent); return; }
     g.dead = true; g.deadMix = 1;
     if (!silent) stonesDestroyed++;
     reflectOffBar(g, bar, silent);
