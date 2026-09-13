@@ -2154,6 +2154,18 @@ navHowTo.addEventListener('click', () => {
   else hideHowToScreen();
 });
 
+// "Find a player" (sidebar) / "Telegram" (inside Info) — same external
+// destination, the NimiCurl Telegram channel (see conversation), just two
+// different entry points/framings. Plain external link, opened in a new tab
+// rather than navigating this one away from a live match.
+const NIMICURL_TELEGRAM_URL = 'https://t.me/Nimicurl';
+function openNimicurlTelegram() {
+  audio.play('button');
+  window.open(NIMICURL_TELEGRAM_URL, '_blank', 'noopener,noreferrer');
+}
+document.getElementById('navFindPlayer').addEventListener('click', openNimicurlTelegram);
+document.getElementById('navTelegram').addEventListener('click', openNimicurlTelegram);
+
 // "How to play" pill — the actual interactive tutorial (see game.js's howTo
 // mode), same self-contained single-stone flow and same mobile-only gate it
 // always had (its spotlight geometry assumes #mobileController/the mobile
