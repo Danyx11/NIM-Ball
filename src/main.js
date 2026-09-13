@@ -2136,12 +2136,19 @@ function hideHowToScreen() {
   returnToModeSelect();
 }
 htBackBtn.addEventListener('click', hideHowToScreen);
-// Help button (see conversation) — the sole entry point now (the sidebar's
-// own "How to" nav item is gone, this button was judged enough on its own).
-// Same toggle-on-reclick shape #navHowTo used to have, just moved directly
-// onto this button instead of proxying through a click() on the removed one.
+// Help button — same toggle-on-reclick shape as every other About/Nimiq/
+// League-style nav entry in this file.
 const helpBtn = document.getElementById('helpBtn');
 helpBtn.addEventListener('click', () => {
+  if (activeStopGame) return;
+  if (howToHubOverlay.classList.contains('hidden')) showHowToScreen();
+  else hideHowToScreen();
+});
+// Sidebar's own "How to play" nav entry (see index.html — back under Home,
+// per explicit request) — deliberately a second way into the exact same hub
+// as #helpBtn above, not a separate destination; same guard/toggle shape.
+const navHowTo = document.getElementById('navHowTo');
+navHowTo.addEventListener('click', () => {
   if (activeStopGame) return;
   if (howToHubOverlay.classList.contains('hidden')) showHowToScreen();
   else hideHowToScreen();
