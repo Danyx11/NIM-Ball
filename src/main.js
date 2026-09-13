@@ -2978,8 +2978,17 @@ function shareWeekMatch(week, message, btn) {
 //     entry/reconnect (chained=false, i.e. reached via enterWeekMatch) —
 //     PLAY shows exactly once per player per NEW point on THAT path, never
 //     again on a later reconnect mid-point.
-async function showWeekAimScreen(week, chained = false) {
-  const showNotice = !chained && !week.enteredPoint;
+// liveSession (Stage 2 of the WEEK persistent-session migration, see
+// src/weekController.js's playReveal): the still-alive engine a reveal just
+// finished on, handed straight over instead of being torn down so this turn
+// can be aimed on the board that's already there. When set, this function
+// skips its own playSingleShot()/startGame() entirely — everything from the
+// shot's commit onwards (send it, then either chain into the next reveal or
+// show the waiting screen) is the exact same code either way. Always a
+// same-sitting continuation, so it forces showNotice off the same way
+// chained already does.
+async function showWeekAimScreen(week, chained = false, liveSession = null) {
+  const showNotice = !chained && !liveSession && !week.enteredPoint;
   hideNetPanel();
   // Same bug/fix as showLobby()'s own modeOverlay.classList.add('hidden')
   // (see that function's own comment) — #modeOverlay's arena-illustration
@@ -3033,12 +3042,26 @@ async function showWeekAimScreen(week, chained = false) {
   // so a quit anywhere during this aim turn — including while the "Play"
   // card above is still up, unanswered — actually tears the engine down
   // instead of leaving it running (see CLAUDE.md's WEEK section).
-  const shotPromise = playSingleShot(week, {
-    ...rockHandlers, mobile: IS_MOBILE,
-    identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
-    onMatchReady: showNotice ? hideLoadingOverlay : hideWeekSpinner,
-    weekEntryReady,
-  }, (stop) => { activeStopGame = stop; });
+  let shotPromise;
+  if (liveSession) {
+    // Re-established rather than assigned fresh: playWeekReveal's own
+    // hideMatchChrome() nulls activeStopGame on its way here, which was
+    // correct while that also meant the engine had just been torn down —
+    // it hasn't anymore (Stage 2), so the handle has to come straight back.
+    activeStopGame = liveSession.stopGame;
+    // No onMatchReady to hand the wait indicator to (no new session is
+    // starting, so nothing fires it) — this is the moment the spinner
+    // playWeekReveal put up over the settled board has served its purpose.
+    hideWeekSpinner();
+    shotPromise = liveSession.aimNextShot();
+  } else {
+    shotPromise = playSingleShot(week, {
+      ...rockHandlers, mobile: IS_MOBILE,
+      identiconAddress: identiconOverride(week.team), identiconLabel: identityLabelOverride(week.team),
+      onMatchReady: showNotice ? hideLoadingOverlay : hideWeekSpinner,
+      weekEntryReady,
+    }, (stop) => { activeStopGame = stop; });
+  }
   if (showNotice) {
     showWeekBoardPanel(week.inboxMessage ? `
       <h2>${week.opponentAddress ? shortenAddressCompact(week.opponentAddress) : 'Your opponent'} left you a message</h2>
@@ -3052,6 +3075,7 @@ async function showWeekAimScreen(week, chained = false) {
     });
   }
   const { stones, sweep, boardSnapshot } = await shotPromise;
+  if (liveSession) liveSession.stopGame();
   pendingWeekCancel = null; // shot committed — no longer cancellable-on-exit
   activeWeekAiming = null; // shot committed — no longer an unfinished turn to confirm-quit over
   hideMatchChrome();
@@ -3215,6 +3239,12 @@ async function playWeekReveal(week, chained = false) {
     // server is the authoritative source for the match's real running
     // score/completion now (see this call's own comment above).
     if (snapshot.status === 'completed') {
+      // Stage 2: the engine is still alive at this point (it used to tear
+      // itself down the moment the reveal settled), and nothing downstream
+      // of here would ever stop it — returnToModeSelect()'s own
+      // hideMatchChrome() only nulls activeStopGame, it never calls it. So
+      // this branch has to end the session itself.
+      result.session.stopGame();
       hideWeekSpinner();
       week.close();
       showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${snapshot.scoreA} · Team Yellow ${snapshot.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
@@ -3228,8 +3258,15 @@ async function playWeekReveal(week, chained = false) {
     // regardless of enteredPoint (see showWeekAimScreen's own comment) —
     // it also means this always inherits the spinner (still up) rather
     // than showing its own black overlay, same call either way.
-    showWeekAimScreen(mergeWeek(week, snapshot), true);
+    // Stage 2: and it now also inherits the still-live engine itself (see
+    // showWeekAimScreen's own liveSession comment) — the reveal that just
+    // played out IS the board this next turn aims on, no teardown, no
+    // rebuild, no fastForwardManche in between.
+    showWeekAimScreen(mergeWeek(week, snapshot), true, result.session);
   } catch (err) {
+    // Same reasoning as the 'completed' branch above — this path abandons
+    // the session, so it has to end it rather than leave it running.
+    result.session.stopGame();
     hideWeekSpinner();
     week.close();
     showWeekErrorScreen(err.message);

@@ -101,8 +101,16 @@ export function playSingleShot(week, engineOpts, onSessionStart) {
 // them out with completely normal pacing/physics/rendering (reusing
 // launchSimulation() exactly as the AI branch does) and resolves once the
 // manche has fully settled, including — if it scored — the player
-// dismissing the result panel. Tears the session down itself before
-// resolving, same as playSingleShot above.
+// dismissing the result panel.
+//
+// Stage 2 of the WEEK persistent-session migration: unlike playSingleShot
+// above, this no longer tears its own session down on the way out. The
+// engine stays alive, parked on the settled board, and the resolved result
+// carries a `session` handle the caller uses to decide what happens to it:
+// either carry it straight into the next aim turn (session.aimNextShot) or
+// end it (session.stopGame, for a completed match or an error). This is the
+// one boundary Stage 2 covers — the "I submitted, now I wait" pause is
+// still a full teardown/rebuild (that's Stage 4).
 // onSessionStart(stopGame): see playSingleShot's own comment — same reason,
 // same contract. A reveal session is just as alive (and just as quittable
 // mid-flight, e.g. from the "Watch the reveal" card before it's tapped, or
@@ -110,9 +118,22 @@ export function playSingleShot(week, engineOpts, onSessionStart) {
 export function playReveal(week, engineOpts, onSessionStart) {
   const manche = revealToManche(week);
   return new Promise((resolve) => {
+    // Set only while session.aimNextShot() below is waiting on the next
+    // turn's commit — see onShotCommitted.
+    let resolveShot = null;
     const stopGame = startGame({
       ...engineOpts,
       externalManche: manche,
+      // Stage 2: this session outlives the reveal, so it has to be a full
+      // WEEK session from the start rather than a reveal-only one.
+      // singleShotTeam is what makes beginAimPhase() route the turn that
+      // follows into 'lanAim' — without it, that same call lands in the
+      // Pass & Play hand-off mask instead (see its own
+      // `!net && !aiTeam && !singleShotTeam` branch) — and what makes
+      // onValidate() accept that turn's PLAY at all. Completely inert while
+      // the reveal itself plays out: aimingTeam()/sweepViewTeam() both gate
+      // on phase, which is never an aiming one before resumeAim() runs.
+      singleShotTeam: week.team,
       resumeManches: resumeManchesFor(week),
       // No weekPointStart here — a reveal never shows the match-intro
       // huddle/sting, regardless of team, score, or whether this happens to
@@ -132,10 +153,39 @@ export function playReveal(week, engineOpts, onSessionStart) {
       // as the background behind its lightweight spinner while completeRound
       // round-trips and, if the match continues, the next aim session warms
       // up, instead of a full black cut).
-      onMancheSettled: (result) => {
+      // The next turn's own commit, played on this same session — resolves
+      // session.aimNextShot() below with exactly the shape playSingleShot
+      // resolves with, so the caller's post-commit path is shared verbatim.
+      onShotCommitted: (stones, sweep) => {
         const boardSnapshot = document.getElementById('stage').toDataURL();
-        stopGame();
-        resolve({ ...result, manche, boardSnapshot });
+        const done = resolveShot;
+        resolveShot = null;
+        done?.({ stones, sweep, boardSnapshot });
+      },
+      // `resumeAim` is the engine's Stage 2 continuation (see game.js's own
+      // resumeAim) — consumed here rather than forwarded, so main.js only
+      // ever sees the `session` handle below, not the engine's internals.
+      onMancheSettled: ({ resumeAim, ...result }) => {
+        const boardSnapshot = document.getElementById('stage').toDataURL();
+        // No stopGame() here anymore — see this function's own header
+        // comment. The engine is parked on the settled board (game.js's
+        // 'mancheHold' phase) until the caller picks one of the two below.
+        resolve({
+          ...result,
+          manche,
+          boardSnapshot,
+          session: {
+            stopGame,
+            // Starts the next aim turn on this live engine and resolves with
+            // that turn's committed shot: playSingleShot's own aim half,
+            // minus the startGame()/stopGame() that used to bracket it. No
+            // board reconstruction, no re-seeded score, no second intro —
+            // the board is simply still there (see game.js's resumeAim).
+            aimNextShot() {
+              return new Promise((res) => { resolveShot = res; resumeAim(); });
+            },
+          },
+        });
       },
     });
     onSessionStart?.(stopGame);

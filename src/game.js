@@ -246,7 +246,7 @@ export function startGame(opts = {}) {
     net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false,
     onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, onTurnChange = null,
     matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null,
-    singleShotTeam = null, onShotCommitted = null, externalManche = null, onMancheSettled = null, resumeManches = null, weekPointStart = false,
+    singleShotTeam = null, onShotCommitted = null, externalManche: externalMancheOpt = null, onMancheSettled = null, resumeManches = null, weekPointStart = false,
     weekEntryReady = null, weekStartScoreA = 0, weekStartScoreB = 0,
   } = opts;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
@@ -1241,6 +1241,17 @@ export function startGame(opts = {}) {
   // beginAimPhase()'s first call (apply + launch it) from its second (the
   // manche has now settled, report out) without needing a new phase name.
   let externalMancheConsumed = false;
+  // Mutable mirror of the externalManche opt (destructured as
+  // externalMancheOpt above purely so this can shadow it). Every existing
+  // read site is unchanged — only resumeAim() below ever writes it, clearing
+  // it once this session's one reveal is done so beginAimPhase() stops
+  // routing into the reveal branch and falls through to its normal aim tail.
+  // Stage 2 of the WEEK persistent-session migration (see resumeAim).
+  let externalManche = externalMancheOpt;
+  // Guards onMancheSettled to exactly one call per reveal — see
+  // beginAimPhase()'s own externalManche branch for why that stopped being
+  // free once the caller no longer tears the session down inside it.
+  let mancheSettledReported = false;
   // WEEK reconnect (see startGame's own resumeManches comment) — applied on
   // beginAimPhase()'s first real call, not eagerly right after
   // resetPositions() above: fastForwardManche() calls physicsStep(), which
@@ -1419,8 +1430,28 @@ export function startGame(opts = {}) {
       if (!externalMancheConsumed) {
         externalMancheConsumed = true;
         applyExternalManche(externalManche);
-      } else {
-        onMancheSettled?.({ scoreA, scoreB, matchOver: scoreA >= WIN_SCORE || scoreB >= WIN_SCORE, scoredTeam: lastMancheScoringTeam });
+      } else if (!mancheSettledReported) {
+        // Stage 2 of the WEEK persistent-session migration: reporting the
+        // outcome used to be this session's last act — src/weekController.js
+        // called stopGame() from inside this very callback. It can now carry
+        // on into the next aim turn instead (see resumeAim below, handed out
+        // in this same payload), which makes two things load-bearing that
+        // used to come free from that immediate teardown:
+        //   - Firing exactly ONCE. A no-goal settle re-enters here every ~7
+        //     frames on its own (runSimTick keeps seeing phase 'sim' +
+        //     allSettled() and calling beginStraighten() ->
+        //     tryAdvanceAfterManche -> beginAimPhase), which without this
+        //     guard would re-report the same manche repeatedly — and for
+        //     curling would also keep incrementing curlingCycle in
+        //     beginStraighten() until it spuriously resolved a whole point.
+        //   - Parking the machine somewhere inert. 'mancheHold' is handled
+        //     by nothing at all: loop()'s phase dispatch and runSimTick both
+        //     fall through it, and render() just keeps painting the settled
+        //     board. That IS the point — the engine holds this exact frame,
+        //     alive, until the orchestrator says what happens next.
+        mancheSettledReported = true;
+        phase = 'mancheHold';
+        onMancheSettled?.({ scoreA, scoreB, matchOver: scoreA >= WIN_SCORE || scoreB >= WIN_SCORE, scoredTeam: lastMancheScoringTeam, resumeAim });
       }
       return;
     }
@@ -1478,6 +1509,32 @@ export function startGame(opts = {}) {
     turnTimerStart = performance.now();
     turnTimerPhase = phase;
     if (aiTeam) prepareAiShots();
+  }
+  // Stage 2 bridge (handed to the caller in onMancheSettled's payload, see
+  // beginAimPhase's own externalManche branch) — carries THIS still-live
+  // session into the next aim turn instead of it being torn down and a fresh
+  // one built for every half-turn. Clearing externalManche is the whole
+  // mechanism: beginAimPhase() then falls through its reveal branch to the
+  // normal aim tail (phase = firstAimPhase(), i.e. 'lanAim' for a session
+  // that also has singleShotTeam set — which a WEEK reveal session now
+  // always does, see src/weekController.js's playReveal).
+  //
+  // Nothing else needs restoring, because nothing was destroyed: a no-goal
+  // settle left the stones exactly where they stopped (runSimTick already
+  // cleared `used`/pendingVx/pendingVy right before beginStraighten()), and
+  // a scoring settle already ran beginRoundReset()'s own slide back to the
+  // rack, freed both sweeps, reset curlingCycle and bumped scoreA/scoreB.
+  // resumeManches/fastForwardManche deliberately does NOT re-run — its own
+  // resumeManchesApplied guard already covers that, and this path is the
+  // whole reason it no longer has to (see CLAUDE.md's WEEK section: board
+  // reconstruction is a cold-entry mechanism, not a per-turn one).
+  //
+  // Deliberately not a general "session control" API — that's Stage 3. This
+  // is the single continuation the reveal -> next-aim boundary needs.
+  function resumeAim() {
+    if (torn) return; // session already ended (quit/teardown raced this callback)
+    externalManche = null;
+    beginAimPhase();
   }
   // WEEK reveal (see beginAimPhase's own externalManche branch) — applies
   // both teams' already-known shots and launches them, same shape as the AI
