@@ -258,21 +258,35 @@ html, body {
 #helpBtn.hidden { display: none; }
 #helpBtn:hover { background: rgba(255,255,255,0.32); color: #fff; }
 
-/* Nav sits right under the brand now (desktop and mobile alike — mobile
-   already worked this way, see .mobile-layout .sidebar-nav below); the
-   identity pill's own margin-top:auto (.nq-connect-btn) is what now eats the
-   leftover space and pins itself to the column's bottom edge instead. */
+/* Nav sits right under the brand now (desktop and mobile alike); the
+   identity pill's own margin-top:auto (.nq-connect-btn) is what eats the
+   leftover space and pins itself to the column's bottom edge — but only
+   once THIS element stops claiming that space itself. flex:1 1 auto +
+   min-height:0 + overflow-y:auto (was flex:none/no scroll on desktop, mobile
+   already worked this way — see conversation) is what makes that true:
+   without it, opening "Info" just grows this column past the fixed-height
+   #sidebar's own bottom edge, visibly shoving the identity pill down
+   instead of scrolling — reported exactly that. Now the nav scrolls
+   internally (thin overlay-style scrollbar below) and the pill never moves. */
 .sidebar-nav {
-  flex: none;
+  flex: 1 1 auto;
+  min-height: 0;
   margin-top: -5px; /* nudge up a bit further, see conversation — safe margin on both platforms */
   display: flex;
   flex-direction: column;
-  /* Loose between groups, tight within one (see .nav-section's own gap
-     below) — the nimiq-ui-kit sidebar's own rhythm: its section labels
-     ("FOUNDATIONS", "COMPONENTS") sit in a wide gap of their own, while the
-     items under one label sit close together. */
-  gap: 32px;
+  /* Tightened per explicit request (was 32px) — this used to also read as
+     "loose between groups, tight within one" back when every item here was
+     a .nav-section, which no longer holds now most of these are flat
+     top-level actions (see .nav-section's own still-tight 4px gap below,
+     unaffected). */
+  gap: 18px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--nb-16) transparent;
 }
+.sidebar-nav::-webkit-scrollbar { width: 5px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: var(--nb-16); border-radius: 999px; }
 .nav-section { display: flex; flex-direction: column; gap: 4px; }
 /* Wraps just the <button>s below a .nav-label (see index.html) — collapsed
    by default on BOTH platforms now (see conversation: this used to be an
@@ -318,6 +332,7 @@ html, body {
   font-weight: 600;
   color: var(--nb-80);
   cursor: pointer;
+  white-space: nowrap;
   transition: background .12s ease, color .12s ease;
 }
 .nav-item-icon { width: 14px; height: 14px; flex: none; }
@@ -343,6 +358,7 @@ html, body {
   font-weight: 600;
   color: var(--nb-80);
   cursor: pointer;
+  white-space: nowrap;
   transition: background .12s ease, color .12s ease;
 }
 .nav-label:hover { background: var(--nb-12); color: var(--nb-100); }
@@ -376,6 +392,12 @@ html, body {
   font-weight: 600;
   color: var(--nb-80);
   cursor: pointer;
+  /* Keeps "How to play"/"Find a player" on one line at typical desktop
+     widths (see conversation — was wrapping any time the column got a
+     little narrow, even with room to spare elsewhere in the row) instead
+     of the browser's default wrap-when-tight behavior; mobile was already
+     single-line at its own smaller font-size, unaffected either way. */
+  white-space: nowrap;
   transition: background .12s ease, color .12s ease;
 }
 .nav-flat-item:hover { background: var(--nb-12); color: var(--nb-100); }
@@ -571,28 +593,15 @@ html, body {
    (see .mobile-layout .nav-label below, and the shared, no-longer-mobile-
    only .nav-section-items rule above); main.js is what enforces "only one
    section open at a time" for whenever a second .nav-section exists again
-   (plain CSS can't reach a sibling .nav-section from here). flex:1/min-
-   height:0/overflow-y:auto is the same "grow into
-   whatever's left, scroll internally if it's not enough" pattern the whole
-   nav used before switching to this per-section design — still needed as a
-   fallback (a short landscape phone + an open section can still outgrow the
-   column) since a earlier fixed max-height here once shoved the identity
-   pill fully off-screen at 812x375 (see git history) rather than just
-   clipping. Thin, muted overlay-style scrollbar to match (WebKit + Firefox
-   properties both declared, real support varies but neither has a
-   fallback-fails-loud case). */
-.mobile-layout .sidebar-nav {
-  margin-top: -5px;
-  flex: 1 1 auto;
-  min-height: 0;
-  gap: 10px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--nb-16) transparent;
-}
-.mobile-layout .sidebar-nav::-webkit-scrollbar { width: 5px; }
-.mobile-layout .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
-.mobile-layout .sidebar-nav::-webkit-scrollbar-thumb { background: var(--nb-16); border-radius: 999px; }
+   (plain CSS can't reach a sibling .nav-section from here). The "grow into
+   whatever's left, scroll internally if it's not enough" behavior itself
+   (flex:1/min-height:0/overflow-y:auto/scrollbar styling) now lives on the
+   shared base .sidebar-nav rule above (desktop needs the exact same fix —
+   see that rule's own comment: an earlier fixed max-height here once shoved
+   the identity pill fully off-screen at 812x375, see git history, same
+   symptom desktop had); only the tighter mobile-specific gap stays scoped
+   here. */
+.mobile-layout .sidebar-nav { gap: 10px; }
 .mobile-layout .nav-section { flex: none; gap: 0; position: relative; }
 /* Mobile keeps its own quieter "category label" look (was the only look
    there was, before desktop's own trigger picked up .nav-flat-item's bold
