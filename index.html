@@ -124,17 +124,38 @@
       </button>
       <!-- How to play (see conversation): same destination as #helpBtn (the
            floating "?" over the tile grid) — #helpBtn stays, this is a
-           deliberately redundant second way in, per explicit request. Same
-           question-mark-in-circle glyph #navAbout's "Info" section already
-           uses below, reused rather than drawn fresh. -->
+           deliberately redundant second way in, per explicit request.
+           Lightbulb glyph, not the question-mark-in-circle #navAbout's
+           "Info" section below uses — this one reads as "tips/how it
+           works", Info's own icon stays reserved for that section. -->
       <button class="nav-flat-item" id="navHowTo" type="button">
-        <svg class="nav-flat-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.5"/><path d="M12 17.2h.01"/></svg>
+        <!-- Lucide's "lightbulb" icon (lucide.dev), verbatim path data. -->
+        <svg class="nav-flat-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
         <span>How to play</span>
       </button>
       <button class="nav-flat-item" id="navLeague" type="button">
         <svg class="nav-flat-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 5H4.5a2 2 0 0 0 0 4H7"/><path d="M17 5h2.5a2 2 0 0 1 0 4H17"/><path d="M12 17v3.5"/><path d="M8 21h8"/></svg>
         <span>League</span>
       </button>
+      <!-- "Find a player" (see conversation) — external link to the NimiCurl
+           Telegram channel (t.me/Nimicurl), opened in a new tab (main.js).
+           Handshake glyph, not the Telegram brand mark itself — that one's
+           reserved for the literal "Telegram" entry inside Info below,
+           same destination, different framing (community/matchmaking vs
+           "here's our Telegram"). -->
+      <button class="nav-flat-item" id="navFindPlayer" type="button">
+        <!-- Lucide's "handshake" icon (lucide.dev), verbatim path data — not
+             hand-drawn (see conversation: earlier attempts weren't clean
+             enough at this size). -->
+        <svg class="nav-flat-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m11 17 2 2a1 1 0 1 0 3-3"/><path d="m14 14 2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4"/><path d="m21 3 1 11h-2"/><path d="M3 3 2 14l6.5 6.5a1 1 0 1 0 3-3"/><path d="M3 4h8"/></svg>
+        <span>Find a player</span>
+      </button>
+      <!-- "Info" (see conversation) — now a real accordion trigger on
+           desktop too (main.js's click handler already toggled .open on
+           both platforms; only desktop's CSS never reacted to it — see
+           style.css). Same bold weight/size as every other top-level nav
+           now instead of the small-caps label look, which mobile alone
+           keeps (see .mobile-layout .nav-label in style.css). -->
       <div class="nav-section">
         <div class="nav-label" role="button" tabindex="0" aria-expanded="false">
           <svg class="nav-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.5"/><path d="M12 17.2h.01"/></svg>
@@ -145,6 +166,14 @@
           <button class="nav-item" id="navAbout" type="button">About</button>
           <button class="nav-item" id="navPartnership" type="button">Partnership</button>
           <button class="nav-item" id="navNimiq" type="button">Nimiq</button>
+          <!-- Same t.me/Nimicurl destination as #navFindPlayer above, own
+               icon this time (the actual Telegram paper-plane mark) — the
+               one deliberate exception to "nav items are text-only" (see
+               style.css's .nav-item comment), per explicit request. -->
+          <button class="nav-item" id="navTelegram" type="button">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>
+            <span>Telegram</span>
+          </button>
         </div>
         <div class="nav-scroll-pill" aria-hidden="true"></div>
       </div>
@@ -547,7 +576,13 @@
             <rect x="189" y="231" width="182" height="86" rx="43" ry="43" stroke-width="15"/>
           </svg>
           <div class="tag">PLAY NIMICURL</div>
-          <div class="sub">score a goal</div>
+          <div class="sub">First to 3 goals wins</div>
+          <!-- Approx. match length (see conversation) — Lucide's "clock"
+               icon (lucide.dev), verbatim path data, same reuse pattern as
+               the nav icons. Pinned to the tile's own bottom-right corner
+               (#modeHockey/#modeCurling get position:relative for this, see
+               style.css), not part of the centered icon/tag/sub stack. -->
+          <span class="tile-duration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>~5m</span>
         </div>
         <div class="half e" id="modeCurling">
           <svg class="mode-icon" viewBox="0 0 64 48" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -556,7 +591,8 @@
             <circle cx="32" cy="24" r="4" fill="currentColor" stroke="none"/>
           </svg>
           <div class="tag">PLAY PURE CURLING</div>
-          <div class="sub">get closest</div>
+          <div class="sub">Closest to center wins</div>
+          <span class="tile-duration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>~2m</span>
         </div>
         <!-- More (see conversation) — reuses the sidebar's old "More" nav
              icon (a gamepad, since that whole accordion is gone now, see

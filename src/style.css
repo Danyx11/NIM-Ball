@@ -274,41 +274,40 @@ html, body {
   gap: 32px;
 }
 .nav-section { display: flex; flex-direction: column; gap: 4px; }
-/* Wraps just the <button>s below a .nav-label (see index.html) so mobile can
-   collapse/expand them independently per section (accordion) without
-   touching the label itself — plain flex column on desktop, same 4px
-   rhythm .nav-section used to apply directly to its children. */
-.nav-section-items { display: flex; flex-direction: column; gap: 4px; }
-/* Nav items are text-only, right-aligned flush to the sidebar's own right
-   edge — no icons there (dropped per explicit request). The group label
-   above them is the one exception: icon + text as a unit, that unit still
-   flush right (justify-content, not text-align, now that there are two
-   children to lay out) — icon reads to the left of its own label, per
-   explicit request, not pinned to the sidebar's left edge. Color/weight
-   follow the --nb-* ladder above, not one-off grays: --nb-50 for this label
-   (icon included) is the kit's own "quietest" text tier. */
-.nav-label {
+/* Wraps just the <button>s below a .nav-label (see index.html) — collapsed
+   by default on BOTH platforms now (see conversation: this used to be an
+   always-expanded plain list on desktop, only collapsible on mobile; the
+   accordion click handler in main.js already toggled .nav-section's own
+   .open class on both platforms unconditionally, desktop's CSS just never
+   reacted to it). max-height/opacity (not display:none) so the height
+   change itself can transition. */
+.nav-section-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: max-height .22s ease, opacity .15s ease;
+}
+.nav-section.open .nav-section-items {
+  max-height: 220px;
+  opacity: 1;
+  pointer-events: auto;
+  overflow-y: auto;
+}
+/* Nav items are text-only by default (icons dropped per explicit request) —
+   #navTelegram (index.html) is the one deliberate exception (its own
+   Telegram brand glyph, per explicit request), so this lays out an
+   optional leading icon + text rather than plain centered text; a bare
+   text node with no icon still centers correctly in a flex row, so the
+   icon-less items (About/Partnership/Nimiq) are unaffected. */
+.nav-item {
   display: flex;
   align-items: center;
-  justify-content: center; /* centered on brand/pill's shared center, see conversation */
+  justify-content: center;
   gap: 6px;
-  padding: 0 12px 8px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--nb-50);
-}
-.nav-label-icon { width: 13px; height: 13px; flex: none; }
-/* Accordion state affordance, mobile only (see .mobile-layout .nav-label
-   below) — desktop's label isn't a trigger, nothing to point at. */
-.nav-label-chevron { display: none; }
-/* Resting/hover/active read as one continuous step up the same --nb-*
-   ladder (80 -> 100, plus a bold jump at .active) rather than three
-   unrelated colors — the kit's own idiom of driving hierarchy through alpha,
-   not through swapping in new hues per state. */
-.nav-item {
-  display: block;
   width: 100%;
   padding: 12px 14px;
   border: none;
@@ -318,12 +317,41 @@ html, body {
   font-size: 15px;
   font-weight: 600;
   color: var(--nb-80);
-  text-align: center; /* centered on brand/pill's shared center, see conversation */
   cursor: pointer;
   transition: background .12s ease, color .12s ease;
 }
+.nav-item-icon { width: 14px; height: 14px; flex: none; }
 .nav-item:hover { background: var(--nb-12); color: var(--nb-100); }
 .nav-item.active { background: var(--nb-16); color: var(--nb-100); font-weight: 700; }
+/* "Info" trigger (see conversation) — same bold weight/size/padding as
+   .nav-flat-item below now (was a distinct small-caps "category label"
+   look, kept only for mobile — see .mobile-layout .nav-label further down)
+   so it reads as a real, equally-weighted nav action on desktop, not a
+   passive header sitting above an always-open list. */
+.nav-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--nb-80);
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.nav-label:hover { background: var(--nb-12); color: var(--nb-100); }
+.nav-label-icon { width: 16px; height: 16px; flex: none; }
+/* Accordion state affordance — chevron flips on .open (main.js toggles that
+   class on both platforms, see .nav-section-items above), shown on both
+   platforms now (was mobile-only, desktop's label wasn't a trigger yet). */
+.nav-label-chevron { width: 13px; height: 13px; flex: none; transition: transform .18s ease; }
+.nav-section.open .nav-label-chevron { transform: rotate(180deg); }
 
 /* Home / League: flat top-level nav actions (see conversation, nimicurl
    arborescence rework — Home carries the old #bg-logo "back to menu" click,
@@ -538,12 +566,13 @@ html, body {
 .mobile-layout #sidebar.in-match .sidebar-nav { display: none; }
 .mobile-layout .sidebar-brand { padding: 10px 12px; }
 .mobile-layout #bg-logo { max-width: 160px; }
-/* Both section titles (More/Info, icon included) show at once on mobile —
-   no collapsed single "Menu" line — each is its own accordion trigger (see
-   .mobile-layout .nav-label below); only its own .nav-section-items
-   collapses/expands, main.js is what enforces "only one section open at a
-   time" across the two (plain CSS can't reach a sibling .nav-section from
-   here). flex:1/min-height:0/overflow-y:auto is the same "grow into
+/* The section title ("Info", icon included) shows on mobile without a
+   collapsed single "Menu" line wrapping it — it's its own accordion trigger
+   (see .mobile-layout .nav-label below, and the shared, no-longer-mobile-
+   only .nav-section-items rule above); main.js is what enforces "only one
+   section open at a time" for whenever a second .nav-section exists again
+   (plain CSS can't reach a sibling .nav-section from here). flex:1/min-
+   height:0/overflow-y:auto is the same "grow into
    whatever's left, scroll internally if it's not enough" pattern the whole
    nav used before switching to this per-section design — still needed as a
    fallback (a short landscape phone + an open section can still outgrow the
@@ -565,32 +594,22 @@ html, body {
 .mobile-layout .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
 .mobile-layout .sidebar-nav::-webkit-scrollbar-thumb { background: var(--nb-16); border-radius: 999px; }
 .mobile-layout .nav-section { flex: none; gap: 0; position: relative; }
-.mobile-layout .nav-label { padding: 8px 10px; font-size: 11px; cursor: pointer; }
-.mobile-layout .nav-label-chevron { display: block; width: 13px; height: 13px; flex: none; transition: transform .18s ease; }
-.mobile-layout .nav-section.open .nav-label-chevron { transform: rotate(180deg); }
-/* Collapsed by default (max-height:0, not display:none, so the height
-   change itself can transition) — .open on the parent .nav-section
-   (main.js) is what a tap on its .nav-label above adds/removes. 220px is
-   comfortably more than the 2-4 short links this has held so far, but isn't
-   guaranteed to always be (see conversation — Nimiq was just added as a
-   4th Info entry) — overflow-y:auto once open, rather than clipping
-   silently, plus the scroll pill below, covers whatever list length this
-   ever grows to without needing to keep bumping this cap. */
-.mobile-layout .nav-section-items {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  pointer-events: none;
-  transition: max-height .22s ease, opacity .15s ease;
-}
-.mobile-layout .nav-section.open .nav-section-items {
-  max-height: 220px;
-  opacity: 1;
-  pointer-events: auto;
-  overflow-y: auto;
+/* Mobile keeps its own quieter "category label" look (was the only look
+   there was, before desktop's own trigger picked up .nav-flat-item's bold
+   weight/size instead — see that rule's own comment) — every property the
+   new shared base rule changed gets restored here explicitly, since mobile
+   should look exactly as it did before this desktop-only change. */
+.mobile-layout .nav-label {
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--nb-50);
 }
 .mobile-layout .nav-item { padding: 8px 10px; font-size: 13px; }
 .mobile-layout .nav-flat-item { padding: 8px 10px; font-size: 13px; }
+.mobile-layout .nav-item-icon { width: 12px; height: 12px; }
 /* Scroll thumb for the section above, real element rather than native
    scrollbar styling (iOS Safari doesn't support ::-webkit-scrollbar at all,
    unlike the desktop-only thin scrollbar further up this file) — main.js's
@@ -2252,6 +2271,22 @@ button:disabled { opacity: 0.35; cursor: default; }
 #modeOverlay .half.d, #modeOverlay .half.e { color: var(--bg-deep); }
 #modeOverlay .half.d .sub, #modeOverlay .half.e .sub { color: rgba(11,31,42,0.75); }
 #modeOverlay .half.d .mode-icon, #modeOverlay .half.e .mode-icon { color: var(--bg-deep); }
+
+/* Approx. match-length badge (see conversation, index.html's own comment) —
+   #modeHockey/#modeCurling only, pinned to the tile's own bottom-right
+   corner rather than sitting in the centered icon/tag/sub stack, so it
+   needs its own positioning context (same pattern as #modeLocal/#modeMatch's
+   own tile-vibe-logo/config-back further down). */
+#modeHockey, #modeCurling { position: relative; }
+.tile-duration {
+  position: absolute; bottom: 12px; right: 14px;
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.75);
+}
+.tile-duration svg { width: 12px; height: 12px; flex: none; }
+/* Curling's tile is the light Gold wash (see the dark-ink block above) —
+   same treatment for this badge as .sub/.mode-icon already get there. */
+#modeCurling .tile-duration { color: rgba(11,31,42,0.6); }
 
 /* #vibeSubOverlay's own three tiles (#modeAi/#modeLocal/#modeMatch, AI/P&P/
    Remote) don't keep the fixed per-slot brand colors above — under a given
