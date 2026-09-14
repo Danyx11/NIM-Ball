@@ -995,6 +995,8 @@ function renderClaimStep(step, ctx) {
     `);
     const handleInput = document.getElementById('handleInput');
     handleInput.focus();
+    // Return just dismisses the on-screen keyboard — it doesn't submit the claim.
+    handleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleInput.blur(); } });
     document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
     document.getElementById('handleConfirmBtn').onclick = () => {
       const value = handleInput.value.trim().toLowerCase();
@@ -1998,6 +2000,8 @@ function showJoinCodeScreen(errorMsg) {
   input.addEventListener('input', () => {
     input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
   });
+  // Return just dismisses the on-screen keyboard — it doesn't submit the code.
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
   joinBtn.onclick = () => { audio.play('button'); joinWithCode(input.value, joinBtn, showJoinCodeScreen); };
   joinCodeOverlay.classList.remove('hidden');
   renderMyMatchesContent(); // bottom half of this same merged panel, see its own comment
@@ -2465,6 +2469,8 @@ function showLanJoinScreen(errorMsg) {
   `);
   const addrInput = document.getElementById('lanAddr');
   const joinBtn = document.getElementById('lanJoinBtn');
+  // Return just dismisses the on-screen keyboard — it doesn't submit the address.
+  addrInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addrInput.blur(); } });
   joinBtn.onclick = () => { audio.play('button'); joinLan(addrInput.value.trim(), joinBtn); };
 }
 
@@ -3201,6 +3207,9 @@ function showWeekWaitingScreen(week, boardSnapshot) {
     audio.play('button');
     leaveWaitingScreen(showModeDrawer);
   });
+  // Return just dismisses the on-screen keyboard — it doesn't Quit.
+  const weekMsgInputEl = document.getElementById('weekMsgInput');
+  weekMsgInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); weekMsgInputEl.blur(); } });
 
   if (isPending) {
     document.getElementById('weekShareBtn').addEventListener('click', (e) => {
