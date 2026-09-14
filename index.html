@@ -616,24 +616,28 @@
         </div>
       </div>
     </div>
-    <!-- Vibe sub-drawer: AI/P&P/Remote picker for whichever vibe was just
-         chosen above (#modeHockey/#modeCurling) — same sibling-of-
+    <!-- Vibe sub-drawer: AI/P&P/Remote/Week picker for whichever vibe was
+         just chosen above (#modeHockey/#modeCurling) — same sibling-of-
          #modeOverlay pattern as #classicCustomOverlay etc. below (shown
          while #modeOverlay itself stays visible for its bg/scrim, with only
          #modeDrawer's own tile grid hidden, see main.js's showVibeDrawer).
          #vibeDrawer reuses .mode-drawer's own tile grid/animation CSS
          (single row here, not 2x2) so these tiles keep the exact same visual
          language as the top-level ones. #modeLocal/#modeMatch keep their
-         original ids/click handlers from before this feature; #modeAi is new
-         (see conversation, nimicurl arborescence rework) — moved in from the
-         old top-level AI Training tile, now per-vibe and Classic-only:
-         Hockey launches straight in, Curling isn't trained yet and shows the
-         shared "under construction" panel instead (main.js). All three tiles
-         are re-tinted to the ACTIVE VIBE's single color here (blue for
-         Hockey, gold for Curling — #vibeSubOverlay.mode-hockey/.mode-curling
-         in style.css), overriding their old fixed per-slot brand colors,
-         since under a given vibe every one of these should read as "the same
-         game", not different games. -->
+         original ids/click handlers from before this feature; #modeAi is
+         per-vibe and Classic-only (Hockey launches straight in, Curling
+         isn't trained yet and shows the shared "under construction" panel
+         instead, main.js). #modeWeek (see conversation — moved in from
+         under the More tile, which now only keeps Custom/Replay) is the
+         one exception to "every tile here is Classic-only": it still opens
+         the Classic/Custom fork, same as it always has, just with the vibe
+         picker step it used to need skipped now that the vibe is already
+         chosen (main.js's showVibeWeekFlow). All four tiles are re-tinted to
+         the ACTIVE VIBE's single color here (blue for Hockey, gold for
+         Curling — #vibeSubOverlay.mode-hockey/.mode-curling in style.css),
+         overriding their old fixed per-slot brand colors, since under a
+         given vibe every one of these should read as "the same game", not
+         different games. -->
     <div id="vibeSubOverlay" class="hidden">
       <div class="mode-drawer" id="vibeDrawer">
         <div class="half f" id="modeAi">
@@ -676,15 +680,6 @@
           <div class="sub">2 players, 1 device</div>
         </div>
         <div class="half e" id="modeMatch">
-          <!-- Back button lives here now, not floating above both tiles (see
-               conversation) — one button for the whole screen, just visually
-               anchored to this tile's own top-right corner (position:
-               absolute within #modeMatch, see style.css). main.js's click
-               handler stops propagation so it doesn't also trigger
-               #modeMatch's own "go to Remote Match" click. -->
-          <button class="config-back" id="vibeBackBtn" type="button" aria-label="Back">
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
-          </button>
           <span class="tile-vibe-logo" id="modeMatchVibeLogo" aria-hidden="true"></span>
           <!-- Same two person-silhouette tops (head + shoulder arc) as
                #modeLocal's own PASS & PLAY icon below, per explicit request —
@@ -706,11 +701,34 @@
           <div class="tag">REMOTE</div>
           <div class="sub">2 players, 2 devices</div>
         </div>
+        <div class="half g" id="modeWeek">
+          <!-- Back button lives here now (see conversation — moved off
+               #modeMatch when this tile became the new last one), not
+               floating above every tile — one button for the whole screen,
+               just visually anchored to this tile's own top-right corner
+               (position: absolute, see style.css). main.js's click handler
+               stops propagation so it doesn't also trigger #modeWeek's own
+               "enter WEEK" click. -->
+          <button class="config-back" id="vibeBackBtn" type="button" aria-label="Back">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+          </button>
+          <span class="tile-vibe-logo" id="modeWeekVibeLogo" aria-hidden="true"></span>
+          <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/><path d="M8 14l2.5 2.5L16 11"/></svg>
+          <div class="tag">WEEK</div>
+          <div class="sub" id="modeWeekSub">Take your time — 7 days, no timer</div>
+          <!-- Wallet gate (see main.js's showVibeDrawer — no guests) —
+               hidden by default, shown in place of the .sub line above when
+               getIdentity().type is 'guest'. -->
+          <div class="week-wallet-gate hidden" id="modeWeekWalletGate">
+            <div class="sub">WEEK requires a Nimiq wallet. Create your wallet in about 50 seconds.</div>
+          </div>
+        </div>
       </div>
     </div>
-    <!-- More's own 3-tile picker (Custom / Week / Replay, see conversation) —
-         reached from #modeMore above, same sibling-of-#modeOverlay/
-         #vibeDrawer-reuse pattern as #vibeSubOverlay. Fixed "More" tint
+    <!-- More's own 2-tile picker (Custom / Replay, see conversation — Week
+         moved to #vibeSubOverlay above) — reached from #modeMore above, same
+         sibling-of-#modeOverlay/#vibeDrawer-reuse pattern as #vibeSubOverlay.
+         Fixed "More" tint
          (Nimiq Blue navy, same value as #modeOverlay .half.c/#overlay.
          mode-solo — see style.css's #moreSubOverlay .half) rather than a
          per-vibe one: no vibe has been chosen yet at this level. -->
@@ -720,20 +738,6 @@
           <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
           <div class="tag">CUSTOM</div>
           <div class="sub">Play with your own settings</div>
-        </div>
-        <div class="half" id="moreWeek">
-          <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/><path d="M8 14l2.5 2.5L16 11"/></svg>
-          <div class="tag">WEEK</div>
-          <div class="sub" id="moreWeekSub">Take your time — 7 days, no timer</div>
-          <!-- Wallet gate (see main.js's showMoreSubOverlay / the old
-               #remoteModeOverlay's own #weekWalletGate, same pattern moved
-               here now that WEEK's own entry point lives under More instead
-               of behind Remote — no guests, see conversation) — hidden by
-               default, shown in place of the .sub line above when
-               getIdentity().type is 'guest'. -->
-          <div class="week-wallet-gate hidden" id="moreWeekWalletGate">
-            <div class="sub">WEEK requires a Nimiq wallet. Create your wallet in about 50 seconds.</div>
-          </div>
         </div>
         <div class="half" id="moreReplay">
           <button class="config-back" id="moreBackBtn" type="button" aria-label="Back">
@@ -751,14 +755,14 @@
         </div>
       </div>
     </div>
-    <!-- Vibe pick for Custom/Week (see conversation) — More's own equivalent
-         of #modeHockey/#modeCurling above, since those two tiles' own click
-         handlers are permanently wired to the normal AI/P&P/Remote flow
-         (#vibeSubOverlay) and can't be reused as-is here. Icons cloned from
-         those same top-level tiles at click time (main.js's showMoreVibeOverlay),
-         same reuse idiom #vibeSubOverlay's own tile-vibe-logo already uses —
-         no new art. Shared between the Custom and Week entry points
-         (main.js tracks which one via moreFlowTarget); back returns to
+    <!-- Vibe pick for Custom (see conversation — Week moved out to
+         #vibeSubOverlay, so this only ever serves Custom now) — More's own
+         equivalent of #modeHockey/#modeCurling above, since those two tiles'
+         own click handlers are permanently wired to the normal AI/P&P/Remote/
+         Week flow (#vibeSubOverlay) and can't be reused as-is here. Icons
+         cloned from those same top-level tiles at click time (main.js's
+         showMoreVibeOverlay), same reuse idiom #vibeSubOverlay's own
+         tile-vibe-logo already uses — no new art. Back returns to
          #moreSubOverlay. Fixed "More" tint, same reasoning as #moreSubOverlay
          above — the vibe itself is what's being picked here. -->
     <div id="moreVibeOverlay" class="hidden">

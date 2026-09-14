@@ -1220,16 +1220,19 @@ canvas { position: relative; z-index: 1; }
     #000 100%);
 }
 
-/* Desktop-only menu stage (see index.html's own comment + main.js's
-   detachment block, mobile-gated there) — independent of #game-card, sized
-   directly off the true viewport rather than off #card-w/#card-h, so the
-   pre-game menu (mode-select + Classic/Custom + Settings + Remote Match
-   lobby) can render at the same full-screen scale as #homeOverlay instead
-   of being shrunk into the game's own smaller, aspect-ratio-locked box.
-   z-index matches #game-card's own (1) — DOM order (this element comes
-   after #game-card in index.html) settles the tie in this element's favor,
-   no higher number needed since nothing else in this z tier needs to beat
-   it specifically. */
+/* Menu stage, both platforms now (see index.html's own comment + main.js's
+   detachment block — see conversation, mobile used to be gated out of this
+   entirely) — independent of #game-card, sized directly off the true
+   viewport rather than off #card-w/#card-h, so the pre-game menu (mode-
+   select + Classic/Custom + Settings + Remote Match lobby, etc.) can render
+   at the same full-screen scale as #homeOverlay instead of sharing
+   #game-card's own intentionally-oversized-then-cropped box (that crop
+   exists for the CANVAS's benefit on a wide landscape phone — cropping menu
+   content along with it was the actual cause of "the tiles don't fit in
+   height" on mobile). z-index matches #game-card's own (1) — DOM order
+   (this element comes after #game-card in index.html) settles the tie in
+   this element's favor, no higher number needed since nothing else in this
+   z tier needs to beat it specifically. */
 #menuStage {
   position: fixed;
   z-index: 1;
@@ -1248,6 +1251,26 @@ canvas { position: relative; z-index: 1; }
   pointer-events: none;
 }
 #menuStage > * { pointer-events: auto; }
+/* Mobile: the reserved column is --controller-reserved-w (the joystick/
+   sidebar column — see :root's own comment), not desktop's flat 20vw
+   --right-margin, and it sits on the same right edge, so this is the exact
+   same "everything except the reserved column" box desktop's own 80vw
+   already is, just re-derived for mobile's own column width/formula.
+   height: var(--stable-vh, 100dvh) — not a plain 100dvh, same keyboard-
+   immune reasoning as .mobile-layout's own --card-w formula (see :root) —
+   so this box doesn't itself resize/reflow menu content if a keyboard ever
+   opens behind one (none currently take text input, but this costs nothing
+   and avoids the same class of bug #stable-vh was introduced to fix
+   elsewhere). Every menu-screen rule below (.mode-drawer, #vibeSubOverlay,
+   .config-panel, etc.) already centers/insets itself as a PERCENTAGE of its
+   own container — once that container is correctly sized here, on mobile
+   too, none of those rules need their own separate mobile override anymore
+   (removed — see git history for the old per-screen "carve out
+   --controller-reserved-w by hand" versions this replaces). */
+.mobile-layout #menuStage {
+  width: calc(100vw - var(--controller-reserved-w));
+  height: var(--stable-vh, 100dvh);
+}
 /* Mobile: --card-w now covers the full viewport (see .mobile-layout's own
    --card-w above) instead of fitting inside it with room to spare on the
    right for the old joystick column — centered on both axes so the excess
@@ -2074,17 +2097,16 @@ button:disabled { opacity: 0.35; cursor: default; }
 #modeOverlayBg { position: absolute; top: calc((100% - 100dvh) / 2); left: -10vw; width: 100vw; height: 100dvh; background-color: #000; background-size: cover; background-position: center; }
 /* Same recentering trick as the desktop rule above, just re-derived for
    mobile's own reserved column: -10vw is exactly half of DESKTOP's fixed
-   20vw #menuStage margin, which doesn't mean anything on mobile — there the
-   backdrop lives inside #game-card, not #menuStage (see main.js's menuHost),
-   and the reserved strip is --controller-reserved-w (the joystick/sidebar
-   column, ~27% of a typical landscape phone, not 20%). #game-card's own
-   width equals 100vw on every real landscape phone in practice (its
-   max(100vw, 100dvh*2218/1295) picks the 100vw branch whenever the
-   viewport's own aspect ratio exceeds ~1.71, true of every phone from
-   16:9 up), so it sits flush with the viewport's left edge exactly like
-   #menuStage does on desktop — same "shift left by half the reserved
-   width" math applies, just with mobile's own half-width instead of
-   desktop's hardcoded 10vw. */
+   20vw #menuStage margin — meaningless on mobile, where the reserved strip
+   is --controller-reserved-w instead (the joystick/sidebar column, ~27% of
+   a typical landscape phone, not a flat 20%). The backdrop lives inside
+   #menuStage on mobile too now (see conversation, main.js's menuHost/this
+   file's own .mobile-layout #menuStage — mobile used to share #game-card's
+   own oversized-then-cropped box instead, which this same recentering math
+   already assumed away; it happened to keep computing the right answer once
+   #menuStage caught up to actually being that narrower box). Same "shift
+   left by half the reserved width" math as desktop, just with mobile's own
+   half-width instead of desktop's hardcoded 10vw. */
 .mobile-layout #modeOverlayBg { left: calc(-1 * var(--controller-reserved-w) / 2); }
 .mode-select-scrim { position: absolute; inset: 0; background: rgba(6,14,18,0.28); }
 .mode-drawer {
@@ -2120,19 +2142,15 @@ button:disabled { opacity: 0.35; cursor: default; }
   from { opacity: 0; transform: translateY(14px) scale(.97); }
   to { opacity: 1; transform: none; }
 }
-/* Mobile: leave the right-hand column (--controller-reserved-w, see
-   .mobile-layout above) clear of tiles — that's the same column #bg-logo/
-   #connectBtn already live in and is earmarked for more controls later, so
-   the grid needs to stay out of it instead of running full-bleed under
-   them, same inset pattern as .mobile-layout #overlay below.
-   left:3% (half the base rule's 6%), not the inherited plain 6%: with only
-   `right` overridden, the box sits centered between the 6% left inset and
-   the (100% - reserved-column) right edge — 3% off from the arena's own
-   optical center (see .mobile-layout #modeOverlayBg's recentering above,
-   same root cause). Halving the left inset while adding that same 3% to the
-   right one keeps the grid's overall size identical, just recentered on the
-   arena instead of the raw viewport. */
-.mobile-layout .mode-drawer { left: 3%; right: calc(var(--controller-reserved-w) + 3%); }
+/* Mobile used to need its own "leave the right-hand column clear of tiles"
+   override here (a manual 3%/calc(reserved+3%) carve-out) back when this
+   grid lived inside #game-card, which ran full-bleed under the sidebar
+   column. Now that mode-select (and every other menu screen) lives in
+   #menuStage on mobile too (see conversation, main.js's menuHost/style.css's
+   own .mobile-layout #menuStage), that container is already the correct
+   narrower width — the base inset:6% above already keeps tiles clear of the
+   sidebar for free, same as it already did on desktop with no override.
+   Removed rather than left dead — see git history for the old rule. */
 /* Hidden while Classic/Custom or Custom Settings show over the same
    #modeOverlay backdrop (see main.js's modeDrawer) — every hideable element
    in this file gets its own scoped .hidden rule rather than a generic one,
@@ -2158,24 +2176,27 @@ button:disabled { opacity: 0.35; cursor: default; }
   z-index: 4;
 }
 #vibeSubOverlay.hidden { display: none; }
-.mobile-layout #vibeSubOverlay { left: 3%; right: calc(var(--controller-reserved-w) + 3%); }
+/* Mobile's own "carve out the sidebar column" override removed (see
+   .mobile-layout .mode-drawer's own comment above — same reasoning, same
+   fix: #menuStage is already the right width now). */
 /* Reuses .mode-drawer's grid/tile-pop-in/scale(0.9) look wholesale, just
    flowed inside #vibeSubOverlay's flex column (its only child now) instead
-   of absolutely inset:6% of #modeOverlay itself. Three columns now (AI/P&P/
-   Remote, see conversation) instead of the base rule's fixed 2 — without
-   this override the 3rd tile wraps onto its own implicit grid row instead of
-   sitting in a single row alongside the other two. */
+   of absolutely inset:6% of #modeOverlay itself. Four columns now (AI/P&P/
+   Remote/Week, see conversation) instead of the base rule's fixed 2 —
+   without this override the 3rd/4th tiles wrap onto their own implicit grid
+   row instead of sitting in a single row alongside the others. */
 #vibeSubOverlay .mode-drawer {
   position: relative; inset: auto; flex: 1; min-height: 0;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   grid-template-rows: 1fr;
 }
-/* #modeLocal/#modeMatch need their own positioning context (see conversation:
-   the vibe logo and, for #modeMatch, the back button are both pinned to a
-   tile edge now instead of sitting in the tile's own centered content flow)
-   — .half itself has no position of its own, so this is scoped to just
-   these two rather than every tile everywhere .half is reused. */
-#modeLocal, #modeMatch { position: relative; }
+/* #modeLocal/#modeMatch/#modeWeek need their own positioning context (see
+   conversation: the vibe logo and, for #modeWeek, the back button/wallet
+   gate are both pinned to a tile edge now instead of sitting in the tile's
+   own centered content flow) — .half itself has no position of its own, so
+   this is scoped to just these three rather than every tile everywhere
+   .half is reused. */
+#modeLocal, #modeMatch, #modeWeek { position: relative; }
 /* Vibe logo cloned into each tile (main.js's showVibeDrawer) — pinned to the
    tile's own top edge, centered, out of the tile's normal vertically-
    centered flex flow (own icon/tag/sub below still center as a group without
@@ -2193,16 +2214,17 @@ button:disabled { opacity: 0.35; cursor: default; }
    own mode-curling class (set in main.js's showVibeDrawer) scopes this to
    just that vibe, Hockey's stays the base 20px. */
 #vibeSubOverlay.mode-curling .tile-vibe-logo .mode-icon { height: 40px; }
-/* Back button relocated here from a floating position above both tiles (see
+/* Back button relocated here from a floating position above every tile (see
    conversation) — one button for the whole screen (main.js's vibeBackBtn),
-   just visually anchored to #modeMatch's own top-right corner now. Smaller
-   offsets than .config-back's own top:24px/right:28px defaults, which were
-   sized for a full ~600px .config-panel, not a single grid tile. */
-#modeMatch .config-back { top: 14px; right: 14px; }
+   just visually anchored to #modeWeek's own top-right corner now (moved off
+   #modeMatch when Week became the new last tile). Smaller offsets than
+   .config-back's own top:24px/right:28px defaults, which were sized for a
+   full ~600px .config-panel, not a single grid tile. */
+#modeWeek .config-back { top: 14px; right: 14px; }
 /* Pure Curling only (see conversation) — same dark-ink swap as every other
-   icon on this tile (#vibeSubOverlay.mode-curling .half.e .mode-icon below);
+   icon on this tile (#vibeSubOverlay.mode-curling .half.e/.half.g below);
    .config-back's own base color:#fff would otherwise go unreadable on gold. */
-#vibeSubOverlay.mode-curling #modeMatch .config-back { color: var(--bg-deep); }
+#vibeSubOverlay.mode-curling #modeWeek .config-back { color: var(--bg-deep); }
 /* Per-tile line-art icon, one per mode (players-at-console, linked devices,
    robot-on-curling-stone, replay document) — ported from design/"Modes tuiles
    design ref.png"'s outlined icon set, redrawn as inline stroke SVGs so
@@ -2297,46 +2319,52 @@ button:disabled { opacity: 0.35; cursor: default; }
    same treatment for this badge as .sub/.mode-icon already get there. */
 #modeCurling .tile-duration { color: rgba(11,31,42,0.6); }
 
-/* #vibeSubOverlay's own three tiles (#modeAi/#modeLocal/#modeMatch, AI/P&P/
-   Remote) don't keep the fixed per-slot brand colors above — under a given
-   vibe, all three should read as "the same game" rather than mismatched
-   colors. Overridden here per active vibe (class set in main.js's
+/* #vibeSubOverlay's own four tiles (#modeAi/#modeLocal/#modeMatch/#modeWeek,
+   AI/P&P/Remote/Week) don't keep the fixed per-slot brand colors above —
+   under a given vibe, all four should read as "the same game" rather than
+   mismatched colors. Overridden here per active vibe (class set in main.js's
    showVibeDrawer), at higher specificity than the #modeOverlay .half.a/
    .half.e rules above so it wins despite #vibeSubOverlay's tiles also
    matching those broader selectors. Hockey reuses the exact Light Blue wash
    + default light text (tile 'a' already looks like this); Curling reuses
    the exact Gold wash + dark-ink text (tile 'e' already looks like this) —
    same two brand colors, just no longer tied to which physical slot a tile
-   sits in. #modeAi (.half.f, see conversation — moved in from the old
-   top-level AI Training tile) picks up the exact same treatment as .half.e,
-   not a fourth color of its own. */
+   sits in. #modeAi (.half.f) and #modeWeek (.half.g, see conversation —
+   moved in from the old More tile) both pick up the exact same treatment as
+   .half.e, not extra colors of their own. */
 #vibeSubOverlay.mode-hockey .half.a,
 #vibeSubOverlay.mode-hockey .half.e,
-#vibeSubOverlay.mode-hockey .half.f {
+#vibeSubOverlay.mode-hockey .half.f,
+#vibeSubOverlay.mode-hockey .half.g {
   background: rgba(5, 130, 202, 0.72);
   color: var(--ink);
 }
 #vibeSubOverlay.mode-hockey .half.e .sub,
-#vibeSubOverlay.mode-hockey .half.f .sub { color: rgba(255,255,255,0.85); }
+#vibeSubOverlay.mode-hockey .half.f .sub,
+#vibeSubOverlay.mode-hockey .half.g .sub { color: rgba(255,255,255,0.85); }
 #vibeSubOverlay.mode-hockey .half.e .mode-icon,
-#vibeSubOverlay.mode-hockey .half.f .mode-icon { color: rgba(255,255,255,0.92); }
+#vibeSubOverlay.mode-hockey .half.f .mode-icon,
+#vibeSubOverlay.mode-hockey .half.g .mode-icon { color: rgba(255,255,255,0.92); }
 #vibeSubOverlay.mode-curling .half.a,
 #vibeSubOverlay.mode-curling .half.e,
-#vibeSubOverlay.mode-curling .half.f {
+#vibeSubOverlay.mode-curling .half.f,
+#vibeSubOverlay.mode-curling .half.g {
   background: rgba(233, 178, 19, 0.72);
   color: var(--bg-deep);
 }
 #vibeSubOverlay.mode-curling .half.a .sub,
 #vibeSubOverlay.mode-curling .half.e .sub,
-#vibeSubOverlay.mode-curling .half.f .sub { color: rgba(11,31,42,0.75); }
+#vibeSubOverlay.mode-curling .half.f .sub,
+#vibeSubOverlay.mode-curling .half.g .sub { color: rgba(11,31,42,0.75); }
 #vibeSubOverlay.mode-curling .half.a .mode-icon,
 #vibeSubOverlay.mode-curling .half.e .mode-icon,
-#vibeSubOverlay.mode-curling .half.f .mode-icon { color: var(--bg-deep); }
+#vibeSubOverlay.mode-curling .half.f .mode-icon,
+#vibeSubOverlay.mode-curling .half.g .mode-icon { color: var(--bg-deep); }
 /* #modeAi's own tile-vibe-logo badge already picks up the Curling-only
    doubled size from the existing #vibeSubOverlay.mode-curling
    .tile-vibe-logo .mode-icon rule above (.tile-vibe-logo section) — that
-   selector isn't scoped to a specific tile, so all three (including this
-   new one) share it for free. */
+   selector isn't scoped to a specific tile, so all four (including
+   #modeWeek) share it for free. */
 
 /* Sizing for #modeAi's own icon (moved verbatim off the old top-level AI
    Training tile, see index.html — same numbers that tile used under
@@ -2358,20 +2386,20 @@ button:disabled { opacity: 0.35; cursor: default; }
   z-index: 4;
 }
 #moreSubOverlay.hidden, #moreVibeOverlay.hidden, #moreLaunchOverlay.hidden { display: none; }
-.mobile-layout #moreSubOverlay,
-.mobile-layout #moreVibeOverlay,
-.mobile-layout #moreLaunchOverlay { left: 3%; right: calc(var(--controller-reserved-w) + 3%); }
+/* Mobile's own "carve out the sidebar column" override removed (see
+   .mobile-layout .mode-drawer's own comment further up — same reasoning,
+   same fix: #menuStage is already the right width now). */
 #moreSubOverlay .mode-drawer,
 #moreVibeOverlay .mode-drawer,
 #moreLaunchOverlay .mode-drawer {
   position: relative; inset: auto; flex: 1; min-height: 0;
   grid-template-rows: 1fr;
 }
-/* Three tiles (Custom/Week/Replay), same reasoning as #vibeSubOverlay's own
-   3-column override above — #moreVibeOverlay/#moreLaunchOverlay stay at the
-   base rule's 2 columns (each only ever shows 2 tiles). */
-#moreSubOverlay .mode-drawer { grid-template-columns: repeat(3, 1fr); }
-#moreCustom, #moreWeek, #moreReplay,
+/* #moreSubOverlay now only ever shows 2 tiles too (Custom/Replay — Week
+   moved to #vibeSubOverlay, see conversation), so it stays at the base
+   rule's 2 columns like #moreVibeOverlay/#moreLaunchOverlay — no override
+   needed here anymore. */
+#moreCustom, #moreReplay,
 #moreVibeHockey, #moreVibeCurling { position: relative; background: rgba(31, 35, 72, 0.72); color: var(--ink); }
 #moreReplay .config-back, #moreVibeCurling .config-back { top: 14px; right: 14px; }
 /* Icons cloned in by main.js (showMoreVibeOverlay/showMoreLaunchOverlay,
@@ -2460,13 +2488,16 @@ button:disabled { opacity: 0.35; cursor: default; }
   box-shadow: 0 4px 14px rgba(31, 35, 72, 0.38);
 }
 .config-panel.hidden { display: none; }
-/* Same fix, same reasoning as .mobile-layout #overlay.overlay-boxed above
-   (both use the base rule's translate(-50%,-50%) center-point pattern): drop
-   the stray "6% +" term, `left` is just the arena's own optical center. */
-.mobile-layout .config-panel {
-  left: calc((100% - var(--controller-reserved-w)) / 2);
-  max-width: calc(100% - 6% - var(--controller-reserved-w));
-}
+/* Mobile used to need its own recentering override here too (same "carve
+   out --controller-reserved-w by hand" pattern as .mode-drawer's own,
+   further up — see that rule's comment), back when every .config-panel
+   screen (Classic/Custom, Custom Settings, Connect gate, About, etc.) lived
+   inside #game-card. Now that they live in the correctly-sized #menuStage
+   on mobile too, the base rule's plain left:50%/max-width above already
+   centers correctly with no override — #overlay.overlay-boxed's own mobile
+   rule (a DIFFERENT element, the in-match exit-confirm/goal dialog, which
+   still lives in #game-card, untouched by this change) still needs its own,
+   unrelated to this one. */
 /* Background tint now follows the active vibe (mode-hockey/mode-curling),
    not which mode tile (P&P/Remote) this screen follows — set via JS
    (main.js's fillModeHeader/showNetPanel) since Classic/Custom, Custom
@@ -2830,18 +2861,14 @@ button:disabled { opacity: 0.35; cursor: default; }
    width/height (not the base .config-panel rule's own fit-content) so these
    three actually fill that space regardless of their own content, rather
    than just raising the ceiling something has to grow into. Keeps the base
-   rule's position:absolute + translate(-50%,-50%) centering intact; mobile
-   mirrors .mobile-layout .config-panel's own controller-column-aware
-   formula instead of the desktop 90%. */
+   rule's position:absolute + translate(-50%,-50%) centering intact. Mobile
+   used to need its own controller-column-aware width formula here (same
+   "carve out --controller-reserved-w by hand" pattern as .config-panel's
+   own removed override above — see that rule's comment); #menuStage is
+   already the right width on mobile now, so the plain 90% below applies on
+   both platforms with no override. */
 #howToHubOverlay, #nimicurlRulesOverlay, #pureCurlingRulesOverlay {
   width: 90%; max-width: 90%;
-  height: 92%; max-height: 92%;
-}
-.mobile-layout #howToHubOverlay,
-.mobile-layout #nimicurlRulesOverlay,
-.mobile-layout #pureCurlingRulesOverlay {
-  width: calc(100% - 6% - var(--controller-reserved-w));
-  max-width: calc(100% - 6% - var(--controller-reserved-w));
   height: 92%; max-height: 92%;
 }
 /* "How to?" hub's 3 pills (see conversation) — one alone on top, two side by
