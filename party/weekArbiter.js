@@ -89,6 +89,8 @@ export class WeekArbiter extends Server {
         // pointManches describes exactly the board before it — no snapshot
         // needed.
         priorManches: m.pointManches,
+        // Not yet resolved, so the live score is already the pre-manche one.
+        priorScoreA: m.scoreA, priorScoreB: m.scoreB,
       };
     } else if (lm && !lm.seenBy[team]) {
       reveal = {
@@ -99,6 +101,9 @@ export class WeekArbiter extends Server {
         // priorManches comment). null for a match persisted before this
         // field existed; the client falls back for those.
         priorManches: lm.priorManches ?? null,
+        // null for a match persisted before these existed — the client falls
+        // back to the live score there, as it always did.
+        priorScoreA: lm.priorScoreA ?? null, priorScoreB: lm.priorScoreB ?? null,
       };
     }
     return {
@@ -164,6 +169,11 @@ export class WeekArbiter extends Server {
   // team has already moved on to their next shot).
   turnLabelFor(team) {
     const m = this.match;
+    // A completed match still owes its deciding reveal to whichever side has
+    // not watched it (onConnect keeps a grace connection open for exactly
+    // that) — so it stays actionable in My Matches rather than reading as
+    // "Finished", and its row is only dropped once they have seen it.
+    if (m.status === 'completed' && m.lastManche && !m.lastManche.seenBy[team]) return 'revealReady';
     if (m.status !== 'active') return m.status;
     if (m.pendingShots.A && m.pendingShots.B) return 'revealReady'; // both submitted — see snapshotFor's own comment
     const lm = m.lastManche;
@@ -409,7 +419,14 @@ export class WeekArbiter extends Server {
     //   (possibly one the other team has since moved several shots past) —
     //   just marks their own seenBy, touches nothing else.
     if (msg.type === 'completeRound') {
-      if (this.match.status !== 'active') return;
+      // 'completed' allowed through for one specific case: the side that
+      // never saw the deciding manche, acking it. Without this their seenBy
+      // could never be set, so they would sit in My Matches forever (see the
+      // matchOver branch below) and be re-offered the same reveal on every
+      // visit.
+      const pendingFinalAck = this.match.status === 'completed'
+        && this.match.lastManche && !this.match.lastManche.seenBy[team];
+      if (this.match.status !== 'active' && !pendingFinalAck) return;
       const bothIn = !!(this.match.pendingShots.A && this.match.pendingShots.B);
       if (bothIn) {
         const scoredTeam = msg.scoredTeam === 'A' || msg.scoredTeam === 'B' ? msg.scoredTeam : null;
@@ -424,6 +441,10 @@ export class WeekArbiter extends Server {
         // this one in place, so what's captured here can never change under
         // us afterwards.
         const priorManches = this.match.pointManches;
+        // Same idea as priorManches, for the other half of the state a
+        // reveal starts from. Captured before the increments above land.
+        const priorScoreA = this.match.scoreA - (scoredTeam === 'A' ? 1 : 0);
+        const priorScoreB = this.match.scoreB - (scoredTeam === 'B' ? 1 : 0);
         this.match.pointManches = pointScored ? [] : [...this.match.pointManches, {
           stonesA: this.match.pendingShots.A.stones, sweepA: this.match.pendingShots.A.sweep,
           stonesB: this.match.pendingShots.B.stones, sweepB: this.match.pendingShots.B.sweep,
@@ -450,6 +471,12 @@ export class WeekArbiter extends Server {
           // then, and clearing it would cost the write-once property for
           // nothing.
           priorManches,
+          // The score as it stood BEFORE this manche. A straggler's snapshot
+          // already counts it (the first reporter's completeRound bumped it),
+          // so seeding their engine with the live score and then letting them
+          // watch the manche score again showed the opponent a goal ahead for
+          // the rest of the sitting (reported).
+          priorScoreA, priorScoreB,
         };
         this.match.round += 1;
         this.match.pendingShots = { A: null, B: null };
@@ -467,7 +494,17 @@ export class WeekArbiter extends Server {
       }
       await this.persist();
       if (matchOver) {
-        await Promise.all([this.removeFromIndex(this.match.playerA), this.removeFromIndex(this.match.playerB)]);
+        // Not both at once any more: removing the row of a player who still
+        // has the final reveal to watch takes away their only route back to
+        // it (reported — the match vanished before the last team could see
+        // how it ended). They keep a row, labelled actionable by
+        // turnLabelFor, until their own ack above lands.
+        const lm = this.match.lastManche;
+        await Promise.all(['A', 'B'].map((t) => {
+          const address = t === 'A' ? this.match.playerA : this.match.playerB;
+          if (!address) return null;
+          return lm && !lm.seenBy[t] ? this.pushIndexUpdate(t) : this.removeFromIndex(address);
+        }));
       } else {
         await Promise.all([this.pushIndexUpdate('A'), this.pushIndexUpdate('B')]);
       }
