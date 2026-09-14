@@ -39,6 +39,36 @@ function revealToManche(week) {
 // isn't team-relative).
 function resumeManchesFor(week) { return week.pointManches || null; }
 
+// The same question, asked for a REVEAL rather than for an aim turn — and
+// the answers genuinely differ. An aim reconstructs the board up to *now*
+// (resumeManchesFor above). A reveal has to reconstruct it up to *its own
+// start*, which is not the same board the moment this player is a straggler
+// catching up on a manche their opponent already reported: pointManches has
+// by then either grown to include that very manche (a no-goal settle —
+// replaying it and then playing the reveal applied it twice, the measured
+// bug) or been emptied by a scored point (so the reveal played from the bare
+// rack instead of wherever the point had actually got to).
+//
+// party/weekArbiter.js answers it directly now, on the reveal itself, for
+// both of its sources — so the normal path is just reveal.priorManches.
+// The fallback below only runs for a match persisted before that field
+// existed, and cannot be as good: it repairs the no-goal case exactly (the
+// offending manche is provably the last entry) but has nothing to rebuild
+// the scored case from, since the server had already discarded it. Those
+// matches keep today's behaviour there.
+//
+// mySubmitted && opponentSubmitted IS the server's own `bothIn` — see
+// snapshotFor, where both are literally !!pendingShots[...] — so which
+// source a reveal came from is known, not inferred.
+function revealResumeManchesFor(week) {
+  const prior = week.reveal?.priorManches;
+  if (prior) return prior.length ? prior : null;
+  const played = week.pointManches || [];
+  if (week.mySubmitted && week.opponentSubmitted) return played.length ? played : null;
+  const trimmed = played.slice(0, -1);
+  return trimmed.length ? trimmed : null;
+}
+
 // A freeze-frame of the canvas at the exact instant a shot commits or a
 // manche settles. Still taken even though the engine now survives both of
 // those moments: main.js's "Your shot is ready" screen is shown over a
@@ -200,7 +230,9 @@ export function playReveal(week, engineOpts, onSessionStart) {
       // the reveal itself plays out: aimingTeam()/sweepViewTeam() both gate
       // on phase, which is never an aiming one before resumeAim() runs.
       singleShotTeam: week.team,
-      resumeManches: resumeManchesFor(week),
+      // revealResumeManchesFor, NOT resumeManchesFor: a reveal rebuilds the
+      // board up to its own start, not up to now — see that function.
+      resumeManches: revealResumeManchesFor(week),
       // No weekPointStart here — a reveal never shows the match-intro
       // huddle/sting, regardless of team, score, or whether this happens to
       // be this player's first look at the point (see startGame's own

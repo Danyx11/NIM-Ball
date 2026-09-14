@@ -82,11 +82,23 @@ export class WeekArbiter extends Server {
       reveal = {
         mine: team === 'A' ? { stones: m.pendingShots.A.stones, sweep: m.pendingShots.A.sweep } : { stones: m.pendingShots.B.stones, sweep: m.pendingShots.B.sweep },
         opponent: team === 'A' ? { stones: m.pendingShots.B.stones, sweep: m.pendingShots.B.sweep } : { stones: m.pendingShots.A.stones, sweep: m.pendingShots.A.sweep },
+        // The board THIS reveal starts from, bound to the reveal rather than
+        // sent alongside it, so the client has one unconditional rule
+        // whichever of the two sources it came from (see the client's own
+        // revealResumeManchesFor). Here the manche is still unresolved, so
+        // pointManches describes exactly the board before it — no snapshot
+        // needed.
+        priorManches: m.pointManches,
       };
     } else if (lm && !lm.seenBy[team]) {
       reveal = {
         mine: team === 'A' ? { stones: lm.stonesA, sweep: lm.sweepA } : { stones: lm.stonesB, sweep: lm.sweepB },
         opponent: team === 'A' ? { stones: lm.stonesB, sweep: lm.sweepB } : { stones: lm.stonesA, sweep: lm.sweepA },
+        // Already resolved, so pointManches has moved on — this is the
+        // snapshot completeRound took before it did (see lastManche's own
+        // priorManches comment). null for a match persisted before this
+        // field existed; the client falls back for those.
+        priorManches: lm.priorManches ?? null,
       };
     }
     return {
@@ -404,6 +416,14 @@ export class WeekArbiter extends Server {
         if (scoredTeam === 'A') this.match.scoreA += 1;
         else if (scoredTeam === 'B') this.match.scoreB += 1;
         const pointScored = !!scoredTeam;
+        // The board this manche was played FROM — captured before the line
+        // below reassigns pointManches, and carried on lastManche so a
+        // straggler can reconstruct it (see lastManche's own priorManches
+        // comment). Safe as a plain reference, no clone: that line
+        // reassigns pointManches to a brand new array rather than mutating
+        // this one in place, so what's captured here can never change under
+        // us afterwards.
+        const priorManches = this.match.pointManches;
         this.match.pointManches = pointScored ? [] : [...this.match.pointManches, {
           stonesA: this.match.pendingShots.A.stones, sweepA: this.match.pendingShots.A.sweep,
           stonesB: this.match.pendingShots.B.stones, sweepB: this.match.pendingShots.B.sweep,
@@ -412,6 +432,24 @@ export class WeekArbiter extends Server {
           stonesA: this.match.pendingShots.A.stones, sweepA: this.match.pendingShots.A.sweep,
           stonesB: this.match.pendingShots.B.stones, sweepB: this.match.pendingShots.B.sweep,
           seenBy: { A: team === 'A', B: team === 'B' },
+          // The manches of this point that were already resolved BEFORE this
+          // one — i.e. the board this manche started from. pointManches on
+          // its own cannot answer that for a straggler: by the time they
+          // connect it has either grown to INCLUDE this manche (a no-goal
+          // settle, so replaying it would apply this manche twice) or been
+          // emptied (a scoring settle, so replaying it would start from the
+          // bare rack instead of wherever the point had actually got to).
+          // Both were real, measured bugs. Same shape as pointManches, so
+          // src/weekController.js feeds it straight to game.js's
+          // resumeManches with no translation.
+          //
+          // Written once, here, where lastManche itself is built, and never
+          // mutated afterwards (unlike seenBy just above) — its lifetime is
+          // exactly its manche's lifetime as lastManche. Deliberately not
+          // cleared once both teams have watched: nothing reads it again by
+          // then, and clearing it would cost the write-once property for
+          // nothing.
+          priorManches,
         };
         this.match.round += 1;
         this.match.pendingShots = { A: null, B: null };
