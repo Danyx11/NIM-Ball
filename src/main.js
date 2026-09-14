@@ -3061,10 +3061,12 @@ async function showWeekAimScreen(week, chained = false, liveSession = null) {
   // decides what becomes of it.
   let session = liveSession;
   if (liveSession) {
-    // Re-established rather than assigned fresh: playWeekReveal's own
-    // hideMatchChrome() nulls activeStopGame on its way here, which was
-    // correct while that also meant the engine had just been torn down —
-    // it hasn't anymore (Stage 2), so the handle has to come straight back.
+    // Re-asserted rather than assumed: this is the one place that knows for
+    // certain which engine this turn runs on, and the handle must be the
+    // live one for the whole turn (a mid-turn quit goes through it). Usually
+    // already correct, since nothing tears the chrome down on the chained
+    // path any more — kept explicit so the invariant does not depend on
+    // that staying true.
     activeStopGame = liveSession.stop;
     // No onMatchReady to hand the wait indicator to (no new session is
     // starting, so nothing fires it) — this is the moment the spinner
@@ -3094,7 +3096,14 @@ async function showWeekAimScreen(week, chained = false, liveSession = null) {
   const { stones, sweep, boardSnapshot } = await shotPromise;
   pendingWeekCancel = null; // shot committed — no longer cancellable-on-exit
   activeWeekAiming = null; // shot committed — no longer an unfinished turn to confirm-quit over
-  hideMatchChrome();
+  // No hideMatchChrome() here: at this point we do not yet know whether this
+  // session is about to carry straight on into the opponent's reveal (the
+  // branch below), and tearing the toolbar/controller down only to have
+  // playWeekReveal put them back a moment later is what made the right-hand
+  // column flicker between shots (reported). It also nulled activeStopGame
+  // while the engine was still very much alive, leaving the round-trip below
+  // with no working teardown. Each branch that really does end the session
+  // hides the chrome itself now.
   // Frozen-board spinner, not the branded black overlay (see showWeekSpinner's
   // own comment) — the board is already showing exactly the right thing
   // (the shot that just committed), there's nothing to hide here, only a
@@ -3119,6 +3128,7 @@ async function showWeekAimScreen(week, chained = false, liveSession = null) {
     showWeekWaitingScreen(merged, boardSnapshot);
   } catch (err) {
     session.stop();
+    hideMatchChrome();
     hideWeekSpinner();
     week.close();
     showWeekErrorScreen(err.message);
@@ -3239,10 +3249,10 @@ async function playWeekReveal(week, chained = false, liveSession = null) {
   let session = liveSession;
   let revealPromise;
   if (liveSession) {
-    // Same re-establish-and-unveil pair as showWeekAimScreen's own live
-    // branch: hideMatchChrome() nulled activeStopGame on the way here even
-    // though the engine is still running, and there is no onMatchReady to
-    // hand the spinner to since no new session is starting.
+    // Same re-assert-and-unveil pair as showWeekAimScreen's own live branch:
+    // the handle must point at the engine this reveal actually runs on, and
+    // there is no onMatchReady to hand the spinner to since no new session
+    // is starting.
     activeStopGame = liveSession.stop;
     hideWeekSpinner();
     revealPromise = liveSession.watchReveal(week);
@@ -3266,7 +3276,9 @@ async function playWeekReveal(week, chained = false, liveSession = null) {
     }
   }
   const result = await revealPromise;
-  hideMatchChrome();
+  // Same reasoning as showWeekAimScreen's own post-commit comment: the next
+  // aim turn usually runs on this very session, so dropping the chrome here
+  // only to re-show it is a visible flicker.
   // See showWeekAimScreen's own comment on this same call — the just-settled
   // reveal is already exactly the right frame to freeze on.
   showWeekSpinner(result.boardSnapshot);
@@ -3287,6 +3299,7 @@ async function playWeekReveal(week, chained = false, liveSession = null) {
       // hideMatchChrome() only nulls activeStopGame, it never calls it. So
       // this branch has to end the session itself.
       session.stop();
+      hideMatchChrome();
       hideWeekSpinner();
       week.close();
       showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${snapshot.scoreA} · Team Yellow ${snapshot.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
@@ -3309,6 +3322,7 @@ async function playWeekReveal(week, chained = false, liveSession = null) {
     // Same reasoning as the 'completed' branch above — this path abandons
     // the session, so it has to end it rather than leave it running.
     session.stop();
+    hideMatchChrome();
     hideWeekSpinner();
     week.close();
     showWeekErrorScreen(err.message);
