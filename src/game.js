@@ -1434,9 +1434,10 @@ export function startGame(opts = {}) {
         // Stage 2 of the WEEK persistent-session migration: reporting the
         // outcome used to be this session's last act — src/weekController.js
         // called stopGame() from inside this very callback. It can now carry
-        // on into the next aim turn instead (see resumeAim below, handed out
-        // in this same payload), which makes two things load-bearing that
-        // used to come free from that immediate teardown:
+        // on into the next aim turn instead (via the session object this
+        // closure returns, see resumeAim/the return statement at the very
+        // bottom), which makes two things load-bearing that used to come
+        // free from that immediate teardown:
         //   - Firing exactly ONCE. A no-goal settle re-enters here every ~7
         //     frames on its own (runSimTick keeps seeing phase 'sim' +
         //     allSettled() and calling beginStraighten() ->
@@ -1451,7 +1452,7 @@ export function startGame(opts = {}) {
         //     alive, until the orchestrator says what happens next.
         mancheSettledReported = true;
         phase = 'mancheHold';
-        onMancheSettled?.({ scoreA, scoreB, matchOver: scoreA >= WIN_SCORE || scoreB >= WIN_SCORE, scoredTeam: lastMancheScoringTeam, resumeAim });
+        onMancheSettled?.({ scoreA, scoreB, matchOver: scoreA >= WIN_SCORE || scoreB >= WIN_SCORE, scoredTeam: lastMancheScoringTeam });
       }
       return;
     }
@@ -1510,10 +1511,12 @@ export function startGame(opts = {}) {
     turnTimerPhase = phase;
     if (aiTeam) prepareAiShots();
   }
-  // Stage 2 bridge (handed to the caller in onMancheSettled's payload, see
-  // beginAimPhase's own externalManche branch) — carries THIS still-live
-  // session into the next aim turn instead of it being torn down and a fresh
-  // one built for every half-turn. Clearing externalManche is the whole
+  // One of the two members of the session object this closure returns for a
+  // WEEK session (see the return statement at the very bottom; Stage 2
+  // smuggled this through onMancheSettled's payload instead, Stage 3 gave it
+  // a proper home) — carries THIS still-live session into the next aim turn
+  // instead of it being torn down and a fresh one built for every
+  // half-turn. Clearing externalManche is the whole
   // mechanism: beginAimPhase() then falls through its reveal branch to the
   // normal aim tail (phase = firstAimPhase(), i.e. 'lanAim' for a session
   // that also has singleShotTeam set — which a WEEK reveal session now
@@ -7647,5 +7650,21 @@ export function startGame(opts = {}) {
   // Handed back so a caller outside this closure (main.js's own "Quitter"/
   // logo-menu confirm dialogs) can tear this match down without a page
   // reload — see stopGame()'s own comment above for why that matters.
-  return stopGame;
+  //
+  // Stage 3 of the WEEK persistent-session migration: a WEEK session
+  // (singleShotTeam) needs more than "end this" — it outlives a single
+  // half-turn now (see resumeAim), so it gets a small named control surface
+  // instead of the bare teardown function. Deliberately conditional rather
+  // than uniform: LIVE, Pass & Play, vs AI, howTo and replay keep receiving
+  // the exact same bare callable they always have, so none of their call
+  // sites (main.js's `activeStopGame = startGame(...)` then
+  // `activeStopGame()`) change at all — and the object never escapes
+  // src/weekController.js, which unwraps `.stop` before handing anything
+  // back up to main.js, so main.js's own activeStopGame contract is
+  // likewise untouched. Chosen over attaching these as properties to
+  // stopGame itself (a function is an object in JS, so that also "works"):
+  // a function named "stop" quietly carrying a live-session protocol is
+  // both undocumented at the call site and silently lost by any future
+  // .bind()/wrapper, whereas a plain object's keys survive that.
+  return singleShotTeam ? { stop: stopGame, resumeAim } : stopGame;
 }
