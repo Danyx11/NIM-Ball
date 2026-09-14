@@ -69,6 +69,19 @@ function revealResumeManchesFor(week) {
   return trimmed.length ? trimmed : null;
 }
 
+// The score a reveal starts from — the other half of revealResumeManchesFor
+// above, and needed for the same reason. A straggler's snapshot already
+// counts the manche they are about to watch (the first reporter's
+// completeRound bumped it server-side), so seeding the engine with the live
+// score and then letting resolveGoal bump it again showed the opponent one
+// goal ahead. Falls back to the live score for a match persisted before the
+// server carried this, exactly as the board reconstruction does.
+function revealStartScore(week) {
+  const r = week.reveal;
+  if (r && r.priorScoreA != null && r.priorScoreB != null) return { A: r.priorScoreA, B: r.priorScoreB };
+  return { A: week.scoreA, B: week.scoreB };
+}
+
 // A freeze-frame of the canvas at the exact instant a shot commits or a
 // manche settles. Still taken even though the engine now survives both of
 // those moments: main.js's "Your shot is ready" screen is shown over a
@@ -238,7 +251,8 @@ export function playReveal(week, engineOpts, onSessionStart) {
       // be this player's first look at the point (see startGame's own
       // comment: entering a point and watching a reveal are different
       // things — only the former gets the ceremony).
-      weekStartScoreA: week.scoreA, weekStartScoreB: week.scoreB,
+      // revealStartScore, NOT week.scoreA/scoreB — see that function.
+      weekStartScoreA: revealStartScore(week).A, weekStartScoreB: revealStartScore(week).B,
       matchConfig: week.config,
       vibe: week.game,
     });
