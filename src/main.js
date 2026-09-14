@@ -2836,14 +2836,18 @@ function enterWeekMatch(week) {
   // just keeps the surrounding UI in sync with it too.
   activeVibe = week.game;
   hideLobby();
-  // Same bug/fix as showLobby()'s own joinCodeOverlay.classList.add('hidden')
-  // above: reachable from "Join with a code" (joinWithCode -> joinWeekMatch)
-  // just like LIVE's joinMatch() is, and this panel never hides itself
-  // before handing off — without this it sits on top of every WEEK screen
-  // below, fully obscuring them, exactly the historic LIVE bug documented
-  // on showLobby(). Only needs doing once, here, since nothing downstream in
-  // the WEEK flow ever re-shows it.
-  joinCodeOverlay.classList.add('hidden');
+  // Every menu screen that can lead here, in one call — the whole stack is
+  // siblings of #modeOverlay rather than children of it (see that function),
+  // so hiding #modeOverlay downstream does not take them with it and they
+  // sit on top of the match, fully obscuring it. Each entry path used to
+  // clear its own: "Join with a code" and My Matches leave #joinCodeOverlay,
+  // and the tile itself used to pass through the Classic/Custom screen,
+  // which cleared #vibeSubOverlay on the way. Removing that fork left the
+  // 4-tile picker showing over a live WEEK match (reported). Doing it here,
+  // at the single funnel every WEEK entry goes through, is what makes it not
+  // depend on which screen got us here. Safe this early: every WEEK panel
+  // below is created after this point.
+  hideRemoteMatchStack();
   // week.reveal checked BEFORE the terminal-status branches below: a match
   // can be 'completed' and still owe this specific player their own last
   // look at the final reveal (see party/weekArbiter.js's own onConnect
