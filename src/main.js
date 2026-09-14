@@ -1162,8 +1162,6 @@ const modeAi = document.getElementById('modeAi');
 const modeLocal = document.getElementById('modeLocal');
 const modeMatch = document.getElementById('modeMatch');
 const modeWeek = document.getElementById('modeWeek');
-const modeWeekWalletGate = document.getElementById('modeWeekWalletGate');
-const modeWeekSub = document.getElementById('modeWeekSub');
 // Cloned into each of #modeAi/#modeLocal/#modeMatch/#modeWeek's own top
 // (.tile-vibe-logo, see index.html) rather than a separate external header
 // (see conversation) — aria-hidden in the markup since each tile's own tag
@@ -1189,15 +1187,6 @@ function showVibeDrawer(vibe) {
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.remove('hidden');
   modeOverlay.classList.remove('hidden');
-  // Re-checked every time this drawer opens (not just once) — connecting a
-  // wallet elsewhere (the sidebar identity pill, the connect gate) shouldn't
-  // leave a stale gate note showing here. Same wallet-gate pattern the old
-  // LIVE/WEEK picker's own #weekWalletGate used (see conversation — moved
-  // here now that WEEK's own entry point lives right in this drawer instead
-  // of behind More) — no guests.
-  const isGuest = !hubAddress;
-  modeWeekWalletGate.classList.toggle('hidden', !isGuest);
-  modeWeekSub.classList.toggle('hidden', isGuest);
 }
 modeHockey.addEventListener('click', () => { audio.play('button'); showVibeDrawer('hockey'); });
 modeCurling.addEventListener('click', () => { audio.play('button'); showVibeDrawer('curling'); });
@@ -1244,25 +1233,34 @@ modeAi.addEventListener('click', async () => {
 // defined further down), no separate vibe-repick step needed anymore.
 modeWeek.addEventListener('click', () => {
   audio.play('button');
-  if (!hubAddress) return; // wallet gate note is already showing — see showVibeDrawer
+  if (!hubAddress) { showWeekWalletPanel(); return; }
   showVibeWeekFlow();
 });
-// Tapping the gate note itself connects (same flow as the sidebar identity
-// pill / connect gate's own CONNECT button, see connectIdentity() below) —
-// stopPropagation so it doesn't also trigger #modeWeek's own "enter WEEK"
-// click right after connecting succeeds.
-modeWeekWalletGate.addEventListener('click', (e) => {
-  e.stopPropagation();
-  audio.play('button');
-  connectIdentity()
-    .then((address) => {
-      hubAddress = address;
-      syncIdentityPill();
-      modeWeekWalletGate.classList.add('hidden');
-      modeWeekSub.classList.remove('hidden');
-    })
-    .catch(() => {}); // cancelled/failed — stay on this screen, gate note still showing
-});
+// WEEK is the one mode with no guest play (see party/weekArbiter.js — the
+// wallet address IS the reconnection credential). The tile keeps its normal
+// sub-line either way and says so here instead, on its own panel, rather
+// than swapping the sub-line for a gate note that was easy to miss and left
+// a tile-body tap doing nothing but play a click. Exits via the panel's own
+// top-right Back arrow, which already returns to the vibe drawer (see
+// matchNetworkBackBtn).
+function showWeekWalletPanel() {
+  showNetPanel(`
+    <h2>WEEK requires a Nimiq wallet</h2>
+    <p>Create yours in about 50 seconds.</p>
+    <button class="bigbtn" id="weekCreateWalletBtn">Create a wallet</button>
+  `);
+  document.getElementById('weekCreateWalletBtn').addEventListener('click', () => {
+    audio.play('button');
+    connectIdentity()
+      .then((address) => {
+        hubAddress = address;
+        syncIdentityPill();
+        hideNetPanel();
+        showVibeWeekFlow(); // straight on into WEEK, no second tap on the tile
+      })
+      .catch(() => {}); // cancelled/failed — stay on this panel
+  });
+}
 
 // ---- More: Custom / Replay (see conversation, nimicurl arborescence rework
 // — Week moved into #vibeSubOverlay above) — reached from #modeMore, the
