@@ -2146,9 +2146,34 @@ function showHowToScreen() {
 function hideHowToScreen() {
   audio.play('button');
   howToHubOverlay.classList.add('hidden');
+  document.getElementById('htVideoPlayer').pause();
+  document.getElementById('howToVideoOverlay').classList.add('hidden');
   returnToModeSelect();
 }
 htBackBtn.addEventListener('click', hideHowToScreen);
+// Tutorial video thumbnail (index.html's #htVideoThumb) -> bigger unmuted
+// player (#howToVideoOverlay). Purely illustrative, no link to htPlayBtn's
+// interactive tutorial (see conversation).
+const htVideoThumb = document.getElementById('htVideoThumb');
+const howToVideoOverlay = document.getElementById('howToVideoOverlay');
+const htVideoCloseBtn = document.getElementById('htVideoCloseBtn');
+const htVideoPlayer = document.getElementById('htVideoPlayer');
+function showHowToVideo() {
+  audio.play('button');
+  howToVideoOverlay.classList.remove('hidden');
+  htVideoPlayer.currentTime = 0;
+  htVideoPlayer.play().catch(() => {});
+}
+function hideHowToVideo() {
+  audio.play('button');
+  htVideoPlayer.pause();
+  howToVideoOverlay.classList.add('hidden');
+}
+htVideoThumb.addEventListener('click', showHowToVideo);
+htVideoCloseBtn.addEventListener('click', hideHowToVideo);
+howToVideoOverlay.addEventListener('click', (e) => {
+  if (e.target === howToVideoOverlay) hideHowToVideo();
+});
 // Help button — same toggle-on-reclick shape as every other About/Nimiq/
 // League-style nav entry in this file.
 const helpBtn = document.getElementById('helpBtn');
