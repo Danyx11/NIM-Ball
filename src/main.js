@@ -1227,14 +1227,15 @@ modeAi.addEventListener('click', async () => {
 });
 
 // WEEK: moved in from the old More tile (see conversation, nimicurl
-// arborescence rework — More now only keeps Custom/Replay) — the vibe is
-// already chosen by the time this tile is reachable, so this skips straight
-// to the Classic/Custom fork WEEK has always used (showVibeWeekFlow,
-// defined further down), no separate vibe-repick step needed anymore.
+// arborescence rework — More now only keeps Custom/Replay). The vibe is
+// already chosen by the time this tile is reachable, and WEEK is never
+// played with Custom rules, so there is nothing left to pick — no
+// Classic/Custom fork, no confirmation step, straight into a Classic match
+// (per explicit request).
 modeWeek.addEventListener('click', () => {
   audio.play('button');
   if (!hubAddress) { showWeekWalletPanel(); return; }
-  showVibeWeekFlow();
+  hostWeekMatch({ ...DEFAULT_MATCH_CONFIG });
 });
 // WEEK is the one mode with no guest play (see party/weekArbiter.js — the
 // wallet address IS the reconnection credential). The tile keeps its normal
@@ -1256,7 +1257,7 @@ function showWeekWalletPanel() {
         hubAddress = address;
         syncIdentityPill();
         hideNetPanel();
-        showVibeWeekFlow(); // straight on into WEEK, no second tap on the tile
+        hostWeekMatch({ ...DEFAULT_MATCH_CONFIG }); // straight on into WEEK, no second tap on the tile
       })
       .catch(() => {}); // cancelled/failed — stay on this panel
   });
@@ -1670,10 +1671,6 @@ function showRemoteConnectError(message, config) {
 // hostWeekMatch() instead of hostMatch(). Back returns to the vibe drawer,
 // vibe already set; also reused as hostWeekMatch's own error-retry target
 // (activeVibe is already set correctly by then either way).
-function showVibeWeekFlow(errorMsg) {
-  showClassicCustomScreen('remote', (config) => hostWeekMatch(config), () => showVibeDrawer(activeVibe), errorMsg);
-}
-
 ccBackBtn.addEventListener('click', () => {
   audio.play('button');
   classicCustomOverlay.classList.add('hidden');
@@ -2737,7 +2734,13 @@ async function hostWeekMatch(matchConfig) {
     } catch (err) {
       if (err.reason === 'occupied' && attempt < 4) { code = generateMatchCode(); continue; }
       hideLoadingOverlay();
-      showVibeWeekFlow(err.message);
+      // WEEK has no Classic/Custom screen to fall back onto any more (see
+      // #modeWeek's own handler) — a creation failure just says so and
+      // returns to the vibe drawer the tile was tapped from.
+      showNetPanel(`<p class="lan-error">${escapeHtml(err.message)}</p><button class="bigbtn" id="weekHostErrBtn">OK</button>`);
+      document.getElementById('weekHostErrBtn').addEventListener('click', () => {
+        audio.play('button'); hideNetPanel(); showVibeDrawer(activeVibe);
+      });
       return;
     }
   }
