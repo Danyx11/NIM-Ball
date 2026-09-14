@@ -1067,9 +1067,12 @@
          (mode-hockey) per explicit request ("comme quand on entre dans un
          mode"), with a visible title (this one breaks from the icon-only
          convention the vibe-nested screens use, per explicit request too).
-         Three pills in a pyramid: "How to play" alone on top launches the
-         existing interactive tutorial (main.js — still mobile-only), the
-         pair below opens one of the two rules panels further down. -->
+         Three pills in a pyramid: "How to play" launches the existing
+         interactive tutorial (main.js — still mobile-only), now sharing its
+         top row with a purely illustrative tutorial video thumbnail (see
+         conversation — design/Tuto Nimicurl 1 mp4 copie.mp4, baked to
+         public/rules/nimicurl-howto.mp4); the pair below opens one of the
+         two rules panels further down. -->
     <div id="howToHubOverlay" class="config-panel mode-hockey hidden">
       <button class="config-back" id="htBackBtn" type="button" aria-label="Back">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
@@ -1081,9 +1084,18 @@
         <span class="config-mode-title">How to?</span>
       </div>
       <div class="howto-pyramid">
-        <button class="config-preset-btn howto-pill-top" id="htPlayBtn" type="button">
-          <div class="config-preset-name">HOW TO PLAY</div>
-        </button>
+        <div class="howto-top-row">
+          <button class="config-preset-btn howto-pill-top" id="htPlayBtn" type="button">
+            <div class="config-preset-name">HOW TO PLAY</div>
+          </button>
+          <!-- Purely illustrative — autoplay/muted/loop preview, no link to
+               htPlayBtn's own interactive tutorial. Click opens the same
+               file bigger, unmuted, with controls (#howToVideoOverlay
+               below). -->
+          <button class="howto-video-thumb" id="htVideoThumb" type="button" aria-label="Watch tutorial video">
+            <video class="howto-video-preview" src="%BASE_URL%rules/nimicurl-howto.mp4" autoplay muted loop playsinline preload="metadata"></video>
+          </button>
+        </div>
         <div class="config-presets">
           <button class="config-preset-btn howto-rules-pill" id="htNimicurlBtn" type="button">
             <div class="config-preset-name howto-rules-name">NIMICURL<br>RULES</div>
@@ -1093,6 +1105,18 @@
           </button>
         </div>
       </div>
+    </div>
+    <!-- Bigger tutorial-video player (see conversation — click on
+         #htVideoThumb's small autoplay/muted preview above opens this),
+         unmuted with native controls. Own top-level overlay (not nested in
+         #howToHubOverlay) so it can sit above the whole hub at a higher
+         z-index, same reasoning as every other .config-panel-adjacent
+         overlay in this file. -->
+    <div id="howToVideoOverlay" class="video-lightbox hidden">
+      <button class="video-lightbox-close" id="htVideoCloseBtn" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+      <video id="htVideoPlayer" class="video-lightbox-player" src="%BASE_URL%rules/nimicurl-howto.mp4" controls playsinline></video>
     </div>
     <!-- NimiCurl / Pure Curling rules (see conversation) — reached only from
          #howToHubOverlay above, back returns there rather than straight to

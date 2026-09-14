@@ -2884,6 +2884,13 @@ button:disabled { opacity: 0.35; cursor: default; }
    side below, same .config-preset-btn look as Classic/Custom's own pair.
    Reuses .config-presets as-is for the bottom row. */
 .howto-pyramid { display: flex; flex-direction: column; gap: 16px; flex: 1; justify-content: center; }
+/* Top row: HOW TO PLAY pill + the illustrative video thumbnail, 50/50 split
+   (see conversation — "rapetisse la pill principale de moitié pour laisser
+   de la place à cette vidéo à côté"). Same flex:1/min-width:0 split as
+   .config-presets below rather than a shared class, since this row also
+   needs to match that row's own left/right edges (max-width:none override
+   below, same reasoning .howto-pill-top always had). */
+.howto-top-row { display: flex; gap: 16px; }
 /* max-width: none overrides the shared .config-preset-btn rule's own
    max-width:260px (see conversation — "les extremités gauche et droite
    doivent être alignées"): .config-presets below has no cap of its own
@@ -2891,7 +2898,37 @@ button:disabled { opacity: 0.35; cursor: default; }
    (flex containers stretch their children's cross axis unless told
    otherwise); this pill needs the same free rein to land on the exact same
    left/right edges as that row, whatever width the panel ends up being. */
-.howto-pill-top { width: 100%; max-width: none; }
+.howto-pill-top { flex: 1; min-width: 0; max-width: none; }
+/* Video thumbnail: same card footprint as the pill beside it (rounded
+   corners, height driven by the pill's own padding) rather than the video's
+   native 16:9 dictating the row's height. object-fit:cover crops instead of
+   letterboxing so the thumbnail reads as a filled card, not a video floating
+   in empty space. */
+.howto-video-thumb {
+  flex: 1; min-width: 0; padding: 0; border: none; border-radius: 20px;
+  overflow: hidden; cursor: pointer; background: rgba(0,0,0,0.25);
+  display: block;
+}
+.howto-video-preview { width: 100%; height: 100%; min-height: 120px; object-fit: cover; display: block; pointer-events: none; }
+/* Bigger tutorial-video player (see conversation). Plain dark scrim,
+   centered video, same fixed-full-viewport shape as .gate-overlay above but
+   its own z-index — above every .config-panel (z-index:5) and #menuStage
+   (z-index:1) but below #homeOverlay/#loadingOverlay, which never show at
+   the same time as this anyway. */
+.video-lightbox {
+  position: fixed; inset: 0; z-index: 30;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(4,10,14,0.92);
+}
+.video-lightbox.hidden { display: none; }
+.video-lightbox-player { max-width: 90vw; max-height: 80vh; border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
+.video-lightbox-close {
+  position: absolute; top: 20px; right: 20px;
+  width: 40px; height: 40px; border-radius: 50%; border: none;
+  background: rgba(255,255,255,0.12); color: #fff;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.video-lightbox-close:hover { background: rgba(255,255,255,0.22); }
 /* NIMICURL RULES vs PURE CURLING RULES otherwise end up visibly different
    widths (see conversation — "des tailles de pills identiques") even though
    both are flex:1: with flex-basis:0 and the default min-width:auto, a flex
