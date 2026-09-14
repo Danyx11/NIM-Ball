@@ -1998,6 +1998,8 @@ function showJoinCodeScreen(errorMsg) {
   input.addEventListener('input', () => {
     input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
   });
+  // Return just dismisses the on-screen keyboard — it doesn't submit the code.
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
   joinBtn.onclick = () => { audio.play('button'); joinWithCode(input.value, joinBtn, showJoinCodeScreen); };
   joinCodeOverlay.classList.remove('hidden');
   renderMyMatchesContent(); // bottom half of this same merged panel, see its own comment
