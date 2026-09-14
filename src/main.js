@@ -3152,35 +3152,36 @@ function showWeekWaitingScreen(week, boardSnapshot) {
   activeWeekWaiting = week;
   modeOverlay.classList.add('hidden');
   const isPending = week.status === 'pending';
-  const messageField = `<input id="weekMsgInput" type="text" maxlength="60" placeholder="Leave a message (optional)…" autocomplete="off" />`;
+  // One action, not three (see conversation): the message field is simply
+  // always open — whatever is typed goes with the single Quit below, nothing
+  // if it is left empty — and the line under it says where the match will be
+  // waiting, which is what the two separate "come back" / "exit" buttons
+  // were really trying to express. The code + share row stays for 'pending',
+  // since that is the only way A can invite B at all.
   showWeekBoardPanel(`
     <h2>Your shot is ready.</h2>
+    <input id="weekMsgInput" type="text" maxlength="60" placeholder="Leave a message…" autocomplete="off" />
     ${isPending ? `
-      ${messageField}
       <div class="match-code-row">
         <div class="match-code">${week.code}</div>
         <button class="code-share-btn" id="weekShareBtn" aria-label="Share match">${CODE_SHARE_ICON}</button>
       </div>
-    ` : `
-      <div id="weekMsgArea" class="hidden">${messageField}</div>
-    `}
-    <div class="week-panel-row">
-      ${isPending ? '' : `<button class="bigbtn" id="weekMsgToggleBtn">Message</button>`}
-      <button class="bigbtn" id="weekQuitBtn">Come back to your match anytime</button>
-    </div>
-    <button class="bigbtn" id="weekExitBtn">Exit</button>
+    ` : ''}
+    <button class="bigbtn" id="weekQuitBtn">Quit</button>
+    <p>Find your match again under Code / Matches.</p>
   `, boardSnapshot);
 
-  // Shared by both buttons below — a single message slot per recipient
-  // (see party/weekArbiter.js's inbox), sent whenever either is pressed,
-  // whatever's currently typed, if anything. Fire-and-forget, NOT awaited:
+  // The panel's single Quit — a single message slot per recipient
+  // (see party/weekArbiter.js's inbox), sent on the way out with whatever
+  // is currently typed, if anything. Fire-and-forget, NOT awaited:
   // awaiting it here previously meant a slow/stuck reply left the whole
   // click silently doing nothing (reported: "click exit, rien ne se
-  // passe") — navigation must never wait on it. No confirmation dialog on
-  // either — per explicit request, this isn't "quit and lose the match"
+  // passe") — navigation must never wait on it. No confirmation dialog
+  // here — per explicit request, this isn't "quit and lose the match"
   // (there's nothing to lose, the shot's already saved server-side), just
-  // "step away for now"; `next` is the only thing that differs between the
-  // two — Code/Matches (weekQuitBtn) vs the main menu (weekExitBtn).
+  // "step away for now". `next` stays a parameter because performMatchExit
+  // and the Home/logo path reach this same teardown with their own
+  // destination.
   function leaveWaitingScreen(next) {
     activeWeekWaiting = null; // handling it ourselves — performMatchExit doesn't own this exit path
     const text = document.getElementById('weekMsgInput')?.value.trim();
@@ -3191,10 +3192,6 @@ function showWeekWaitingScreen(week, boardSnapshot) {
   }
   document.getElementById('weekQuitBtn').addEventListener('click', () => {
     audio.play('button');
-    leaveWaitingScreen(showJoinCodeScreen);
-  });
-  document.getElementById('weekExitBtn').addEventListener('click', () => {
-    audio.play('button');
     leaveWaitingScreen(showModeDrawer);
   });
 
@@ -3202,12 +3199,6 @@ function showWeekWaitingScreen(week, boardSnapshot) {
     document.getElementById('weekShareBtn').addEventListener('click', (e) => {
       audio.play('button');
       shareWeekMatch(week, document.getElementById('weekMsgInput').value.trim(), e.currentTarget);
-    });
-  } else {
-    document.getElementById('weekMsgToggleBtn').addEventListener('click', (e) => {
-      audio.play('button');
-      e.currentTarget.classList.add('hidden');
-      document.getElementById('weekMsgArea').classList.remove('hidden');
     });
   }
 }
@@ -3269,7 +3260,19 @@ async function playWeekReveal(week, chained = false, liveSession = null) {
       weekEntryReady,
     }, (s) => { session = s; activeStopGame = s.stop; });
     if (!chained) {
-      showWeekBoardPanel(`<button class="bigbtn" id="weekEntryWatchBtn">Watch the reveal</button>`);
+      // Same inbox delivery the PLAY card does (see showWeekAimScreen): a
+      // message is consumed server-side at connect, so whichever entry card
+      // this player actually lands on has to show it or it is lost. A
+      // returning player with a reveal waiting lands here, not there —
+      // enterWeekMatch checks week.reveal first (reported: messages never
+      // showed up on coming back to a match).
+      showWeekBoardPanel(`
+        ${week.inboxMessage ? `
+          <h2>${week.opponentAddress ? shortenAddressCompact(week.opponentAddress) : 'Your opponent'} left you a message</h2>
+          <p class="week-quote">"${escapeHtml(week.inboxMessage.text)}"</p>
+        ` : ''}
+        <button class="bigbtn" id="weekEntryWatchBtn">Watch the reveal</button>
+      `);
       document.getElementById('weekEntryWatchBtn').addEventListener('click', () => {
         audio.play('button'); hideWeekBoardPanel(); resolveWeekEntry();
       });

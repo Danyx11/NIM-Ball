@@ -2737,6 +2737,15 @@ button:disabled { opacity: 0.35; cursor: default; }
   display: flex; align-items: center; justify-content: center;
 }
 #weekBoardPanel.hidden { display: none; }
+/* Mobile: #mobileController is a fixed overlay pinned to the right of the
+   viewport, so the ice a player actually looks at is the area LEFT of it —
+   but this panel centers on #game-card, whose center is the viewport's.
+   That put every WEEK card visibly right of the rink (reported). #game-card
+   and the viewport share a center (it is translate(-50%) at left:50%), so
+   reserving the controller's own width here re-centers the card on the free
+   part of the board. Padding on the flex container rather than a transform
+   on the box, which has its own entry animation. */
+.mobile-layout #weekBoardPanel { padding-right: var(--controller-reserved-w); }
 /* Dims whatever's underneath (live canvas or the frozen bg image alike) so
    the card's own text stays legible regardless of what the ice looks like
    at that exact moment — same role as #overlay's own --scrim-92 wash. */
