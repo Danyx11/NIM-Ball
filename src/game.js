@@ -1511,16 +1511,17 @@ export function startGame(opts = {}) {
     turnTimerPhase = phase;
     if (aiTeam) prepareAiShots();
   }
-  // One of the two members of the session object this closure returns for a
-  // WEEK session (see the return statement at the very bottom; Stage 2
-  // smuggled this through onMancheSettled's payload instead, Stage 3 gave it
-  // a proper home) — carries THIS still-live session into the next aim turn
-  // instead of it being torn down and a fresh one built for every
-  // half-turn. Clearing externalManche is the whole
-  // mechanism: beginAimPhase() then falls through its reveal branch to the
-  // normal aim tail (phase = firstAimPhase(), i.e. 'lanAim' for a session
-  // that also has singleShotTeam set — which a WEEK reveal session now
-  // always does, see src/weekController.js's playReveal).
+  // The two continuations that make up the session object this closure
+  // returns for a WEEK session (see the return statement at the very
+  // bottom). Between them they let one live engine play a whole sitting —
+  // aim, reveal, aim, reveal — instead of being torn down and rebuilt at
+  // every half-turn the way WEEK used to.
+  //
+  // resumeAim(): carries this session into the next aim turn. Clearing
+  // externalManche is the whole mechanism — beginAimPhase() then falls
+  // through its reveal branch to the normal aim tail (phase =
+  // firstAimPhase(), i.e. 'lanAim' for a session that also has
+  // singleShotTeam set, which a WEEK session always does).
   //
   // Nothing else needs restoring, because nothing was destroyed: a no-goal
   // settle left the stones exactly where they stopped (runSimTick already
@@ -1528,15 +1529,31 @@ export function startGame(opts = {}) {
   // a scoring settle already ran beginRoundReset()'s own slide back to the
   // rack, freed both sweeps, reset curlingCycle and bumped scoreA/scoreB.
   // resumeManches/fastForwardManche deliberately does NOT re-run — its own
-  // resumeManchesApplied guard already covers that, and this path is the
+  // resumeManchesApplied guard already covers that, and these paths are the
   // whole reason it no longer has to (see CLAUDE.md's WEEK section: board
   // reconstruction is a cold-entry mechanism, not a per-turn one).
-  //
-  // Deliberately not a general "session control" API — that's Stage 3. This
-  // is the single continuation the reveal -> next-aim boundary needs.
   function resumeAim() {
     if (torn) return; // session already ended (quit/teardown raced this callback)
     externalManche = null;
+    beginAimPhase();
+  }
+  // startReveal(manche): the mirror image — feeds this session a NEW reveal
+  // to play out, so an opponent's shot that arrives while the engine is
+  // still alive (see src/weekController.js / main.js's post-commit path) is
+  // simply played on the board that's already there, rather than triggering
+  // a teardown and a fresh startGame() that would have to rebuild the same
+  // board from pointManches first.
+  //
+  // Both consumed-flags reset here, not just externalManche: they are
+  // per-reveal bookkeeping (see their own declarations), and a session that
+  // plays a second reveal needs beginAimPhase() to treat it as a brand new
+  // one — apply-and-launch on the next call, report on the one after. Left
+  // set, a second reveal would be silently swallowed.
+  function startReveal(manche) {
+    if (torn) return; // same teardown race as resumeAim above
+    externalManche = manche;
+    externalMancheConsumed = false;
+    mancheSettledReported = false;
     beginAimPhase();
   }
   // WEEK reveal (see beginAimPhase's own externalManche branch) — applies
@@ -7666,5 +7683,5 @@ export function startGame(opts = {}) {
   // a function named "stop" quietly carrying a live-session protocol is
   // both undocumented at the call site and silently lost by any future
   // .bind()/wrapper, whereas a plain object's keys survive that.
-  return singleShotTeam ? { stop: stopGame, resumeAim } : stopGame;
+  return singleShotTeam ? { stop: stopGame, resumeAim, startReveal } : stopGame;
 }
