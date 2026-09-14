@@ -1252,6 +1252,9 @@ export function startGame(opts = {}) {
   // beginAimPhase()'s own externalManche branch for why that stopped being
   // free once the caller no longer tears the session down inside it.
   let mancheSettledReported = false;
+  // Set by startReveal only — see applyExternalManche's own comment on why a
+  // chained reveal must not re-play the launch cue.
+  let externalMancheSkipCue = false;
   // WEEK reconnect (see startGame's own resumeManches comment) — applied on
   // beginAimPhase()'s first real call, not eagerly right after
   // resetPositions() above: fastForwardManche() calls physicsStep(), which
@@ -1429,7 +1432,8 @@ export function startGame(opts = {}) {
     if (externalManche) {
       if (!externalMancheConsumed) {
         externalMancheConsumed = true;
-        applyExternalManche(externalManche);
+        applyExternalManche(externalManche, externalMancheSkipCue);
+        externalMancheSkipCue = false;
       } else if (!mancheSettledReported) {
         // Stage 2 of the WEEK persistent-session migration: reporting the
         // outcome used to be this session's last act — src/weekController.js
@@ -1554,6 +1558,10 @@ export function startGame(opts = {}) {
     externalManche = manche;
     externalMancheConsumed = false;
     mancheSettledReported = false;
+    // This path is reached only from a session that just committed a shot
+    // (main.js hands an opponent's reveal to the live engine it was aimed
+    // on), so the launch cue has already sounded — see applyExternalManche.
+    externalMancheSkipCue = true;
     beginAimPhase();
   }
   // WEEK reveal (see beginAimPhase's own externalManche branch) — applies
@@ -1562,7 +1570,7 @@ export function startGame(opts = {}) {
   // after PRE_SIM_DELAY) plus the sweep-application from net.onLaunch, minus
   // everything network-specific from either (no mancheValidated/sync-check —
   // there's no second live client here to validate against).
-  function applyExternalManche(manche) {
+  function applyExternalManche(manche, skipLaunchCue = false) {
     // Reset per-manche, not per-session — see its own declaration. Only
     // resolveGoal() ever sets this to a real team; a manche that settles
     // without scoring never touches it, so it must default back to null
@@ -1583,7 +1591,17 @@ export function startGame(opts = {}) {
     sweep.B.active = !!manche.sweepB; sweep.B.committed = !!manche.sweepB;
     if (manche.sweepB) { sweep.B.x = manche.sweepB.x; sweep.B.y = manche.sweepB.y; sweep.B.r = manche.sweepB.r; sweep.B.used = true; }
     phase = 'pending';
-    playLaunchEngine();
+    // Skipped when this reveal is chaining straight off the player's own
+    // commit (see startReveal): onValidate's singleShotTeam branch already
+    // played this exact cue barely a PRE_SIM_DELAY ago, for the laser
+    // retracting into the stones. Both calls have always existed, but a
+    // teardown and a fresh session used to sit between them; now that one
+    // live engine carries the commit into the reveal they land back to back
+    // and read as the sound stuttering (reported). A cold-entry reveal has
+    // no preceding commit, so it still cues normally — the two cases are
+    // exactly startReveal vs. this session's own construction, no timing
+    // heuristic needed.
+    if (!skipLaunchCue) playLaunchEngine();
     scheduleGlideLeadIn(PRE_SIM_DELAY);
     trackedTimeout(launchSimulation, PRE_SIM_DELAY);
   }
