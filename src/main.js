@@ -178,15 +178,21 @@ if (IS_MOBILE) document.body.classList.add('mobile-layout');
   // The pre-game menu screens (mode-select + Classic/Custom + Settings +
   // Remote Match lobby + the Replay upload picker — everything reached from
   // a mode tile before a match/replay actually starts) go to #menuStage
-  // instead of #game-card, desktop only — #menuStage is sized off the true
-  // viewport (see style.css), not #card-w/#card-h, so these render at
-  // #homeOverlay's own full-screen scale rather than shrunk into the game's
-  // smaller box. #replayBar (live replay PLAYBACK chrome, shown over the
-  // canvas once a replay is actually running) stays with #game-card above,
-  // same as #overlay/#syncToast — it's gameplay chrome, not a menu screen.
-  // Mobile keeps its existing behavior untouched (still #game-card children)
-  // — #menuStage isn't part of mobile's layout yet.
-  const menuHost = IS_MOBILE ? gameCard : document.getElementById('menuStage');
+  // instead of #game-card, on BOTH platforms now (see conversation — mobile
+  // used to keep these inside #game-card, "untouched" since #menuStage
+  // "wasn't part of mobile's layout yet"). #menuStage is sized off the true
+  // viewport (see style.css's own .mobile-layout #menuStage rule now), not
+  // #card-w/#card-h, so these render at #homeOverlay's own full-screen scale
+  // rather than sharing #game-card's own intentionally-oversized-then-cropped
+  // box — that crop exists for the CANVAS's benefit (fills more of a wide
+  // landscape phone screen), and was clipping the top/bottom of the
+  // mode-select tile grid (and every other menu screen) right along with it
+  // on any phone wider than ~1.71:1 in landscape, i.e. virtually all of them
+  // — reported as "the 4 tiles don't fit in height". #replayBar (live replay
+  // PLAYBACK chrome, shown over the canvas once a replay is actually
+  // running) stays with #game-card above, same as #overlay/#syncToast — it's
+  // gameplay chrome, not a menu screen, so this change doesn't touch it.
+  const menuHost = document.getElementById('menuStage');
   ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
@@ -1142,27 +1148,31 @@ const overlay = document.getElementById('overlay');
 const ovContent = document.getElementById('ovContent');
 
 // ---- Vibe pick (Hockey/Curling, see conversation) — one level above AI/P&P/
-// Remote now: #modeHockey/#modeCurling (the top row of #modeDrawer) open
-// #vibeSubOverlay's own 3-tile drawer (#modeAi/#modeLocal/#modeMatch)
-// instead of going straight into Classic/Custom. `activeVibe` drives every
-// downstream tint (Classic/Custom, Custom Settings, Remote Match's 3
-// screens, the exit-confirm dialog, the in-match +1 goal panel in game.js)
-// — always set before any of those screens is reachable, since they all
-// live behind #vibeSubOverlay now.
+// Remote/Week now: #modeHockey/#modeCurling (the top row of #modeDrawer)
+// open #vibeSubOverlay's own 4-tile drawer (#modeAi/#modeLocal/#modeMatch/
+// #modeWeek) instead of going straight into Classic/Custom. `activeVibe`
+// drives every downstream tint (Classic/Custom, Custom Settings, Remote
+// Match's 3 screens, the exit-confirm dialog, the in-match +1 goal panel in
+// game.js) — always set before any of those screens is reachable, since
+// they all live behind #vibeSubOverlay now.
 let activeVibe = null;
 const vibeSubOverlay = document.getElementById('vibeSubOverlay');
 const vibeBackBtn = document.getElementById('vibeBackBtn');
 const modeAi = document.getElementById('modeAi');
 const modeLocal = document.getElementById('modeLocal');
 const modeMatch = document.getElementById('modeMatch');
-// Cloned into each of #modeAi/#modeLocal/#modeMatch's own top (.tile-vibe-logo,
-// see index.html) rather than a separate external header (see conversation) —
-// aria-hidden in the markup since each tile's own tag already gives screen
-// readers a real name; this is a purely decorative reinforcement, redundant
-// to announce on every tile.
+const modeWeek = document.getElementById('modeWeek');
+const modeWeekWalletGate = document.getElementById('modeWeekWalletGate');
+const modeWeekSub = document.getElementById('modeWeekSub');
+// Cloned into each of #modeAi/#modeLocal/#modeMatch/#modeWeek's own top
+// (.tile-vibe-logo, see index.html) rather than a separate external header
+// (see conversation) — aria-hidden in the markup since each tile's own tag
+// already gives screen readers a real name; this is a purely decorative
+// reinforcement, redundant to announce on every tile.
 const modeAiVibeLogo = document.getElementById('modeAiVibeLogo');
 const modeLocalVibeLogo = document.getElementById('modeLocalVibeLogo');
 const modeMatchVibeLogo = document.getElementById('modeMatchVibeLogo');
+const modeWeekVibeLogo = document.getElementById('modeWeekVibeLogo');
 const VIBE_LABELS = { hockey: 'NimiCurl', curling: 'Pure Curling' };
 const VIBE_TILES = { hockey: modeHockey, curling: modeCurling };
 function vibeTintClass() { return activeVibe === 'curling' ? 'mode-curling' : 'mode-hockey'; }
@@ -1173,17 +1183,27 @@ function showVibeDrawer(vibe) {
   modeAiVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
   modeLocalVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
   modeMatchVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
+  modeWeekVibeLogo.replaceChildren(vibeIcon.cloneNode(true));
   vibeSubOverlay.classList.remove('mode-hockey', 'mode-curling');
   vibeSubOverlay.classList.add(vibeTintClass());
   modeDrawer.classList.add('hidden');
   vibeSubOverlay.classList.remove('hidden');
   modeOverlay.classList.remove('hidden');
+  // Re-checked every time this drawer opens (not just once) — connecting a
+  // wallet elsewhere (the sidebar identity pill, the connect gate) shouldn't
+  // leave a stale gate note showing here. Same wallet-gate pattern the old
+  // LIVE/WEEK picker's own #weekWalletGate used (see conversation — moved
+  // here now that WEEK's own entry point lives right in this drawer instead
+  // of behind More) — no guests.
+  const isGuest = !hubAddress;
+  modeWeekWalletGate.classList.toggle('hidden', !isGuest);
+  modeWeekSub.classList.toggle('hidden', isGuest);
 }
 modeHockey.addEventListener('click', () => { audio.play('button'); showVibeDrawer('hockey'); });
 modeCurling.addEventListener('click', () => { audio.play('button'); showVibeDrawer('curling'); });
-// Lives inside #modeMatch now (see index.html's own comment there) — without
-// stopPropagation this click would also bubble up into modeMatch's own
-// listener below and immediately jump into Remote right after going back.
+// Lives inside #modeWeek now (see index.html's own comment there) — without
+// stopPropagation this click would also bubble up into modeWeek's own
+// listener below and immediately jump into WEEK right after going back.
 vibeBackBtn.addEventListener('click', (e) => { e.stopPropagation(); audio.play('button'); showModeDrawer(); });
 
 // vs AI: moved in from the old top-level AI Training tile (see conversation,
@@ -1198,7 +1218,7 @@ modeAi.addEventListener('click', async () => {
   if (activeVibe === 'curling') { showConstructionScreen('AI Training'); return; }
   // #modeAi lives inside #vibeSubOverlay — a sibling of #modeOverlay, not
   // nested inside it (see that overlay's own comment) — so hiding
-  // #modeOverlay alone leaves this tile's own 3-tile picker sitting on top
+  // #modeOverlay alone leaves this tile's own 4-tile picker sitting on top
   // of the live match underneath. Every other tile in here reaches this
   // same point via showClassicCustomScreen, which already calls
   // hideRemoteMatchStack() on the way; AI skips that screen entirely, so it
@@ -1217,74 +1237,67 @@ modeAi.addEventListener('click', async () => {
   syncIdentityPill();
 });
 
-// ---- More: Custom / Week / Replay (see conversation, nimicurl arborescence
-// rework) — reached from #modeMore, the old top-level AI Training tile's
-// slot. Same sibling-of-#modeOverlay pattern as #vibeSubOverlay above.
-const moreSubOverlay = document.getElementById('moreSubOverlay');
-const moreBackBtn = document.getElementById('moreBackBtn');
-const moreCustom = document.getElementById('moreCustom');
-const moreWeek = document.getElementById('moreWeek');
-const moreReplay = document.getElementById('moreReplay');
-const moreWeekWalletGate = document.getElementById('moreWeekWalletGate');
-const moreWeekSub = document.getElementById('moreWeekSub');
-function showMoreSubOverlay() {
-  setModeSelectVibeBackground(null); // no vibe chosen yet at this level
-  hideRemoteMatchStack(); // see that function's own comment
-  modeDrawer.classList.add('hidden');
-  modeOverlay.classList.remove('hidden');
-  moreSubOverlay.classList.remove('hidden');
-  // Re-checked every time this screen opens (not just once) — connecting a
-  // wallet elsewhere (the sidebar identity pill, the connect gate) shouldn't
-  // leave a stale gate note showing here. Same wallet-gate pattern the old
-  // LIVE/WEEK picker's own #weekWalletGate used, moved here now that WEEK's
-  // entry point lives under More instead of behind Remote (see conversation).
-  const isGuest = !hubAddress;
-  moreWeekWalletGate.classList.toggle('hidden', !isGuest);
-  moreWeekSub.classList.toggle('hidden', isGuest);
-}
-modeMore.addEventListener('click', () => { audio.play('button'); modeOverlay.classList.add('hidden'); showMoreSubOverlay(); });
-moreBackBtn.addEventListener('click', (e) => { e.stopPropagation(); audio.play('button'); showModeDrawer(); });
-moreCustom.addEventListener('click', () => { audio.play('button'); showMoreVibeOverlay('custom'); });
-moreWeek.addEventListener('click', () => {
+// WEEK: moved in from the old More tile (see conversation, nimicurl
+// arborescence rework — More now only keeps Custom/Replay) — the vibe is
+// already chosen by the time this tile is reachable, so this skips straight
+// to the Classic/Custom fork WEEK has always used (showVibeWeekFlow,
+// defined further down), no separate vibe-repick step needed anymore.
+modeWeek.addEventListener('click', () => {
   audio.play('button');
-  if (!hubAddress) return; // wallet gate note is already showing — see showMoreSubOverlay
-  showMoreVibeOverlay('week');
+  if (!hubAddress) return; // wallet gate note is already showing — see showVibeDrawer
+  showVibeWeekFlow();
 });
 // Tapping the gate note itself connects (same flow as the sidebar identity
 // pill / connect gate's own CONNECT button, see connectIdentity() below) —
-// stopPropagation so it doesn't also trigger #moreWeek's own "enter WEEK"
+// stopPropagation so it doesn't also trigger #modeWeek's own "enter WEEK"
 // click right after connecting succeeds.
-moreWeekWalletGate.addEventListener('click', (e) => {
+modeWeekWalletGate.addEventListener('click', (e) => {
   e.stopPropagation();
   audio.play('button');
   connectIdentity()
     .then((address) => {
       hubAddress = address;
       syncIdentityPill();
-      moreWeekWalletGate.classList.add('hidden');
-      moreWeekSub.classList.remove('hidden');
+      modeWeekWalletGate.classList.add('hidden');
+      modeWeekSub.classList.remove('hidden');
     })
     .catch(() => {}); // cancelled/failed — stay on this screen, gate note still showing
 });
+
+// ---- More: Custom / Replay (see conversation, nimicurl arborescence rework
+// — Week moved into #vibeSubOverlay above) — reached from #modeMore, the
+// old top-level AI Training tile's slot. Same sibling-of-#modeOverlay
+// pattern as #vibeSubOverlay above.
+const moreSubOverlay = document.getElementById('moreSubOverlay');
+const moreBackBtn = document.getElementById('moreBackBtn');
+const moreCustom = document.getElementById('moreCustom');
+const moreReplay = document.getElementById('moreReplay');
+function showMoreSubOverlay() {
+  setModeSelectVibeBackground(null); // no vibe chosen yet at this level
+  hideRemoteMatchStack(); // see that function's own comment
+  modeDrawer.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  moreSubOverlay.classList.remove('hidden');
+}
+modeMore.addEventListener('click', () => { audio.play('button'); modeOverlay.classList.add('hidden'); showMoreSubOverlay(); });
+moreBackBtn.addEventListener('click', (e) => { e.stopPropagation(); audio.play('button'); showModeDrawer(); });
+moreCustom.addEventListener('click', () => { audio.play('button'); showMoreVibeOverlay(); });
 moreReplay.addEventListener('click', () => { showReplayUpload(); });
 
-// ---- More's own vibe pick (NimiCurl/Pure Curling), shared by Custom and
-// Week (see conversation) — #modeHockey/#modeCurling's own click handlers
-// are permanently wired to the normal AI/P&P/Remote flow above, so this is
+// ---- More's own vibe pick (NimiCurl/Pure Curling) for Custom (see
+// conversation — Week moved out to #vibeSubOverlay, so this only ever
+// serves Custom now) — #modeHockey/#modeCurling's own click handlers are
+// permanently wired to the normal AI/P&P/Remote/Week flow above, so this is
 // its own small picker instead of reusing those tiles directly. Icons cloned
 // once at load (below), same reuse idiom #vibeSubOverlay's own
-// tile-vibe-logo already uses — no new art. `moreFlowTarget` records which
-// of the two flows is asking ('custom' or 'week') so picking a vibe here
-// knows where to continue.
+// tile-vibe-logo already uses — no new art.
 const moreVibeOverlay = document.getElementById('moreVibeOverlay');
 const moreVibeBackBtn = document.getElementById('moreVibeBackBtn');
 const moreVibeHockey = document.getElementById('moreVibeHockey');
 const moreVibeCurling = document.getElementById('moreVibeCurling');
 document.getElementById('moreVibeHockeyIcon').replaceChildren(modeHockey.querySelector('.mode-icon').cloneNode(true));
 document.getElementById('moreVibeCurlingIcon').replaceChildren(modeCurling.querySelector('.mode-icon').cloneNode(true));
-let moreFlowTarget = null;
-function showMoreVibeOverlay(target) {
-  moreFlowTarget = target;
+function showMoreVibeOverlay() {
   hideRemoteMatchStack(); // see that function's own comment
   modeOverlay.classList.remove('hidden');
   moreVibeOverlay.classList.remove('hidden');
@@ -1296,8 +1309,7 @@ function pickMoreVibe(vibe) {
   activeVibe = vibe;
   setModeSelectVibeBackground(vibe);
   moreVibeOverlay.classList.add('hidden');
-  if (moreFlowTarget === 'week') showMoreWeekFlow();
-  else showMoreCustomSettingsScreen(vibe);
+  showMoreCustomSettingsScreen(vibe);
 }
 
 // ---- More's own P&P/Remote picker, for a Custom config already chosen (see
@@ -1654,12 +1666,14 @@ function showRemoteConnectError(message, config) {
   document.getElementById('remoteRetryBtn').onclick = () => { audio.play('button'); hideLobby(); hostMatch(config); };
   document.getElementById('remoteBackBtn').onclick = () => { audio.play('button'); hideLobby(); returnToModeSelect(); };
 }
-// WEEK's own entry point, reached via More (see conversation) — same
-// Classic/Custom screen, routed to hostWeekMatch() instead of hostMatch().
-// Back returns to More's own vibe picker; also reused as hostWeekMatch's own
-// error-retry target (activeVibe is already set correctly by then).
-function showMoreWeekFlow(errorMsg) {
-  showClassicCustomScreen('remote', (config) => hostWeekMatch(config), () => showMoreVibeOverlay('week'), errorMsg);
+// WEEK's own entry point, reached straight off #vibeSubOverlay now (see
+// conversation, nimicurl arborescence rework — used to go through More's own
+// vibe-repick step first) — same Classic/Custom screen, routed to
+// hostWeekMatch() instead of hostMatch(). Back returns to the vibe drawer,
+// vibe already set; also reused as hostWeekMatch's own error-retry target
+// (activeVibe is already set correctly by then either way).
+function showVibeWeekFlow(errorMsg) {
+  showClassicCustomScreen('remote', (config) => hostWeekMatch(config), () => showVibeDrawer(activeVibe), errorMsg);
 }
 
 ccBackBtn.addEventListener('click', () => {
@@ -1746,7 +1760,7 @@ csBackBtn.addEventListener('click', () => {
   // More's own Custom flow has no Classic/Custom fork to return to (see
   // showMoreCustomSettingsScreen's own comment) — back one step means
   // re-picking the vibe instead.
-  if (customSettingsMode === 'more') { showMoreVibeOverlay('custom'); return; }
+  if (customSettingsMode === 'more') { showMoreVibeOverlay(); return; }
   classicCustomOverlay.classList.remove('hidden');
 });
 
@@ -2725,7 +2739,7 @@ async function hostWeekMatch(matchConfig) {
     } catch (err) {
       if (err.reason === 'occupied' && attempt < 4) { code = generateMatchCode(); continue; }
       hideLoadingOverlay();
-      showMoreWeekFlow(err.message);
+      showVibeWeekFlow(err.message);
       return;
     }
   }
