@@ -1227,14 +1227,15 @@ modeAi.addEventListener('click', async () => {
 });
 
 // WEEK: moved in from the old More tile (see conversation, nimicurl
-// arborescence rework — More now only keeps Custom/Replay) — the vibe is
-// already chosen by the time this tile is reachable, so this skips straight
-// to the Classic/Custom fork WEEK has always used (showVibeWeekFlow,
-// defined further down), no separate vibe-repick step needed anymore.
+// arborescence rework — More now only keeps Custom/Replay). The vibe is
+// already chosen by the time this tile is reachable, and WEEK is never
+// played with Custom rules, so there is nothing left to pick — no
+// Classic/Custom fork, no confirmation step, straight into a Classic match
+// (per explicit request).
 modeWeek.addEventListener('click', () => {
   audio.play('button');
   if (!hubAddress) { showWeekWalletPanel(); return; }
-  showVibeWeekFlow();
+  hostWeekMatch({ ...DEFAULT_MATCH_CONFIG });
 });
 // WEEK is the one mode with no guest play (see party/weekArbiter.js — the
 // wallet address IS the reconnection credential). The tile keeps its normal
@@ -1256,7 +1257,7 @@ function showWeekWalletPanel() {
         hubAddress = address;
         syncIdentityPill();
         hideNetPanel();
-        showVibeWeekFlow(); // straight on into WEEK, no second tap on the tile
+        hostWeekMatch({ ...DEFAULT_MATCH_CONFIG }); // straight on into WEEK, no second tap on the tile
       })
       .catch(() => {}); // cancelled/failed — stay on this panel
   });
@@ -1670,10 +1671,6 @@ function showRemoteConnectError(message, config) {
 // hostWeekMatch() instead of hostMatch(). Back returns to the vibe drawer,
 // vibe already set; also reused as hostWeekMatch's own error-retry target
 // (activeVibe is already set correctly by then either way).
-function showVibeWeekFlow(errorMsg) {
-  showClassicCustomScreen('remote', (config) => hostWeekMatch(config), () => showVibeDrawer(activeVibe), errorMsg);
-}
-
 ccBackBtn.addEventListener('click', () => {
   audio.play('button');
   classicCustomOverlay.classList.add('hidden');
@@ -2737,7 +2734,13 @@ async function hostWeekMatch(matchConfig) {
     } catch (err) {
       if (err.reason === 'occupied' && attempt < 4) { code = generateMatchCode(); continue; }
       hideLoadingOverlay();
-      showVibeWeekFlow(err.message);
+      // WEEK has no Classic/Custom screen to fall back onto any more (see
+      // #modeWeek's own handler) — a creation failure just says so and
+      // returns to the vibe drawer the tile was tapped from.
+      showNetPanel(`<p class="lan-error">${escapeHtml(err.message)}</p><button class="bigbtn" id="weekHostErrBtn">OK</button>`);
+      document.getElementById('weekHostErrBtn').addEventListener('click', () => {
+        audio.play('button'); hideNetPanel(); showVibeDrawer(activeVibe);
+      });
       return;
     }
   }
@@ -3152,35 +3155,36 @@ function showWeekWaitingScreen(week, boardSnapshot) {
   activeWeekWaiting = week;
   modeOverlay.classList.add('hidden');
   const isPending = week.status === 'pending';
-  const messageField = `<input id="weekMsgInput" type="text" maxlength="60" placeholder="Leave a message (optional)…" autocomplete="off" />`;
+  // One action, not three (see conversation): the message field is simply
+  // always open — whatever is typed goes with the single Quit below, nothing
+  // if it is left empty — and the line under it says where the match will be
+  // waiting, which is what the two separate "come back" / "exit" buttons
+  // were really trying to express. The code + share row stays for 'pending',
+  // since that is the only way A can invite B at all.
   showWeekBoardPanel(`
     <h2>Your shot is ready.</h2>
+    <input id="weekMsgInput" type="text" maxlength="60" placeholder="Leave a message…" autocomplete="off" />
     ${isPending ? `
-      ${messageField}
       <div class="match-code-row">
         <div class="match-code">${week.code}</div>
         <button class="code-share-btn" id="weekShareBtn" aria-label="Share match">${CODE_SHARE_ICON}</button>
       </div>
-    ` : `
-      <div id="weekMsgArea" class="hidden">${messageField}</div>
-    `}
-    <div class="week-panel-row">
-      ${isPending ? '' : `<button class="bigbtn" id="weekMsgToggleBtn">Message</button>`}
-      <button class="bigbtn" id="weekQuitBtn">Come back to your match anytime</button>
-    </div>
-    <button class="bigbtn" id="weekExitBtn">Exit</button>
+    ` : ''}
+    <button class="bigbtn" id="weekQuitBtn">Quit</button>
+    <p>Find your match again under Code / Matches.</p>
   `, boardSnapshot);
 
-  // Shared by both buttons below — a single message slot per recipient
-  // (see party/weekArbiter.js's inbox), sent whenever either is pressed,
-  // whatever's currently typed, if anything. Fire-and-forget, NOT awaited:
+  // The panel's single Quit — a single message slot per recipient
+  // (see party/weekArbiter.js's inbox), sent on the way out with whatever
+  // is currently typed, if anything. Fire-and-forget, NOT awaited:
   // awaiting it here previously meant a slow/stuck reply left the whole
   // click silently doing nothing (reported: "click exit, rien ne se
-  // passe") — navigation must never wait on it. No confirmation dialog on
-  // either — per explicit request, this isn't "quit and lose the match"
+  // passe") — navigation must never wait on it. No confirmation dialog
+  // here — per explicit request, this isn't "quit and lose the match"
   // (there's nothing to lose, the shot's already saved server-side), just
-  // "step away for now"; `next` is the only thing that differs between the
-  // two — Code/Matches (weekQuitBtn) vs the main menu (weekExitBtn).
+  // "step away for now". `next` stays a parameter because performMatchExit
+  // and the Home/logo path reach this same teardown with their own
+  // destination.
   function leaveWaitingScreen(next) {
     activeWeekWaiting = null; // handling it ourselves — performMatchExit doesn't own this exit path
     const text = document.getElementById('weekMsgInput')?.value.trim();
@@ -3191,10 +3195,6 @@ function showWeekWaitingScreen(week, boardSnapshot) {
   }
   document.getElementById('weekQuitBtn').addEventListener('click', () => {
     audio.play('button');
-    leaveWaitingScreen(showJoinCodeScreen);
-  });
-  document.getElementById('weekExitBtn').addEventListener('click', () => {
-    audio.play('button');
     leaveWaitingScreen(showModeDrawer);
   });
 
@@ -3202,12 +3202,6 @@ function showWeekWaitingScreen(week, boardSnapshot) {
     document.getElementById('weekShareBtn').addEventListener('click', (e) => {
       audio.play('button');
       shareWeekMatch(week, document.getElementById('weekMsgInput').value.trim(), e.currentTarget);
-    });
-  } else {
-    document.getElementById('weekMsgToggleBtn').addEventListener('click', (e) => {
-      audio.play('button');
-      e.currentTarget.classList.add('hidden');
-      document.getElementById('weekMsgArea').classList.remove('hidden');
     });
   }
 }
@@ -3269,7 +3263,19 @@ async function playWeekReveal(week, chained = false, liveSession = null) {
       weekEntryReady,
     }, (s) => { session = s; activeStopGame = s.stop; });
     if (!chained) {
-      showWeekBoardPanel(`<button class="bigbtn" id="weekEntryWatchBtn">Watch the reveal</button>`);
+      // Same inbox delivery the PLAY card does (see showWeekAimScreen): a
+      // message is consumed server-side at connect, so whichever entry card
+      // this player actually lands on has to show it or it is lost. A
+      // returning player with a reveal waiting lands here, not there —
+      // enterWeekMatch checks week.reveal first (reported: messages never
+      // showed up on coming back to a match).
+      showWeekBoardPanel(`
+        ${week.inboxMessage ? `
+          <h2>${week.opponentAddress ? shortenAddressCompact(week.opponentAddress) : 'Your opponent'} left you a message</h2>
+          <p class="week-quote">"${escapeHtml(week.inboxMessage.text)}"</p>
+        ` : ''}
+        <button class="bigbtn" id="weekEntryWatchBtn">Watch the reveal</button>
+      `);
       document.getElementById('weekEntryWatchBtn').addEventListener('click', () => {
         audio.play('button'); hideWeekBoardPanel(); resolveWeekEntry();
       });
