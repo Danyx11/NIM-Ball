@@ -63,7 +63,12 @@ function resumeManchesFor(week) { return week.pointManches || null; }
 // call already feeds directly.
 export function playSingleShot(week, engineOpts, onSessionStart) {
   return new Promise((resolve) => {
-    const stopGame = startGame({
+    // A singleShotTeam session hands back a session object rather than the
+    // bare teardown function every other mode gets (see game.js's own return
+    // statement). This half of WEEK only ever needs the teardown, so it takes
+    // just that — and, like playReveal below, never lets the object itself
+    // travel any further: main.js only ever sees a plain callable.
+    const { stop: stopGame } = startGame({
       ...engineOpts,
       singleShotTeam: week.team,
       resumeManches: resumeManchesFor(week),
@@ -121,7 +126,12 @@ export function playReveal(week, engineOpts, onSessionStart) {
     // Set only while session.aimNextShot() below is waiting on the next
     // turn's commit — see onShotCommitted.
     let resolveShot = null;
-    const stopGame = startGame({
+    // The engine's own session object (Stage 3, see game.js's return
+    // statement): `stop` is the same bare teardown every other mode gets,
+    // `resumeAim` is what carries this session past the settled reveal into
+    // the next aim turn. Both stay inside this file — the handle handed up
+    // to main.js below is this file's own, built from them.
+    const { stop: stopGame, resumeAim } = startGame({
       ...engineOpts,
       externalManche: manche,
       // Stage 2: this session outlives the reveal, so it has to be a full
@@ -147,12 +157,7 @@ export function playReveal(week, engineOpts, onSessionStart) {
       // scoreA/scoreB/scoredTeam/matchOver) so the caller can report the
       // exact same shot data back to party/weekArbiter.js's completeRound
       // without recomputing the team-relative -> A/B mapping itself (see
-      // revealToManche above) — main.js's playWeekReveal does exactly
-      // that. boardSnapshot: same freeze-frame idea as playSingleShot's own
-      // (captured right before stopGame(), same reason — main.js shows this
-      // as the background behind its lightweight spinner while completeRound
-      // round-trips and, if the match continues, the next aim session warms
-      // up, instead of a full black cut).
+      // revealToManche above) — main.js's playWeekReveal does exactly that.
       // The next turn's own commit, played on this same session — resolves
       // session.aimNextShot() below with exactly the shape playSingleShot
       // resolves with, so the caller's post-commit path is shared verbatim.
@@ -162,10 +167,10 @@ export function playReveal(week, engineOpts, onSessionStart) {
         resolveShot = null;
         done?.({ stones, sweep, boardSnapshot });
       },
-      // `resumeAim` is the engine's Stage 2 continuation (see game.js's own
-      // resumeAim) — consumed here rather than forwarded, so main.js only
-      // ever sees the `session` handle below, not the engine's internals.
-      onMancheSettled: ({ resumeAim, ...result }) => {
+      onMancheSettled: (result) => {
+        // boardSnapshot: same freeze-frame idea as playSingleShot's own —
+        // main.js shows it as the background behind its lightweight spinner
+        // while completeRound round-trips, instead of a full black cut.
         const boardSnapshot = document.getElementById('stage').toDataURL();
         // No stopGame() here anymore — see this function's own header
         // comment. The engine is parked on the settled board (game.js's
@@ -174,8 +179,12 @@ export function playReveal(week, engineOpts, onSessionStart) {
           ...result,
           manche,
           boardSnapshot,
+          // This file's own handle, built from the engine's session object
+          // (destructured above) — deliberately a different, smaller shape:
+          // main.js has no business resuming an aim phase without also
+          // waiting on the shot it produces, so those two are one call here.
           session: {
-            stopGame,
+            stop: stopGame,
             // Starts the next aim turn on this live engine and resolves with
             // that turn's committed shot: playSingleShot's own aim half,
             // minus the startGame()/stopGame() that used to bracket it. No

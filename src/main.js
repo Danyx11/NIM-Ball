@@ -3062,7 +3062,7 @@ async function showWeekAimScreen(week, chained = false, liveSession = null) {
     // hideMatchChrome() nulls activeStopGame on its way here, which was
     // correct while that also meant the engine had just been torn down —
     // it hasn't anymore (Stage 2), so the handle has to come straight back.
-    activeStopGame = liveSession.stopGame;
+    activeStopGame = liveSession.stop;
     // No onMatchReady to hand the wait indicator to (no new session is
     // starting, so nothing fires it) — this is the moment the spinner
     // playWeekReveal put up over the settled board has served its purpose.
@@ -3089,7 +3089,7 @@ async function showWeekAimScreen(week, chained = false, liveSession = null) {
     });
   }
   const { stones, sweep, boardSnapshot } = await shotPromise;
-  if (liveSession) liveSession.stopGame();
+  if (liveSession) liveSession.stop();
   pendingWeekCancel = null; // shot committed — no longer cancellable-on-exit
   activeWeekAiming = null; // shot committed — no longer an unfinished turn to confirm-quit over
   hideMatchChrome();
@@ -3258,7 +3258,7 @@ async function playWeekReveal(week, chained = false) {
       // of here would ever stop it — returnToModeSelect()'s own
       // hideMatchChrome() only nulls activeStopGame, it never calls it. So
       // this branch has to end the session itself.
-      result.session.stopGame();
+      result.session.stop();
       hideWeekSpinner();
       week.close();
       showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${snapshot.scoreA} · Team Yellow ${snapshot.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
@@ -3280,7 +3280,7 @@ async function playWeekReveal(week, chained = false) {
   } catch (err) {
     // Same reasoning as the 'completed' branch above — this path abandons
     // the session, so it has to end it rather than leave it running.
-    result.session.stopGame();
+    result.session.stop();
     hideWeekSpinner();
     week.close();
     showWeekErrorScreen(err.message);
