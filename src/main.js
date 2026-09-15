@@ -454,7 +454,7 @@ const rockHandlers = { onRockSound: triggerSound, onRockExit: triggerExit, onRoc
 // yet). Quitting through either confirm dialog below during that one
 // window cancels the match outright (week.abandon()) instead of leaving a
 // phantom "pending, nothing happened" row behind — still counting against
-// the 2-active-match cap and cluttering My Matches for a match that never
+// the active-match cap and cluttering My Matches for a match that never
 // really started. Cleared the instant that window closes (the shot
 // commits) or once handled here.
 let pendingWeekCancel = null;
@@ -3522,7 +3522,7 @@ function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<
 // match cap — per explicit request, rather than a variable-length list; an
 // unused slot renders as a greyed "Empty" placeholder instead of shrinking.
 const myMatchesContent = document.getElementById('myMatchesContent');
-const MY_MATCHES_SLOTS = 2;
+const MY_MATCHES_SLOTS = 3; // keep in sync with party/playerIndex.js's MAX_ACTIVE_MATCHES
 // 'yourTurn' (this team hasn't submitted their own current-manche shot yet)
 // and 'revealReady' (party/weekArbiter.js's turnLabelFor — this team has a
 // reveal genuinely ready for them, independent of whether the opponent has
