@@ -2130,6 +2130,10 @@ const LEAGUE_MOCK_MAIN = [
   { name: 'NQ77 1102 90LK MMSN 22QT AK91 P02C 771M', pts: 801 },
   { name: '@frostbite', pts: 754 }, { name: '@rockslinger', pts: 689 },
   { name: '@glacequeen', pts: 612 }, { name: 'NQ55 2201 88TM KLPQ 11XT AB03 P44C 992M', pts: 540 },
+  { name: '@houseshot', pts: 498 }, { name: '@brokenbroom', pts: 461 },
+  { name: 'NQ33 6610 22PL MKST 99XQ AB04 P11C L92M', pts: 417 },
+  { name: '@sweepdream', pts: 389 }, { name: '@coldshoulder', pts: 350 },
+  { name: '@rinkrat', pts: 312 }, { name: 'NQ90 1145 77KM XPLS 33TQ AB01 P66C M09L', pts: 268 },
 ];
 const LEAGUE_MOCK_WEEK = [
   { name: '@icebreaker', pts: 216 }, { name: '@nico', pts: 184, me: true },
@@ -2137,6 +2141,8 @@ const LEAGUE_MOCK_WEEK = [
   { name: '@curlqueen', pts: 139 }, { name: '@houseshot', pts: 122 },
   { name: '@frostbite', pts: 97 }, { name: 'NQ21 9012 KPLM 33XQ 8801 TT02 551C M09M', pts: 84 },
   { name: '@rockslinger', pts: 63 }, { name: '@glacequeen', pts: 41 },
+  { name: '@brokenbroom', pts: 37 }, { name: 'NQ44 2201 KMPT 55XL 66QS AB09 P02C L71M', pts: 29 },
+  { name: '@sweepdream', pts: 22 }, { name: '@coldshoulder', pts: 15 },
 ];
 function renderLeagueRankPill(el, list) {
   el.innerHTML = list.map((row, i) => {
