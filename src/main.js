@@ -526,9 +526,16 @@ const navHome = document.getElementById('navHome');
 navHome.addEventListener('click', () => {
   if (!modeOverlay.classList.contains('hidden')) {
     // Already browsing the menu system, not mid-match — just resurface the
-    // tile grid (no-op if that's already what's showing).
+    // tile grid (no-op if that's already what's showing). showModeDrawer()
+    // itself doesn't hide whichever sidebar panel (League, About, Nimiq,
+    // Partnership, a rules screen…) got us here — each of those only hides
+    // itself via its own back/exit button — so without this sweep Home
+    // silently did nothing from inside one of them (reported: League stayed
+    // on screen). Same OTHER_MENU_OVERLAY_IDS sweep showHowToScreen already
+    // uses below for the identical reason.
     if (modeDrawer.classList.contains('hidden')) {
       audio.play('button');
+      OTHER_MENU_OVERLAY_IDS.forEach((id) => document.getElementById(id).classList.add('hidden'));
       showModeDrawer();
     }
     return;
