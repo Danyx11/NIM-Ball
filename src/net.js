@@ -68,7 +68,12 @@ function weekHttpHost() { return PARTY_HOST.replace(/^ws/, 'http'); }
 // WEEK function below normalizes to this same spaceless form before using
 // an address as an identifier, so a match created from one and looked up
 // from the other still land on the same PlayerIndex/WeekArbiter room.
-function normalizeAddress(address) { return address.replace(/\s+/g, ''); }
+// Exported (not just used internally) so callers outside this module — e.g.
+// src/main.js's League panel, comparing hubAddress (raw, possibly
+// space-separated) against addresses returned by party/leagueSeason.js
+// (already normalized server-side, same as every other stored address here)
+// — can normalize before comparing instead of duplicating this regex.
+export function normalizeAddress(address) { return address.replace(/\s+/g, ''); }
 
 // Opens the connection for a WEEK match, either creating one fresh (`intent:
 // 'create'`, needs `game`/`config`) or joining/resuming an existing one
@@ -220,6 +225,51 @@ export async function dismissWeekMatch(address, code) {
     await fetch(`${weekHttpHost()}/parties/player-index/${normalizeAddress(address)}?code=${encodeURIComponent(code)}`, { method: 'DELETE' });
   } catch {
     // best-effort, see comment above
+  }
+}
+
+// ---------------------------------------------------------------------
+// League Beta (party/leagueSeason.js) — a plain HTTP GET, same one-off
+// "connect/fetch/act, nothing held open" shape as fetchMyWeekMatches above,
+// against the one fixed-name Durable Object for the current season.
+// LEAGUE_SEASON_ID mirrors party/leagueRating.js's CURRENT_SEASON_ID —
+// duplicated rather than imported, same src//party bundle-boundary reason
+// as normalizeAddress's own WEEK-address comment above (party/ is a
+// separate Cloudflare Worker bundle, never shared code with the browser
+// build). Keep the two in sync by hand if the season ever changes.
+const LEAGUE_SEASON_ID = 'beta-2026';
+
+// Best-effort like fetchMyWeekMatches — returns null on any failure so the
+// League panel can render a "couldn't load" state instead of throwing.
+export async function fetchLeagueStats(address) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/league-season/${LEAGUE_SEASON_ID}?address=${encodeURIComponent(normalizeAddress(address))}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchLeagueLeaderboard(limit = 20) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/league-season/${LEAGUE_SEASON_ID}?leaderboard=1&limit=${limit}`);
+    if (!res.ok) return { leaderboard: [] };
+    return await res.json();
+  } catch {
+    return { leaderboard: [] };
+  }
+}
+
+// Mirrors fetchLeagueLeaderboard above but hits the weekly variant of
+// party/leagueSeason.js's onRequest.
+export async function fetchLeagueWeeklyLeaderboard(limit = 20) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/league-season/${LEAGUE_SEASON_ID}?leaderboard=1&weekly=1&limit=${limit}`);
+    if (!res.ok) return { leaderboard: [] };
+    return await res.json();
+  } catch {
+    return { leaderboard: [] };
   }
 }
 

@@ -33,6 +33,7 @@
 // Durable Object being evicted between two visits that can be days apart.
 import { Server, getServerByName } from 'partyserver';
 import { RADAR_ROOM_NAME } from './radar.js';
+import { CURRENT_SEASON_ID, isClassicMatchConfig } from './leagueRating.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const JOIN_WINDOW_MS = DAY_MS;        // A's code stays open for B to join
@@ -222,6 +223,15 @@ export class WeekArbiter extends Server {
     getServerByName(this.env.RadarCollector, RADAR_ROOM_NAME)
       .then((radar) => radar[method](payload))
       .catch((err) => console.error(`[radar] ${method} failed:`, err));
+  }
+
+  // League Beta (party/leagueSeason.js) — same RPC shape as radarNotify
+  // above, pointed at the season's own Durable Object instead.
+  leagueNotify(method, payload) {
+    if (!this.env?.LeagueSeason) return;
+    getServerByName(this.env.LeagueSeason, CURRENT_SEASON_ID)
+      .then((league) => league[method](payload))
+      .catch((err) => console.error(`[league] ${method} failed:`, err));
   }
 
   async onConnect(connection, ctx) {
@@ -491,6 +501,30 @@ export class WeekArbiter extends Server {
         this.match.status = 'completed';
         await this.ctx.storage.deleteAlarm();
         this.radarNotify('recordMatchCompleted', { matchId: this.name, mode: 'week', timestampMs: Date.now() });
+        // League Beta (party/leagueSeason.js) — WEEK already structurally
+        // guarantees "both players actually connected" right here: scoreA/
+        // scoreB can only ever move inside the `bothIn` branch above, which
+        // itself requires both pendingShots.A AND pendingShots.B to have
+        // been submitted at least once — i.e. B must have actually joined
+        // and played (see this.match.playerB, set only once B joins in
+        // onConnect's 'join' branch below). WEEK also requires a connected
+        // wallet on BOTH sides unconditionally (no guest mode at all — see
+        // this file's own header comment), so unlike LIVE there's no
+        // separate address check needed. Classic-ruleset-only per scope
+        // decision — this.match.config is whatever the creator's client
+        // sent verbatim at intent==='create' time (see onConnect above),
+        // same trust model as every other client-sent field this file
+        // already treats as opaque.
+        if (this.match.playerA && this.match.playerB && isClassicMatchConfig(this.match.config)) {
+          const winner = this.match.scoreA >= target ? 'A' : 'B';
+          this.leagueNotify('recordMatchCompleted', {
+            // 'week:' prefix keeps this globally distinct from LIVE's own
+            // 'live:'-prefixed ids (see party/arbiter.js) even though match
+            // codes are drawn from the same 4-character space.
+            leagueMatchId: `week:${this.name}`, mode: 'week', timestampMs: Date.now(),
+            playerA: { address: this.match.playerA }, playerB: { address: this.match.playerB }, winner,
+          });
+        }
       }
       await this.persist();
       if (matchOver) {

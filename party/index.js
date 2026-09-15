@@ -1,7 +1,7 @@
 // Cloudflare Worker entry point (see wrangler.jsonc's "main") — routes
 // incoming requests to the right Durable Object instance by room name.
 // Exporting each class here is required — wrangler.jsonc's durable_objects
-// bindings point at this module. Four classes now:
+// bindings point at this module. Five classes now:
 //   Arbiter        — LIVE (see party/arbiter.js), room name = the 4-char
 //                    match code, routed at /parties/arbiter/<code> (src/net.js).
 //   WeekArbiter    — WEEK (see party/weekArbiter.js), same code-as-room-name
@@ -17,12 +17,20 @@
 //                    file adds for it is the inbound Telegram webhook below
 //                    (/radar/telegram-webhook) — everything else Radar-
 //                    related is either that RPC or the scheduled() cron.
+//   LeagueSeason   — League Beta (see party/leagueSeason.js), one fixed-name
+//                    instance per season (room name = the season id, see
+//                    party/leagueRating.js's CURRENT_SEASON_ID) that
+//                    Arbiter/WeekArbiter call into over DO RPC exactly like
+//                    RadarCollector, plus a plain HTTP GET surface
+//                    (/parties/league-season/<seasonId>) for the browser's
+//                    own minimal League panel (src/net.js/src/main.js).
 import { routePartykitRequest, getServerByName } from 'partyserver';
 import { RADAR_ROOM_NAME } from './radar.js';
 export { Arbiter } from './arbiter.js';
 export { WeekArbiter } from './weekArbiter.js';
 export { PlayerIndex } from './playerIndex.js';
 export { RadarCollector } from './radar.js';
+export { LeagueSeason } from './leagueSeason.js';
 
 // Telegram calls this once a webhook is registered (see CLAUDE.md's Radar
 // section for the `setWebhook` call that points it here with a
