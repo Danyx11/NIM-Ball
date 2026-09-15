@@ -193,7 +193,7 @@ if (IS_MOBILE) document.body.classList.add('mobile-layout');
   // running) stays with #game-card above, same as #overlay/#syncToast — it's
   // gameplay chrome, not a menu screen, so this change doesn't touch it.
   const menuHost = document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -2029,6 +2029,7 @@ function showAboutScreen() {
   constructionOverlay.classList.add('hidden');
   nimiqOverlay.classList.add('hidden');
   leagueOverlay.classList.add('hidden');
+  leagueRulesOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2050,10 +2051,10 @@ navAbout.addEventListener('click', () => {
 });
 aboutBackBtn.addEventListener('click', hideAboutScreen);
 // Partnership (index.html's #navPartnership) — no real destination yet, so
-// it gets the shared "Under construction" panel (#constructionOverlay);
-// also reused by #leagueOverlay's own "Rules" pill below (League rules
-// content doesn't exist yet either), same toggle-on-reclick principle as
-// #aboutOverlay above; a JS-set title tells the callers apart. Tracks which
+// it gets the shared "Under construction" panel (#constructionOverlay),
+// same toggle-on-reclick principle as #aboutOverlay above. (League's own
+// "Rules" pill used to reuse this panel too — it has its own dedicated one
+// now, #leagueRulesOverlay, see showLeagueRulesScreen below.) Tracks which
 // label is currently showing so re-clicking a DIFFERENT caller while this
 // panel is open switches topic instead of closing.
 const constructionOverlay = document.getElementById('constructionOverlay');
@@ -2065,6 +2066,7 @@ function showConstructionScreen(label) {
   aboutOverlay.classList.add('hidden');
   nimiqOverlay.classList.add('hidden');
   leagueOverlay.classList.add('hidden');
+  leagueRulesOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2099,6 +2101,7 @@ function showNimiqScreen() {
   aboutOverlay.classList.add('hidden');
   constructionOverlay.classList.add('hidden');
   leagueOverlay.classList.add('hidden');
+  leagueRulesOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2125,6 +2128,8 @@ const leagueOverlay = document.getElementById('leagueOverlay');
 const leagueBackBtn = document.getElementById('leagueBackBtn');
 const leagueFindMatchBtn = document.getElementById('leagueFindMatchBtn');
 const leagueRulesBtn = document.getElementById('leagueRulesBtn');
+const leagueRulesOverlay = document.getElementById('leagueRulesOverlay');
+const leagueRulesBackBtn = document.getElementById('leagueRulesBackBtn');
 // row: { rank, address, lp, matches, wins, losses, streak } from
 // party/leagueSeason.js's onRequest — no handle/name field, just the raw
 // wallet address, so display name resolution reuses this file's existing
@@ -2222,6 +2227,7 @@ function showLeagueScreen() {
   aboutOverlay.classList.add('hidden');
   constructionOverlay.classList.add('hidden');
   nimiqOverlay.classList.add('hidden');
+  leagueRulesOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2266,9 +2272,26 @@ leagueBackBtn.addEventListener('click', hideLeagueScreen);
 // mode-select (same real action #navHome offers) is what's actually
 // available today, rather than a dead stub.
 leagueFindMatchBtn.addEventListener('click', hideLeagueScreen);
-// Reuses the shared "Under construction" panel, same as Partnership above —
-// League rules content doesn't exist yet either.
-leagueRulesBtn.addEventListener('click', () => showConstructionScreen('League rules'));
+// League rules — its own panel (#leagueRulesOverlay), reached only from here
+// and always closing back INTO the League panel rather than mode-select
+// (explicit request — every other sidebar panel's back button goes to
+// mode-select via returnToModeSelect, this one deliberately doesn't).
+// leagueOverlay IS hidden first (unlike a plain toggle) — both panels are
+// the same translucent Nimiq Gray at the same size/position, so leaving it
+// showing underneath double-exposed the two instead of reading as one panel
+// swapping for another.
+function showLeagueRulesScreen() {
+  audio.play('button');
+  leagueOverlay.classList.add('hidden');
+  leagueRulesOverlay.classList.remove('hidden');
+}
+function hideLeagueRulesScreen() {
+  audio.play('button');
+  leagueRulesOverlay.classList.add('hidden');
+  showLeagueScreen();
+}
+leagueRulesBtn.addEventListener('click', showLeagueRulesScreen);
+leagueRulesBackBtn.addEventListener('click', hideLeagueRulesScreen);
 // How To (index.html's #helpBtn) — opens the "How to?" hub
 // (#howToHubOverlay) instead of launching the tutorial directly (see
 // conversation): same toggle-on-reclick/show/hide shape as About/Nimiq
@@ -2291,7 +2314,7 @@ const htCurlingBtn = document.getElementById('htCurlingBtn');
 const OTHER_MENU_OVERLAY_IDS = [
   'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay',
   'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay',
-  'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay',
+  'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay',
   'nimicurlRulesOverlay', 'pureCurlingRulesOverlay',
 ];
 function showHowToScreen() {

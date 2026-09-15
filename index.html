@@ -1211,10 +1211,10 @@
     </div>
     <!-- Shared placeholder panel for Partnership (index.html's
          #navPartnership, wired in main.js) — same config-panel/mode-connect
-         shell + toggle-on-reclick principle as #aboutOverlay. Also reused by
-         #leagueOverlay's own "Rules" pill below (League rules content
-         doesn't exist yet either) — League itself moved to its own dedicated
-         panel, see #leagueOverlay. -->
+         shell + toggle-on-reclick principle as #aboutOverlay. League itself
+         moved to its own dedicated panel (#leagueOverlay), and its "Rules"
+         pill has its own dedicated panel too now (#leagueRulesOverlay,
+         further below) — neither reuses this shared placeholder any more. -->
     <div id="constructionOverlay" class="config-panel mode-connect hidden">
       <button class="config-back" id="constructionBackBtn" type="button" aria-label="Back">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
@@ -1230,12 +1230,13 @@
          .config-panel's shell/positioning/entrance animation as-is
          (.league-panel in style.css only overrides surface color/radius/
          padding) and .config-back verbatim for the exit button, re-tinted
-         for a light surface. Ranking is placeholder data for now — no League
-         backend exists yet, see main.js's renderLeagueRankPill. Two ranking
-         DOM shapes ship at once (the desktop side-by-side pair below, and
-         the single tabbed .league-rank-col--mobile pill further down) —
-         style.css's .mobile-layout rules pick which one actually shows;
-         both are fed by the same LEAGUE_MOCK_MAIN/WEEK data in main.js. -->
+         for a light surface. Ranking is real data now (party/leagueSeason.js
+         via main.js's fetchLeagueLeaderboard/fetchLeagueWeeklyLeaderboard —
+         see that file's own comment). Two ranking DOM shapes ship at once
+         (the desktop side-by-side pair below, and the single tabbed
+         .league-rank-col--mobile pill further down) — style.css's
+         .mobile-layout rules pick which one actually shows; both are fed by
+         the same fetched rows in main.js. -->
     <div id="leagueOverlay" class="config-panel league-panel hidden">
       <button class="config-back" id="leagueBackBtn" type="button" aria-label="Exit">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
@@ -1280,6 +1281,37 @@
           <div class="league-rank-pill" id="leagueWeekRanks"></div>
         </div>
       </div>
+    </div>
+    <!-- League rules (index.html's #leagueOverlay "Rules" pill, wired in
+         main.js) — its own panel now (used to reuse Partnership's "Under
+         construction" placeholder, see that panel's own comment), same
+         .config-panel/.league-panel shell + .rules-scroll/.rules-sentence
+         convention as #nimicurlRulesOverlay above, just re-tinted for this
+         light surface (see style.css). Reached only from #leagueOverlay and
+         always closes back into it (not mode-select) — showLeagueRulesScreen/
+         hideLeagueRulesScreen in main.js, not the generic show*Screen/
+         returnToModeSelect pattern every other sidebar panel uses. -->
+    <div id="leagueRulesOverlay" class="config-panel league-panel hidden">
+      <button class="config-back" id="leagueRulesBackBtn" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="config-header">
+        <span class="config-mode-title">League rules</span>
+      </div>
+      <div class="rules-scroll" id="leagueRulesScroll">
+        <div class="rules-sentences">
+          <p class="rules-sentence"><strong>September 16 → September 30, 2026 —</strong> Beta League season.</p>
+          <p class="rules-sentence"><strong>Only Remote and Week matches count —</strong> both players must be connected. Only matches between two connected players count toward the League.</p>
+          <p class="rules-sentence"><strong>Play 3 matches —</strong> complete 3 League matches to enter the official ranking.</p>
+          <p class="rules-sentence"><strong>Earn League Points —</strong> win matches to climb the leaderboard.</p>
+          <p class="rules-sentence"><strong>Keep your streak alive —</strong> play at least one League match every day to earn bonus League Points.</p>
+          <p class="rules-sentence"><strong>Play stronger opponents —</strong> beating higher-rated players earns more League Points.</p>
+          <p class="rules-sentence"><strong>Badges to be won —</strong> the best players and achievements of the season can earn exclusive badges.</p>
+          <p class="rules-sentence"><strong>No points are lost —</strong> League Points only go up throughout the season.</p>
+          <p class="rules-sentence"><strong>One match, one result —</strong> every completed League match counts once toward your stats and ranking.</p>
+        </div>
+      </div>
+      <div class="rules-scroll-pill" id="leagueRulesScrollPill" aria-hidden="true"></div>
     </div>
     <div id="startOverlay" class="team-select hidden">
       <div class="half a" id="halfA">

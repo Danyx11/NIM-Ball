@@ -2665,9 +2665,18 @@ button:disabled { opacity: 0.35; cursor: default; }
   width: auto; height: auto;
   max-width: none; max-height: none;
   background: rgba(244, 244, 244, 0.85);
+  color: var(--nb-100);
   border-radius: 32px;
   padding: 30px 40px 34px;
 }
+/* #leagueRulesOverlay reuses .config-header/.config-mode-title/.rules-scroll
+   verbatim from the NimiCurl/Pure Curling rules panels (same .rules-sentence
+   convention) — those default to white-on-navy, so retinted here the same
+   way .config-panel.mode-curling already retints them elsewhere. */
+.league-panel .config-mode-title,
+.league-panel .config-mode-icon svg { color: var(--nb-100); }
+.league-panel .rules-note { color: var(--nb-60); }
+.league-panel .rules-scroll-pill { background: rgba(31, 35, 72, 0.16); }
 .league-panel:not(.hidden) { animation: league-panel-in 260ms cubic-bezier(.16,1,.3,1); }
 @keyframes league-panel-in {
   from { opacity: 0; transform: translateY(14px); }
