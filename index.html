@@ -576,7 +576,7 @@
             <rect x="189" y="231" width="182" height="86" rx="43" ry="43" stroke-width="15"/>
           </svg>
           <div class="tag">PLAY NIMICURL</div>
-          <div class="sub">First to 3 goals wins</div>
+          <div class="sub">First to 2 goals wins</div>
           <!-- Approx. match length (see conversation) — Lucide's "clock"
                icon (lucide.dev), verbatim path data, same reuse pattern as
                the nav icons. Pinned to the tile's own bottom-right corner
@@ -1140,7 +1140,7 @@
 
         <div class="rules-sentences">
           <p class="rules-sentence"><strong>Objective —</strong> slide your stones to score in the goal.</p>
-          <p class="rules-sentence"><strong>Win —</strong> first team to 3 points takes the match.</p>
+          <p class="rules-sentence"><strong>Win —</strong> first team to 2 points takes the match.</p>
           <p class="rules-sentence"><strong>Timer —</strong> 30 seconds to aim each turn.</p>
           <p class="rules-sentence"><strong>Stones —</strong> each one survives 8 hits before it's knocked out.</p>
           <p class="rules-sentence"><strong>Ice —</strong> one boost per point to help a stone glide further.</p>
@@ -1162,7 +1162,7 @@
 
         <div class="rules-sentences">
           <p class="rules-sentence"><strong>Objective —</strong> after two shots, whoever's closest to the center wins the point.</p>
-          <p class="rules-sentence"><strong>Win —</strong> first team to 3 points takes the match.</p>
+          <p class="rules-sentence"><strong>Win —</strong> first team to 2 points takes the match.</p>
           <p class="rules-sentence"><strong>Timer —</strong> 30 seconds to aim each turn.</p>
           <p class="rules-sentence"><strong>Stones —</strong> each one survives 4 hits before it's knocked out.</p>
           <p class="rules-sentence"><strong>Ice —</strong> one boost per point to help a stone glide further.</p>
@@ -1209,11 +1209,12 @@
         <p>Nimicurl is one of the ways we want to make that experience even more accessible: by letting people discover Nimiq simply by playing a game with their friends.</p>
       </div>
     </div>
-    <!-- Shared placeholder panel for League/Partnership (index.html's
-         #navLeague/#navPartnership, wired in main.js) — same config-panel/
-         mode-connect shell + toggle-on-reclick principle as #aboutOverlay,
-         just a single reused overlay with a JS-filled title since both are
-         "not built yet" screens with identical body copy. -->
+    <!-- Shared placeholder panel for Partnership (index.html's
+         #navPartnership, wired in main.js) — same config-panel/mode-connect
+         shell + toggle-on-reclick principle as #aboutOverlay. Also reused by
+         #leagueOverlay's own "Rules" pill below (League rules content
+         doesn't exist yet either) — League itself moved to its own dedicated
+         panel, see #leagueOverlay. -->
     <div id="constructionOverlay" class="config-panel mode-connect hidden">
       <button class="config-back" id="constructionBackBtn" type="button" aria-label="Back">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
@@ -1223,6 +1224,40 @@
       </div>
       <div class="config-lobby-content">
         <p>Under construction.</p>
+      </div>
+    </div>
+    <!-- League (index.html's #navLeague, wired in main.js) — reuses
+         .config-panel's shell/positioning/entrance animation as-is
+         (.league-panel in style.css only overrides surface color/radius/
+         padding) and .config-back verbatim for the exit button, re-tinted
+         for a light surface. Ranking is placeholder data for now — no League
+         backend exists yet, see main.js's renderLeagueRankPill. -->
+    <div id="leagueOverlay" class="config-panel league-panel hidden">
+      <button class="config-back" id="leagueBackBtn" type="button" aria-label="Exit">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <button class="league-find-btn" id="leagueFindMatchBtn" type="button">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        Find a match
+      </button>
+      <span class="league-title">League</span>
+      <div class="league-body">
+        <div class="league-rank-col">
+          <div class="league-rank-label">Main</div>
+          <div class="league-rank-pill" id="leagueMainRanks"></div>
+        </div>
+        <div class="league-center">
+          <div class="league-polaroid"><img src="%BASE_URL%league/polaroid-card.webp" alt=""></div>
+          <div class="league-beta-pill">Beta league</div>
+          <button class="league-rules-btn" id="leagueRulesBtn" type="button">
+            Rules
+            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+        <div class="league-rank-col">
+          <div class="league-rank-label">Week</div>
+          <div class="league-rank-pill" id="leagueWeekRanks"></div>
+        </div>
       </div>
     </div>
     <div id="startOverlay" class="team-select hidden">
