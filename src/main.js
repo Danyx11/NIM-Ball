@@ -379,8 +379,14 @@ function performMatchExit() {
     if (text) week.sendMessage(text).catch(() => {}); // best-effort, same posture as above
     week.close();
   }
+  const wasHowTo = activeMatchMode === 'howTo';
   activeStopGame?.();
-  returnToModeSelect();
+  if (wasHowTo) {
+    hideMatchChrome();
+    showHowToScreen();
+  } else {
+    returnToModeSelect();
+  }
 }
 // Shared by triggerExit()/navHome below — swaps in the "you have an
 // unfinished shot" copy over whatever this dialog would otherwise show,
