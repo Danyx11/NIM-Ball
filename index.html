@@ -1088,13 +1088,16 @@
           <button class="config-preset-btn howto-pill-top" id="htPlayBtn" type="button">
             <div class="config-preset-name">HOW TO PLAY</div>
           </button>
-          <!-- Purely illustrative — autoplay/muted/loop preview, no link to
-               htPlayBtn's own interactive tutorial. Click opens the same
-               file bigger, unmuted, with controls (#howToVideoOverlay
-               below). -->
-          <button class="howto-video-thumb" id="htVideoThumb" type="button" aria-label="Watch tutorial video">
-            <video class="howto-video-preview" src="%BASE_URL%rules/nimicurl-howto.mp4" autoplay muted loop playsinline preload="metadata"></video>
-          </button>
+          <!-- Purely illustrative, no link to htPlayBtn's own interactive
+               tutorial. Single <video> element, not a thumbnail + separate
+               lightbox player (see conversation — two elements meant two
+               independent playheads, so clicking could leave both playing
+               at once, audibly out of sync with each other). Starts
+               autoplay/muted/loop as a silent preview; a click on it
+               (main.js) just unmutes it in place and turns on native
+               controls, which is also where the scrub bar and fullscreen
+               button come from — no custom player UI needed. -->
+          <video class="howto-video-thumb" id="htVideoThumb" src="%BASE_URL%rules/nimicurl-howto.mp4" autoplay muted loop playsinline preload="metadata" aria-label="Watch tutorial video"></video>
         </div>
         <div class="config-presets">
           <button class="config-preset-btn howto-rules-pill" id="htNimicurlBtn" type="button">
@@ -1105,18 +1108,6 @@
           </button>
         </div>
       </div>
-    </div>
-    <!-- Bigger tutorial-video player (see conversation — click on
-         #htVideoThumb's small autoplay/muted preview above opens this),
-         unmuted with native controls. Own top-level overlay (not nested in
-         #howToHubOverlay) so it can sit above the whole hub at a higher
-         z-index, same reasoning as every other .config-panel-adjacent
-         overlay in this file. -->
-    <div id="howToVideoOverlay" class="video-lightbox hidden">
-      <button class="video-lightbox-close" id="htVideoCloseBtn" type="button" aria-label="Close">
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
-      <video id="htVideoPlayer" class="video-lightbox-player" src="%BASE_URL%rules/nimicurl-howto.mp4" controls playsinline></video>
     </div>
     <!-- NimiCurl / Pure Curling rules (see conversation) — reached only from
          #howToHubOverlay above, back returns there rather than straight to
