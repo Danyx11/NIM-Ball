@@ -2646,18 +2646,31 @@ button:disabled { opacity: 0.35; cursor: default; }
 .config-back svg { width: 20px; height: 20px; flex-shrink: 0; }
 .config-back:hover { background: rgba(255,255,255,0.22); }
 
-/* League (index.html's #leagueOverlay) — reuses .config-panel's shell/
-   positioning/entrance animation verbatim (see .config-panel above); only
-   the surface itself changes here, from a vibe-tinted navy scrim to a
-   translucent Nimiq Gray, so pills sitting on it read as pure white the same
-   way #connectBtn's identity pill reads against the sidebar's own Nimiq Gray
-   (see conversation — "blanc pur vs blanc nimiq"). .config-back is reused
-   as-is for the exit button, re-tinted for this light surface the same way
-   .config-panel.mode-curling already does elsewhere. */
+/* League (index.html's #leagueOverlay) — reuses .config-panel's shell (flex
+   column, overflow/touch-action, box-shadow) but NOT its fit-content
+   centering: sized to the same inset:6% footprint as .mode-drawer's own tile
+   grid (see conversation — "aussi grand que les 4 tuiles réunies"), so it
+   fills the same space the tiles do rather than floating as a small card in
+   the middle of it. Needs its own entrance animation below since
+   .config-panel's panel-in keyframe assumes the fit-content translate(-50%,
+   -50%) resting transform this overrides. Surface itself is a translucent
+   Nimiq Gray (not a vibe-tinted navy scrim), so pills sitting on it read as
+   pure white the same way #connectBtn's identity pill reads against the
+   sidebar's own Nimiq Gray ("blanc pur vs blanc nimiq"). .config-back is
+   reused as-is for the exit button, re-tinted for this light surface the
+   same way .config-panel.mode-curling already does elsewhere. */
 .league-panel {
+  top: 6%; right: 6%; bottom: 6%; left: 6%;
+  transform: none;
+  width: auto; height: auto;
+  max-width: none; max-height: none;
   background: rgba(244, 244, 244, 0.85);
   border-radius: 32px;
-  padding: 22px 30px 22px;
+  padding: 30px 40px 34px;
+}
+.league-panel:not(.hidden) { animation: league-panel-in 260ms cubic-bezier(.16,1,.3,1); }
+@keyframes league-panel-in {
+  from { opacity: 0; transform: translateY(14px); }
 }
 .league-panel .config-back { background: rgba(31, 35, 72, 0.08); color: var(--nb-100); }
 .league-panel .config-back:hover { background: rgba(31, 35, 72, 0.12); }
@@ -2666,41 +2679,51 @@ button:disabled { opacity: 0.35; cursor: default; }
    same "outside the header flow" treatment instead of fighting the centered
    title for space. */
 .league-find-btn {
-  position: absolute; top: 24px; left: 28px;
-  display: inline-flex; align-items: center; gap: 7px;
+  position: absolute; top: 30px; left: 40px;
+  display: inline-flex; align-items: center; gap: 8px;
   border: none; border-radius: 999px; cursor: pointer;
-  padding: 10px 18px; font-family: inherit; font-weight: 700; font-size: 12.5px;
+  padding: 12px 22px; font-family: inherit; font-weight: 700; font-size: 14px;
   background: var(--accent); color: #3a2900;
 }
-.league-find-btn svg { width: 14px; height: 14px; flex: none; }
+.league-find-btn svg { width: 16px; height: 16px; flex: none; }
 .league-find-btn:hover { background: #f2bd2c; }
 .league-title {
   display: block;
   text-align: center;
-  font-size: 24px; font-weight: 800; letter-spacing: 0.2px;
+  font-size: 32px; font-weight: 800; letter-spacing: 0.2px;
   color: var(--nb-100);
-  padding: 2px 130px 0;
+  padding: 4px 160px 0;
 }
+/* flex:1 (not the header's fixed footprint) so this fills the rest of the
+   now much taller panel — stretch (the grid default, stated explicitly
+   here) lets both rank columns and the center column stretch to that same
+   full height too, instead of only taking what their own content needs. */
 .league-body {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 196px 1fr 196px;
-  align-items: start;
-  gap: 18px;
-  margin-top: 18px;
+  grid-template-columns: 260px 1fr 260px;
+  align-items: stretch;
+  gap: 28px;
+  margin-top: 22px;
 }
-.league-rank-col { display: flex; flex-direction: column; }
+.league-rank-col { display: flex; flex-direction: column; min-height: 0; }
 .league-rank-label {
-  text-align: center; margin-bottom: 8px;
-  font-size: 10.5px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase;
+  text-align: center; margin-bottom: 10px;
+  font-size: 12px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase;
   color: var(--nb-50);
 }
+/* flex:1 (was a fixed 248px) — now fills the column's full stretched
+   height, so at this panel's larger size the list shows well past 6 rows
+   before the scrollbar is ever needed instead of always capping at 6. */
 .league-rank-pill {
   background: #fff;
-  border-radius: 20px;
-  padding: 7px;
-  height: 248px;
+  border-radius: 22px;
+  padding: 9px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  display: flex; flex-direction: column; gap: 1px;
+  display: flex; flex-direction: column; gap: 2px;
   box-shadow: 0 0 0 1px rgba(31, 35, 72, 0.08);
   scrollbar-width: thin; scrollbar-color: var(--nb-16) transparent;
 }
@@ -2708,43 +2731,47 @@ button:disabled { opacity: 0.35; cursor: default; }
 .league-rank-pill::-webkit-scrollbar-track { background: transparent; }
 .league-rank-pill::-webkit-scrollbar-thumb { background: var(--nb-16); border-radius: 999px; }
 .league-rank-row {
-  display: flex; align-items: center; gap: 7px;
-  padding: 6px 7px; border-radius: 13px; flex: none;
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 9px; border-radius: 14px; flex: none;
 }
 .league-rank-row.me { background: rgba(31, 35, 72, 0.08); }
-.league-rank-num { width: 16px; text-align: center; flex: none; font-size: 10.5px; font-weight: 800; color: var(--nb-50); }
+.league-rank-num { width: 18px; text-align: center; flex: none; font-size: 11.5px; font-weight: 800; color: var(--nb-50); }
 .league-rank-row:nth-child(1) .league-rank-num,
 .league-rank-row:nth-child(2) .league-rank-num,
 .league-rank-row:nth-child(3) .league-rank-num { color: var(--nb-100); }
-.league-rank-avatar { width: 22px; height: 22px; border-radius: 50%; flex: none; background: rgba(31, 35, 72, 0.12) center/cover; }
+.league-rank-avatar { width: 26px; height: 26px; border-radius: 50%; flex: none; background: rgba(31, 35, 72, 0.12) center/cover; }
 .league-rank-name {
-  flex: 1; min-width: 0; font-size: 11px; font-weight: 700; color: var(--nb-100);
+  flex: 1; min-width: 0; font-size: 12.5px; font-weight: 700; color: var(--nb-100);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.league-rank-name.addr { font-family: 'Fira Mono', monospace; font-weight: 500; font-size: 10px; color: var(--nb-60); }
-.league-rank-pts { flex: none; font-size: 9.5px; font-weight: 800; color: var(--nb-50); white-space: nowrap; }
+.league-rank-name.addr { font-family: 'Fira Mono', monospace; font-weight: 500; font-size: 11px; color: var(--nb-60); }
+.league-rank-pts { flex: none; font-size: 10.5px; font-weight: 800; color: var(--nb-50); white-space: nowrap; }
 .league-rank-row:nth-child(1) .league-rank-pts,
 .league-rank-row:nth-child(2) .league-rank-pts,
 .league-rank-row:nth-child(3) .league-rank-pts { color: #b9860a; }
-.league-center { display: flex; flex-direction: column; align-items: center; gap: 11px; min-height: 0; }
-.league-polaroid { width: 172px; flex: none; }
+/* Middle column stretches full height too (align-items:stretch above), but
+   has nothing to fill it with — centered vertically in that space instead
+   of pinned to the top, so it doesn't read as stranded above a block of
+   empty air once the rank columns are this tall. */
+.league-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; min-height: 0; }
+.league-polaroid { width: 280px; flex: none; }
 .league-polaroid img { display: block; width: 100%; height: auto; }
 .league-beta-pill {
   background: #fff; color: var(--nb-50);
-  font-size: 10px; font-weight: 800; letter-spacing: 0.9px; text-transform: uppercase;
-  padding: 7px 16px; border-radius: 999px;
+  font-size: 11px; font-weight: 800; letter-spacing: 0.9px; text-transform: uppercase;
+  padding: 8px 18px; border-radius: 999px;
   box-shadow: 0 0 0 1px rgba(31, 35, 72, 0.08);
   cursor: default;
 }
 .league-rules-btn {
   background: #fff; color: var(--nb-100);
-  font-size: 12.5px; font-weight: 700;
-  padding: 9px 20px; border-radius: 999px;
+  font-size: 13.5px; font-weight: 700;
+  padding: 10px 24px; border-radius: 999px;
   border: none; cursor: pointer;
   box-shadow: 0 0 0 1px var(--nb-12);
   display: inline-flex; align-items: center; gap: 6px;
 }
-.league-rules-btn svg { width: 13px; height: 13px; opacity: 0.55; }
+.league-rules-btn svg { width: 14px; height: 14px; opacity: 0.55; }
 
 /* Side by side, not stacked — see explicit request. */
 .config-presets { display: flex; flex-direction: row; gap: 16px; justify-content: center; align-items: center; flex: 1; }
