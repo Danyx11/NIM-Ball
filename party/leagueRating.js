@@ -13,7 +13,7 @@
 // namespacing needed.
 export const CURRENT_SEASON_ID = 'beta-2026';
 export const SEASON_START_UTC = '2026-09-16';
-export const SEASON_END_UTC = '2026-10-16';
+export const SEASON_END_UTC = '2026-09-30';
 
 // ---- Rating (hidden, Elo-style) ----
 // Starting value is intentionally 100, not the traditional chess-Elo 1000 —
