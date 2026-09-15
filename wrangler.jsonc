@@ -15,6 +15,11 @@
       // existing bindings above, never folded into them, so this change
       // can't affect LIVE or WEEK.
       { "name": "RadarCollector", "class_name": "RadarCollector" },
+      // League Beta's season store (party/leagueSeason.js) — a fifth class,
+      // added the same way, for the same reason: alongside every binding
+      // above, never folded into them, so this can't affect LIVE, WEEK or
+      // Radar.
+      { "name": "LeagueSeason", "class_name": "LeagueSeason" },
     ],
   },
   // new_sqlite_classes (not new_classes) — required for Durable Objects on
@@ -29,6 +34,7 @@
     { "tag": "v1", "new_sqlite_classes": ["Arbiter"] },
     { "tag": "v2", "new_sqlite_classes": ["WeekArbiter", "PlayerIndex"] },
     { "tag": "v3", "new_sqlite_classes": ["RadarCollector"] },
+    { "tag": "v4", "new_sqlite_classes": ["LeagueSeason"] },
   ],
   // Drives RadarCollector#maybeSendDailyReport (party/radar.js) — a coarse
   // 15-minute tick is enough since that method itself re-checks the current

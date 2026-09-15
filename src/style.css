@@ -2749,6 +2749,13 @@ button:disabled { opacity: 0.35; cursor: default; }
 .league-rank-row:nth-child(1) .league-rank-pts,
 .league-rank-row:nth-child(2) .league-rank-pts,
 .league-rank-row:nth-child(3) .league-rank-pts { color: #b9860a; }
+/* Empty-state row (no ranked players yet / nobody's played this week yet) —
+   same list-row rhythm as .league-rank-row but centered, single-line text,
+   no rank/avatar/points columns to render. */
+.league-rank-empty {
+  padding: 16px 9px; text-align: center;
+  font-size: 12px; font-weight: 600; color: var(--nb-50);
+}
 /* Middle column stretches full height too (align-items:stretch above), but
    has nothing to fill it with — centered vertically in that space instead
    of pinned to the top, so it doesn't read as stranded above a block of
