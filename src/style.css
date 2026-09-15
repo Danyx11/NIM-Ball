@@ -2772,6 +2772,76 @@ button:disabled { opacity: 0.35; cursor: default; }
   display: inline-flex; align-items: center; gap: 6px;
 }
 .league-rules-btn svg { width: 14px; height: 14px; opacity: 0.55; }
+/* This device's own row (main.js's renderLeagueMeStats — same LEAGUE_MOCK_MAIN
+   "me" row the ranking list already flags, points still placeholder pending
+   the real backend). A pill like the rank rows themselves; win/loss/streak
+   stay plain text underneath per explicit request — no pill wrapper there. */
+.league-me-pill {
+  display: flex; align-items: center; gap: 9px;
+  background: #fff; border-radius: 999px;
+  padding: 6px 18px 6px 6px;
+  box-shadow: 0 0 0 1px rgba(31, 35, 72, 0.08);
+}
+.league-me-avatar { width: 30px; height: 30px; border-radius: 50%; flex: none; background: rgba(31, 35, 72, 0.12) center/cover; }
+.league-me-pts { font-size: 14px; font-weight: 800; color: var(--nb-100); }
+.league-me-line { font-size: 12.5px; color: var(--nb-60); text-align: center; }
+.league-me-line .league-me-num { font-weight: 800; color: var(--nb-100); }
+
+/* Mobile-only single ranking pill (Main/Week merged behind a tab switch,
+   see conversation) — hidden on desktop, where the side-by-side pair above
+   still shows instead (toggled the other way below). Reuses .seg-control/
+   .seg-btn verbatim (the Custom Settings panel's own segmented switch),
+   re-tinted here the same way .config-back already is elsewhere on this
+   panel, since that component's default styling assumes a dark scrim. */
+.league-rank-col--mobile { display: none; }
+.league-panel .seg-control { background: rgba(31, 35, 72, 0.06); }
+.league-panel .seg-btn { color: var(--nb-60); }
+.league-panel .seg-btn.active { background: var(--accent); color: #3a2900; }
+.league-panel .seg-btn:not(.active):hover { background: rgba(31, 35, 72, 0.08); color: var(--nb-100); }
+.league-tab-switch { align-self: center; margin-bottom: 10px; }
+
+/* Mobile (landscape, see CLAUDE.md — this game has no portrait layout):
+   the desktop's 3-column 260/1fr/260 grid doesn't fit a phone's much
+   smaller landscape width even proportionally, so this collapses to 2
+   columns (the single tabbed rank pill, then the center stats column) and
+   every fixed size in the header/center shrinks to match. */
+.mobile-layout .league-panel { padding: 16px 20px 18px; }
+.mobile-layout .league-rank-col--desktop { display: none; }
+.mobile-layout .league-rank-col--mobile { display: flex; }
+.mobile-layout .league-find-btn {
+  top: 16px; left: 16px; padding: 8px 14px; font-size: 11px; gap: 6px;
+}
+.mobile-layout .league-find-btn svg { width: 13px; height: 13px; }
+.mobile-layout .league-panel .config-back { top: 16px; right: 16px; width: 32px; height: 32px; }
+.mobile-layout .league-panel .config-back svg { width: 16px; height: 16px; }
+.mobile-layout .league-title { font-size: 19px; padding: 2px 60px 0; }
+.mobile-layout .league-body {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 14px;
+}
+/* The single rank pill has real names to fit into a much narrower column
+   than desktop's 260px ones — tightened row chrome (num/avatar/gaps/
+   padding) plus dropping the " pts" suffix (kept for a11y/desktop, just
+   hidden here) claws back enough width that .league-rank-name isn't
+   squeezed down to a couple of characters (reported: showed "@.." only). */
+.mobile-layout .league-rank-row { gap: 6px; padding: 6px 7px; }
+.mobile-layout .league-rank-num { width: 13px; font-size: 10px; }
+.mobile-layout .league-rank-avatar { width: 20px; height: 20px; }
+.mobile-layout .league-rank-name { font-size: 11px; }
+.mobile-layout .league-rank-pts { font-size: 10px; }
+.mobile-layout .league-rank-pts-suffix { display: none; }
+/* Shrunk enough to clear the title above it at this narrower width and
+   never get clipped by the center column's own edges either — was 280px,
+   fixed to the desktop column's own generous width. */
+.mobile-layout .league-polaroid { width: 130px; }
+.mobile-layout .league-center { gap: 10px; }
+.mobile-layout .league-me-pill { padding: 5px 14px 5px 5px; gap: 7px; }
+.mobile-layout .league-me-avatar { width: 24px; height: 24px; }
+.mobile-layout .league-me-pts { font-size: 12.5px; }
+.mobile-layout .league-me-line { font-size: 11px; }
+.mobile-layout .league-beta-pill { font-size: 10px; padding: 6px 14px; }
+.mobile-layout .league-rules-btn { font-size: 12px; padding: 8px 18px; }
 
 /* Side by side, not stacked — see explicit request. */
 .config-presets { display: flex; flex-direction: row; gap: 16px; justify-content: center; align-items: center; flex: 1; }

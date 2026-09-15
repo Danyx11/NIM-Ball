@@ -2159,7 +2159,7 @@ function renderLeagueRankPill(el, list) {
       <span class="league-rank-num">${i + 1}</span>
       <span class="league-rank-avatar" data-address="${row.name}"></span>
       <span class="league-rank-name${isAddr ? ' addr' : ''}">${label}</span>
-      <span class="league-rank-pts">+${row.pts} pts</span>
+      <span class="league-rank-pts">+${row.pts}<span class="league-rank-pts-suffix"> pts</span></span>
     </div>`;
   }).join('');
   // Same fire-and-forget backgroundImage pattern as renderMyMatchesContent's
@@ -2168,6 +2168,42 @@ function renderLeagueRankPill(el, list) {
   el.querySelectorAll('.league-rank-avatar[data-address]').forEach((avatarEl) => {
     getIdenticonPngDataUrl(avatarEl.dataset.address).then((url) => { avatarEl.style.backgroundImage = `url(${url})`; });
   });
+}
+// Mobile-only (index.html's .league-rank-col--mobile, see conversation —
+// desktop keeps the side-by-side Main/Week pair above): one shared pill fed
+// by whichever of LEAGUE_MOCK_MAIN/WEEK the .seg-btn tab switch last picked.
+let leagueMobileTab = 'main';
+const leagueTabMain = document.getElementById('leagueTabMain');
+const leagueTabWeek = document.getElementById('leagueTabWeek');
+function renderLeagueMobileRanks() {
+  renderLeagueRankPill(document.getElementById('leagueMobileRanks'), leagueMobileTab === 'main' ? LEAGUE_MOCK_MAIN : LEAGUE_MOCK_WEEK);
+}
+function setLeagueMobileTab(tab) {
+  if (tab === leagueMobileTab) return;
+  audio.play('button');
+  leagueMobileTab = tab;
+  leagueTabMain.classList.toggle('active', tab === 'main');
+  leagueTabWeek.classList.toggle('active', tab === 'week');
+  renderLeagueMobileRanks();
+}
+leagueTabMain.addEventListener('click', () => setLeagueMobileTab('main'));
+leagueTabWeek.addEventListener('click', () => setLeagueMobileTab('week'));
+// This device's own row — points come straight from its LEAGUE_MOCK_MAIN
+// entry (kept in sync there, not duplicated), win/loss/streak are separate
+// mock fields since the ranking rows don't carry those. All placeholder
+// pending the real League backend, same as the ranking lists above.
+const LEAGUE_MOCK_ME_STATS = { wins: 14, losses: 6, streakCount: 3, streakType: 'win' };
+function renderLeagueMeStats() {
+  const me = LEAGUE_MOCK_MAIN.find((row) => row.me);
+  getIdenticonPngDataUrl(me.name).then((url) => {
+    document.getElementById('leagueMeAvatar').style.backgroundImage = `url(${url})`;
+  });
+  document.getElementById('leagueMePts').textContent = `+${me.pts} pts`;
+  const { wins, losses, streakCount, streakType } = LEAGUE_MOCK_ME_STATS;
+  document.getElementById('leagueMeWinLoss').innerHTML =
+    `<span class="league-me-num">${wins}</span> wins · <span class="league-me-num">${losses}</span> losses`;
+  document.getElementById('leagueMeStreak').innerHTML =
+    `<span class="league-me-num">${streakCount}</span> ${streakType} streak`;
 }
 function showLeagueScreen() {
   audio.play('button');
@@ -2180,6 +2216,8 @@ function showLeagueScreen() {
   if (!leagueRendered) {
     renderLeagueRankPill(document.getElementById('leagueMainRanks'), LEAGUE_MOCK_MAIN);
     renderLeagueRankPill(document.getElementById('leagueWeekRanks'), LEAGUE_MOCK_WEEK);
+    renderLeagueMobileRanks();
+    renderLeagueMeStats();
     leagueRendered = true;
   }
   leagueOverlay.classList.remove('hidden');

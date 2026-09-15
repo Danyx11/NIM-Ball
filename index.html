@@ -1231,7 +1231,11 @@
          (.league-panel in style.css only overrides surface color/radius/
          padding) and .config-back verbatim for the exit button, re-tinted
          for a light surface. Ranking is placeholder data for now — no League
-         backend exists yet, see main.js's renderLeagueRankPill. -->
+         backend exists yet, see main.js's renderLeagueRankPill. Two ranking
+         DOM shapes ship at once (the desktop side-by-side pair below, and
+         the single tabbed .league-rank-col--mobile pill further down) —
+         style.css's .mobile-layout rules pick which one actually shows;
+         both are fed by the same LEAGUE_MOCK_MAIN/WEEK data in main.js. -->
     <div id="leagueOverlay" class="config-panel league-panel hidden">
       <button class="config-back" id="leagueBackBtn" type="button" aria-label="Exit">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
@@ -1242,19 +1246,36 @@
       </button>
       <span class="league-title">League</span>
       <div class="league-body">
-        <div class="league-rank-col">
+        <div class="league-rank-col league-rank-col--desktop">
           <div class="league-rank-label">Main</div>
           <div class="league-rank-pill" id="leagueMainRanks"></div>
+        </div>
+        <!-- Mobile-only single pill (see comment above): the Main/Week pair
+             collapses into one .seg-control tab switch (reused as-is from
+             the Custom Settings panel, re-tinted for this light surface —
+             see style.css) driving one shared list underneath. -->
+        <div class="league-rank-col league-rank-col--mobile">
+          <div class="seg-control league-tab-switch">
+            <button class="seg-btn active" id="leagueTabMain" type="button">Main</button>
+            <button class="seg-btn" id="leagueTabWeek" type="button">Week</button>
+          </div>
+          <div class="league-rank-pill" id="leagueMobileRanks"></div>
         </div>
         <div class="league-center">
           <div class="league-polaroid"><img src="%BASE_URL%league/polaroid-card.webp" alt=""></div>
           <div class="league-beta-pill">Beta league</div>
+          <div class="league-me-pill">
+            <span class="league-me-avatar" id="leagueMeAvatar"></span>
+            <span class="league-me-pts" id="leagueMePts"></span>
+          </div>
+          <div class="league-me-line" id="leagueMeWinLoss"></div>
+          <div class="league-me-line" id="leagueMeStreak"></div>
           <button class="league-rules-btn" id="leagueRulesBtn" type="button">
             Rules
             <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
           </button>
         </div>
-        <div class="league-rank-col">
+        <div class="league-rank-col league-rank-col--desktop">
           <div class="league-rank-label">Week</div>
           <div class="league-rank-pill" id="leagueWeekRanks"></div>
         </div>
