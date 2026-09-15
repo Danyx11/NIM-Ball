@@ -244,7 +244,7 @@ export function startGame(opts = {}) {
   // before).
   const {
     net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false,
-    onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onChangeSettings = null, onTurnChange = null,
+    onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onTurnChange = null,
     matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null,
     singleShotTeam = null, onShotCommitted = null, externalManche: externalMancheOpt = null, onMancheSettled = null, resumeManches = null, weekPointStart = false,
     weekEntryReady = null, weekStartScoreA = 0, weekStartScoreB = 0,
@@ -4174,15 +4174,15 @@ export function startGame(opts = {}) {
     // by the time this async render resolves — don't stomp on it.
     if (phase !== 'gameover') return;
     showOverlay(`
+      <button class="config-back" id="goalExitBtn" type="button" aria-label="Exit">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
       <div class="ticket-wrap" id="ticketWrap">
         <img class="ticket-img" id="ticketImg" alt="Nim-Curl match ticket">
       </div>
       <div class="goal-actions">
         <button class="bigbtn" id="goalPlayAgainBtn">▶ Play Again</button>
-        ${onChangeSettings ? '<button class="bigbtn" id="goalChangeSettingsBtn">⚙ Change Settings</button>' : ''}
-        <button class="bigbtn" id="goalMatchReplayBtn">🔁 Replay</button>
         <button class="bigbtn" id="goalShareBtn">📤 Share</button>
-        <button class="bigbtn" id="goalMenuBtn">🚪 Menu</button>
       </div>
     `);
     document.getElementById('ticketImg').src = ticketCanvas.toDataURL('image/png');
@@ -4232,34 +4232,10 @@ export function startGame(opts = {}) {
       // this fresh match (no matchIntro replay here, so no onEnded to do it).
       audio.playAmbience();
     };
-    // CHANGE SETTINGS: tear this instance down and hand back to main.js,
-    // which owns the Custom Settings screen (outside this closure) — same
-    // teardown as Menu, just a different landing spot. For a net match this
-    // also closes the socket (see stopGame()), so the opponent naturally
-    // sees the existing "opponent left" screen rather than a new protocol.
-    if (onChangeSettings) {
-      document.getElementById('goalChangeSettingsBtn').onclick = () => {
-        audio.play('button');
-        stopGame();
-        onChangeSettings();
-      };
-    }
-    // REPLAY: replays this just-finished match from the in-memory points
-    // recorder.js already captured (recordManche/finishPoint), reusing the
-    // exact same replay engine as an uploaded ticket (see CLAUDE.md replay
-    // section) — but sourced directly from memory, bypassing the
-    // binary/QR round-trip entirely, so it works regardless of the 3-stone
-    // hardcoding in replay.js's encode/decode (out of scope, untouched —
-    // see conversation). Passes this same matchConfig through so a Custom
-    // match (any stonesPerTeam/pointsToWin/turnTime/skin) replays exactly
-    // as played, not as whatever Classic defaults to.
-    document.getElementById('goalMatchReplayBtn').onclick = () => {
-      audio.play('button');
-      const pointsToReplay = recorder.getPoints();
-      stopGame();
-      startGame({ onRockSound, onRockExit, onRockPower, onExit, matchConfig, mobile, identiconAddress: IDENTICON_ADDRESS, identiconLabel: IDENTICON_LABEL, replayPoints: pointsToReplay });
-    };
-    document.getElementById('goalMenuBtn').onclick = () => { audio.play('button'); stopGame(); onExit?.(); };
+    // EXIT: small corner pill (same .config-back pattern used everywhere else
+    // in the app — see conversation) replacing the old full-width "Menu"
+    // button — same teardown as before, just a different affordance.
+    document.getElementById('goalExitBtn').onclick = () => { audio.play('button'); stopGame(); onExit?.(); };
     document.getElementById('goalShareBtn').onclick = async () => {
       audio.play('button');
       const shareBtn = document.getElementById('goalShareBtn');

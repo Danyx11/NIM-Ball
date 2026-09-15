@@ -1995,8 +1995,12 @@ button:disabled { opacity: 0.35; cursor: default; }
 
 /* Match-win ticket (see src/ticket.js/showVictory) — a single portrait PNG
    (drawn on an offscreen canvas, dropped in here as a data-URL <img>) doubling
-   as both this in-game panel and the "Partager" share image, per design brief. */
-.ticket-img { max-width: 100%; max-height: 62vh; width: auto; border-radius: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
+   as both this in-game panel and the "Partager" share image, per design brief.
+   62vh -> 76vh (see conversation): showVictory's actions row dropped from up
+   to 5 buttons down to 2 ("Change Settings"/"Replay"/"Menu" gone, Menu's job
+   moved to the small corner .config-back exit pill, which sits outside the
+   flex flow entirely) — the freed vertical room goes to the ticket itself. */
+.ticket-img { max-width: 100%; max-height: 76vh; width: auto; border-radius: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
 
 /* Inset to the physics/ice rect only (FX0/FY0/FX1/FY1 in game.js — as % of the
    V2 3312x1896 canvas: 32.79%/33.02%/31.70%/32.81%, left/top/right/bottom),
@@ -2641,6 +2645,106 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 .config-back svg { width: 20px; height: 20px; flex-shrink: 0; }
 .config-back:hover { background: rgba(255,255,255,0.22); }
+
+/* League (index.html's #leagueOverlay) — reuses .config-panel's shell/
+   positioning/entrance animation verbatim (see .config-panel above); only
+   the surface itself changes here, from a vibe-tinted navy scrim to a
+   translucent Nimiq Gray, so pills sitting on it read as pure white the same
+   way #connectBtn's identity pill reads against the sidebar's own Nimiq Gray
+   (see conversation — "blanc pur vs blanc nimiq"). .config-back is reused
+   as-is for the exit button, re-tinted for this light surface the same way
+   .config-panel.mode-curling already does elsewhere. */
+.league-panel {
+  background: rgba(244, 244, 244, 0.85);
+  border-radius: 32px;
+  padding: 22px 30px 22px;
+}
+.league-panel .config-back { background: rgba(31, 35, 72, 0.08); color: var(--nb-100); }
+.league-panel .config-back:hover { background: rgba(31, 35, 72, 0.12); }
+/* Mirrors .config-back's own position (top:24/right:28) on the opposite
+   corner — the one other floating control this panel has, so it gets the
+   same "outside the header flow" treatment instead of fighting the centered
+   title for space. */
+.league-find-btn {
+  position: absolute; top: 24px; left: 28px;
+  display: inline-flex; align-items: center; gap: 7px;
+  border: none; border-radius: 999px; cursor: pointer;
+  padding: 10px 18px; font-family: inherit; font-weight: 700; font-size: 12.5px;
+  background: var(--accent); color: #3a2900;
+}
+.league-find-btn svg { width: 14px; height: 14px; flex: none; }
+.league-find-btn:hover { background: #f2bd2c; }
+.league-title {
+  display: block;
+  text-align: center;
+  font-size: 24px; font-weight: 800; letter-spacing: 0.2px;
+  color: var(--nb-100);
+  padding: 2px 130px 0;
+}
+.league-body {
+  display: grid;
+  grid-template-columns: 196px 1fr 196px;
+  align-items: start;
+  gap: 18px;
+  margin-top: 18px;
+}
+.league-rank-col { display: flex; flex-direction: column; }
+.league-rank-label {
+  text-align: center; margin-bottom: 8px;
+  font-size: 10.5px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--nb-50);
+}
+.league-rank-pill {
+  background: #fff;
+  border-radius: 20px;
+  padding: 7px;
+  height: 248px;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1px;
+  box-shadow: 0 0 0 1px rgba(31, 35, 72, 0.08);
+  scrollbar-width: thin; scrollbar-color: var(--nb-16) transparent;
+}
+.league-rank-pill::-webkit-scrollbar { width: 5px; }
+.league-rank-pill::-webkit-scrollbar-track { background: transparent; }
+.league-rank-pill::-webkit-scrollbar-thumb { background: var(--nb-16); border-radius: 999px; }
+.league-rank-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 7px; border-radius: 13px; flex: none;
+}
+.league-rank-row.me { background: rgba(31, 35, 72, 0.08); }
+.league-rank-num { width: 16px; text-align: center; flex: none; font-size: 10.5px; font-weight: 800; color: var(--nb-50); }
+.league-rank-row:nth-child(1) .league-rank-num,
+.league-rank-row:nth-child(2) .league-rank-num,
+.league-rank-row:nth-child(3) .league-rank-num { color: var(--nb-100); }
+.league-rank-avatar { width: 22px; height: 22px; border-radius: 50%; flex: none; background: rgba(31, 35, 72, 0.12) center/cover; }
+.league-rank-name {
+  flex: 1; min-width: 0; font-size: 11px; font-weight: 700; color: var(--nb-100);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.league-rank-name.addr { font-family: 'Fira Mono', monospace; font-weight: 500; font-size: 10px; color: var(--nb-60); }
+.league-rank-pts { flex: none; font-size: 9.5px; font-weight: 800; color: var(--nb-50); white-space: nowrap; }
+.league-rank-row:nth-child(1) .league-rank-pts,
+.league-rank-row:nth-child(2) .league-rank-pts,
+.league-rank-row:nth-child(3) .league-rank-pts { color: #b9860a; }
+.league-center { display: flex; flex-direction: column; align-items: center; gap: 11px; min-height: 0; }
+.league-polaroid { width: 172px; flex: none; }
+.league-polaroid img { display: block; width: 100%; height: auto; }
+.league-beta-pill {
+  background: #fff; color: var(--nb-50);
+  font-size: 10px; font-weight: 800; letter-spacing: 0.9px; text-transform: uppercase;
+  padding: 7px 16px; border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(31, 35, 72, 0.08);
+  cursor: default;
+}
+.league-rules-btn {
+  background: #fff; color: var(--nb-100);
+  font-size: 12.5px; font-weight: 700;
+  padding: 9px 20px; border-radius: 999px;
+  border: none; cursor: pointer;
+  box-shadow: 0 0 0 1px var(--nb-12);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.league-rules-btn svg { width: 13px; height: 13px; opacity: 0.55; }
 
 /* Side by side, not stacked — see explicit request. */
 .config-presets { display: flex; flex-direction: row; gap: 16px; justify-content: center; align-items: center; flex: 1; }

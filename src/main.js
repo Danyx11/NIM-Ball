@@ -193,7 +193,7 @@ if (IS_MOBILE) document.body.classList.add('mobile-layout');
   // running) stays with #game-card above, same as #overlay/#syncToast — it's
   // gameplay chrome, not a menu screen, so this change doesn't touch it.
   const menuHost = document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -1483,10 +1483,8 @@ function showToolbar() {
 // without going through main.js's toolbar/logo at all. A function
 // declaration (not const) so it's hoisted — rockHandlers below references it
 // before this line runs.
-// Split out of returnToModeSelect (below) so "Change Settings" (see
-// showVictory's onChangeSettings in game.js) can tear down the same match
-// chrome without necessarily landing back on #modeOverlay — it lands on
-// Custom Settings instead, pre-filled with the match that just ended.
+// Split out of returnToModeSelect (below) so other exit paths can tear down
+// the same match chrome without necessarily landing back on #modeOverlay.
 function hideMatchChrome() {
   activeStopGame = null;
   activeMatchMode = null;
@@ -1698,10 +1696,7 @@ function renderCustomSettingsDraft() {
   });
 }
 
-// Reused both as the Custom Settings entry point from the Classic/Custom
-// fork above and directly by "Change Settings" (game.js's onChangeSettings)
-// on an already-finished match — the latter skips the fork entirely and
-// lands here pre-filled with whatever that match was actually playing with.
+// Custom Settings entry point from the Classic/Custom fork above.
 function showCustomSettingsScreen(mode, initialConfig) {
   customSettingsMode = mode;
   customSettingsDraft = { ...initialConfig };
@@ -1913,7 +1908,6 @@ async function launchPassPlayMatch(config) {
   await new Promise((resolve) => {
     activeStopGame = startGame({
       ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config, vibe: activeVibe,
-      onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('passplay', config); },
       onTurnChange: setProfilePillTeam, // EXPERIMENT, see setProfilePillTeam's own comment
       onMatchReady: resolve,
     });
@@ -2027,6 +2021,7 @@ function showAboutScreen() {
   audio.play('button');
   constructionOverlay.classList.add('hidden');
   nimiqOverlay.classList.add('hidden');
+  leagueOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2047,12 +2042,13 @@ navAbout.addEventListener('click', () => {
   else hideAboutScreen();
 });
 aboutBackBtn.addEventListener('click', hideAboutScreen);
-// League/Partnership (index.html's #navLeague/#navPartnership) — neither has
-// a real destination yet, so both share one "Under construction" panel
-// (#constructionOverlay) rather than duplicating it, with the same
-// toggle-on-reclick principle as #aboutOverlay above; a JS-set title tells
-// the two apart. Tracks which of the two is currently showing so re-clicking
-// the OTHER one while this panel is open switches topic instead of closing.
+// Partnership (index.html's #navPartnership) — no real destination yet, so
+// it gets the shared "Under construction" panel (#constructionOverlay);
+// also reused by #leagueOverlay's own "Rules" pill below (League rules
+// content doesn't exist yet either), same toggle-on-reclick principle as
+// #aboutOverlay above; a JS-set title tells the callers apart. Tracks which
+// label is currently showing so re-clicking a DIFFERENT caller while this
+// panel is open switches topic instead of closing.
 const constructionOverlay = document.getElementById('constructionOverlay');
 const constructionBackBtn = document.getElementById('constructionBackBtn');
 const constructionTitle = document.getElementById('constructionTitle');
@@ -2061,6 +2057,7 @@ function showConstructionScreen(label) {
   audio.play('button');
   aboutOverlay.classList.add('hidden');
   nimiqOverlay.classList.add('hidden');
+  leagueOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2085,7 +2082,6 @@ function wireConstructionNav(id, label) {
     }
   });
 }
-wireConstructionNav('navLeague', 'League');
 wireConstructionNav('navPartnership', 'Partnership');
 // Nimiq (index.html's #navNimiq/#nimiqOverlay) — dedicated panel, same
 // toggle-on-reclick principle as #aboutOverlay above.
@@ -2095,6 +2091,7 @@ function showNimiqScreen() {
   audio.play('button');
   aboutOverlay.classList.add('hidden');
   constructionOverlay.classList.add('hidden');
+  leagueOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2112,6 +2109,87 @@ navNimiq.addEventListener('click', () => {
   else hideNimiqScreen();
 });
 nimiqBackBtn.addEventListener('click', hideNimiqScreen);
+// League (index.html's #navLeague/#leagueOverlay) — dedicated panel now
+// (used to share Partnership's "Under construction" placeholder above, see
+// that panel's own comment), same toggle-on-reclick shape as About/Nimiq.
+// Ranking is placeholder data — there's no League backend yet, this wires up
+// the front-end shell approved in the mockup (see conversation).
+const leagueOverlay = document.getElementById('leagueOverlay');
+const leagueBackBtn = document.getElementById('leagueBackBtn');
+const leagueFindMatchBtn = document.getElementById('leagueFindMatchBtn');
+const leagueRulesBtn = document.getElementById('leagueRulesBtn');
+let leagueRendered = false;
+// "me" flags this device's own row (highlighted, see .league-rank-row.me) —
+// swap this whole block for a real fetch once a League backend exists. An
+// "NQ…" name renders as a shortened address (mono), anything else as a
+// handle — same convention as ticket.js's resolveTeamDisplay.
+const LEAGUE_MOCK_MAIN = [
+  { name: '@stonecold', pts: 1284 }, { name: '@curlqueen', pts: 1197 },
+  { name: 'NQ04 8821 XPLM 22KT AB91 QQ02 991C L82M', pts: 1052 },
+  { name: '@nico', pts: 918, me: true }, { name: '@icebreaker', pts: 873 },
+  { name: 'NQ77 1102 90LK MMSN 22QT AK91 P02C 771M', pts: 801 },
+  { name: '@frostbite', pts: 754 }, { name: '@rockslinger', pts: 689 },
+  { name: '@glacequeen', pts: 612 }, { name: 'NQ55 2201 88TM KLPQ 11XT AB03 P44C 992M', pts: 540 },
+];
+const LEAGUE_MOCK_WEEK = [
+  { name: '@icebreaker', pts: 216 }, { name: '@nico', pts: 184, me: true },
+  { name: '@stonecold', pts: 171 }, { name: 'NQ88 7712 LKMS 22PQ 9021 AABT 771C M02X', pts: 158 },
+  { name: '@curlqueen', pts: 139 }, { name: '@houseshot', pts: 122 },
+  { name: '@frostbite', pts: 97 }, { name: 'NQ21 9012 KPLM 33XQ 8801 TT02 551C M09M', pts: 84 },
+  { name: '@rockslinger', pts: 63 }, { name: '@glacequeen', pts: 41 },
+];
+function renderLeagueRankPill(el, list) {
+  el.innerHTML = list.map((row, i) => {
+    const isAddr = row.name.startsWith('NQ');
+    const label = isAddr ? `${row.name.slice(0, 4)}...${row.name.slice(-4)}` : row.name;
+    return `<div class="league-rank-row${row.me ? ' me' : ''}">
+      <span class="league-rank-num">${i + 1}</span>
+      <span class="league-rank-avatar" data-address="${row.name}"></span>
+      <span class="league-rank-name${isAddr ? ' addr' : ''}">${label}</span>
+      <span class="league-rank-pts">+${row.pts} pts</span>
+    </div>`;
+  }).join('');
+  // Same fire-and-forget backgroundImage pattern as renderMyMatchesContent's
+  // own .week-match-avatar above — any string works as an identicon seed,
+  // real address or not, which is exactly what this mock data needs.
+  el.querySelectorAll('.league-rank-avatar[data-address]').forEach((avatarEl) => {
+    getIdenticonPngDataUrl(avatarEl.dataset.address).then((url) => { avatarEl.style.backgroundImage = `url(${url})`; });
+  });
+}
+function showLeagueScreen() {
+  audio.play('button');
+  aboutOverlay.classList.add('hidden');
+  constructionOverlay.classList.add('hidden');
+  nimiqOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  hideRemoteMatchStack(); // see that function's own comment
+  if (!leagueRendered) {
+    renderLeagueRankPill(document.getElementById('leagueMainRanks'), LEAGUE_MOCK_MAIN);
+    renderLeagueRankPill(document.getElementById('leagueWeekRanks'), LEAGUE_MOCK_WEEK);
+    leagueRendered = true;
+  }
+  leagueOverlay.classList.remove('hidden');
+}
+function hideLeagueScreen() {
+  audio.play('button');
+  leagueOverlay.classList.add('hidden');
+  returnToModeSelect();
+}
+const navLeague = document.getElementById('navLeague');
+navLeague.addEventListener('click', () => {
+  if (activeStopGame) return;
+  if (leagueOverlay.classList.contains('hidden')) showLeagueScreen();
+  else hideLeagueScreen();
+});
+leagueBackBtn.addEventListener('click', hideLeagueScreen);
+// No dedicated matchmaking flow to send this to yet — closing back to
+// mode-select (same real action #navHome offers) is what's actually
+// available today, rather than a dead stub.
+leagueFindMatchBtn.addEventListener('click', hideLeagueScreen);
+// Reuses the shared "Under construction" panel, same as Partnership above —
+// League rules content doesn't exist yet either.
+leagueRulesBtn.addEventListener('click', () => showConstructionScreen('League rules'));
 // How To (index.html's #helpBtn) — opens the "How to?" hub
 // (#howToHubOverlay) instead of launching the tutorial directly (see
 // conversation): same toggle-on-reclick/show/hide shape as About/Nimiq
@@ -2134,7 +2212,7 @@ const htCurlingBtn = document.getElementById('htCurlingBtn');
 const OTHER_MENU_OVERLAY_IDS = [
   'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay',
   'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay',
-  'aboutOverlay', 'constructionOverlay', 'nimiqOverlay',
+  'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay',
   'nimicurlRulesOverlay', 'pureCurlingRulesOverlay',
 ];
 function showHowToScreen() {
@@ -2591,11 +2669,6 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
     await new Promise((resolve) => {
       activeStopGame = startGame({
         ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), identiconLabel: identityLabelOverride(net.myTeam), mobile: IS_MOBILE, matchConfig, vibe: activeVibe,
-        // Remote Match only in practice (Duel LAN's magic link never goes
-        // through Classic/Custom, see conversation) — either player is free to
-        // reconfigure a fresh room after the match ends, creator/joiner roles
-        // don't carry over past a match's end.
-        onChangeSettings: () => { hideMatchChrome(); showCustomSettingsScreen('remote', matchConfig || DEFAULT_MATCH_CONFIG); },
         onMatchReady: resolve,
       });
     });

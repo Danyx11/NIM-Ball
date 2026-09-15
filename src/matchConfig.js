@@ -11,7 +11,7 @@
 export const DEFAULT_MATCH_CONFIG = Object.freeze({
   skin: 'summer',
   stonesPerTeam: 3,
-  pointsToWin: 3,
+  pointsToWin: 2,
   turnTime: 30,
   // Curling only (see game.js's CURLING_CYCLES_PER_POINT/curlingCycle) — how
   // many manches a point lasts before whichever stone sits closest to center
