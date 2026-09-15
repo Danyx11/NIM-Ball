@@ -2630,7 +2630,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    same panel language rather than a harsh divider. */
 .join-mymatches-divider { width: 100%; max-width: 360px; height: 1px; margin: 24px 0 20px; background: rgba(255,255,255,0.18); }
 .join-mymatches-section { gap: 10px; }
-/* Empty slot (see main.js's renderMyMatchesContent) — this wallet's 2-active-
+/* Empty slot (see main.js's renderMyMatchesContent) — this wallet's active-
    WEEK-match cap always renders as exactly 2 slots now, per explicit
    request, rather than a variable-length list; an unused one gets this
    greyed, non-interactive placeholder instead of a real .week-match-card. */

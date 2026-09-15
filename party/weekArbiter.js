@@ -514,7 +514,7 @@ export class WeekArbiter extends Server {
 
     // Either side can abandon at any point before the match is already
     // over — frees this player's PlayerIndex slot immediately (see
-    // conversation: the 2-active-matches cap was blocking testing with no
+    // conversation: the active-matches cap was blocking testing with no
     // way to bail out of a stuck/unwanted match). A deliberate abandon, not
     // the same thing as the natural 24h/7-day expiry (see onAlarm below),
     // but terminal the same way — same alarm/index cleanup either path.

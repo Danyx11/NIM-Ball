@@ -2,7 +2,8 @@
 // one Durable Object instance per address (routed by wallet address as the
 // room name, see party/index.js), used for two things a single match's own
 // Durable Object can't answer by itself: how many active WEEK matches does
-// this player already have (the 2-match cap), and "My Matches" (main.js) —
+// this player already have (the active-match cap, MAX_ACTIVE_MATCHES below),
+// and "My Matches" (main.js) —
 // the list of this player's in-progress WEEK matches with a per-match status
 // label, without opening a connection to every one of them individually.
 //
@@ -13,6 +14,10 @@
 // server-to-server.
 import { Server } from 'partyserver';
 
+// How many WEEK matches one wallet can have running at once. Kept in sync
+// with src/main.js's MY_MATCHES_SLOTS, which draws exactly this many rows.
+const MAX_ACTIVE_MATCHES = 3;
+
 export class PlayerIndex extends Server {
   onStart() {
     this._loaded = this.ctx.storage.get('matches').then((m) => { this.matches = m || {}; });
@@ -20,7 +25,7 @@ export class PlayerIndex extends Server {
 
   async ready() { if (this._loaded) await this._loaded; }
 
-  // Claims a slot for `code` against the 2-active-WEEK-matches cap. Called
+  // Claims a slot for `code` against MAX_ACTIVE_MATCHES. Called
   // once, right when this address becomes a real participant in a match
   // (creating it, or being accepted as the joiner) — never on a later
   // reconnect to a match it's already part of (idempotent: an already-known
@@ -31,7 +36,7 @@ export class PlayerIndex extends Server {
     await this.ready();
     if (this.matches[code]) return { ok: true };
     const activeCount = Object.values(this.matches).filter((m) => m.status === 'pending' || m.status === 'active').length;
-    if (activeCount >= 2) return { ok: false };
+    if (activeCount >= MAX_ACTIVE_MATCHES) return { ok: false };
     this.matches[code] = { status: 'pending', updatedAt: Date.now() };
     await this.ctx.storage.put('matches', this.matches);
     return { ok: true };
