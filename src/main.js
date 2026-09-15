@@ -2146,34 +2146,37 @@ function showHowToScreen() {
 function hideHowToScreen() {
   audio.play('button');
   howToHubOverlay.classList.add('hidden');
-  document.getElementById('htVideoPlayer').pause();
-  document.getElementById('howToVideoOverlay').classList.add('hidden');
+  resetHowToVideo();
   returnToModeSelect();
 }
 htBackBtn.addEventListener('click', hideHowToScreen);
-// Tutorial video thumbnail (index.html's #htVideoThumb) -> bigger unmuted
-// player (#howToVideoOverlay). Purely illustrative, no link to htPlayBtn's
-// interactive tutorial (see conversation).
+// Tutorial video thumbnail (index.html's #htVideoThumb) — a single <video>
+// element doing double duty, not a thumbnail + separate lightbox player (see
+// conversation: two independent <video>s meant two playheads, so a click
+// could leave both playing — audibly out of sync, sometimes literally
+// doubled). Starts as a silent autoplay/muted/loop preview; the first click
+// just unmutes it in place and turns on native controls (scrub bar +
+// fullscreen button come free from that, no custom player needed). Guarded
+// by `muted` so repeat clicks (including ones native controls themselves
+// generate, e.g. play/pause) don't replay the button SFX or reset anything.
 const htVideoThumb = document.getElementById('htVideoThumb');
-const howToVideoOverlay = document.getElementById('howToVideoOverlay');
-const htVideoCloseBtn = document.getElementById('htVideoCloseBtn');
-const htVideoPlayer = document.getElementById('htVideoPlayer');
-function showHowToVideo() {
+function engageHowToVideo() {
+  if (!htVideoThumb.muted) return;
   audio.play('button');
-  howToVideoOverlay.classList.remove('hidden');
-  htVideoPlayer.currentTime = 0;
-  htVideoPlayer.play().catch(() => {});
+  htVideoThumb.muted = false;
+  htVideoThumb.loop = false;
+  htVideoThumb.controls = true;
+  htVideoThumb.play().catch(() => {});
 }
-function hideHowToVideo() {
-  audio.play('button');
-  htVideoPlayer.pause();
-  howToVideoOverlay.classList.add('hidden');
+function resetHowToVideo() {
+  htVideoThumb.pause();
+  htVideoThumb.controls = false;
+  htVideoThumb.loop = true;
+  htVideoThumb.muted = true;
+  htVideoThumb.currentTime = 0;
+  htVideoThumb.play().catch(() => {});
 }
-htVideoThumb.addEventListener('click', showHowToVideo);
-htVideoCloseBtn.addEventListener('click', hideHowToVideo);
-howToVideoOverlay.addEventListener('click', (e) => {
-  if (e.target === howToVideoOverlay) hideHowToVideo();
-});
+htVideoThumb.addEventListener('click', engageHowToVideo);
 // Help button — same toggle-on-reclick shape as every other About/Nimiq/
 // League-style nav entry in this file.
 const helpBtn = document.getElementById('helpBtn');
