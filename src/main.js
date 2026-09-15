@@ -15,7 +15,7 @@ import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, se
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets, setModeSelectVibeBackground } from './background.js';
-import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, fetchMyWeekMatches, dismissWeekMatch } from './net.js';
+import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
@@ -2116,67 +2116,70 @@ navNimiq.addEventListener('click', () => {
   else hideNimiqScreen();
 });
 nimiqBackBtn.addEventListener('click', hideNimiqScreen);
-// League (index.html's #navLeague/#leagueOverlay) — dedicated panel now
-// (used to share Partnership's "Under construction" placeholder above, see
-// that panel's own comment), same toggle-on-reclick shape as About/Nimiq.
-// Ranking is placeholder data — there's no League backend yet, this wires up
-// the front-end shell approved in the mockup (see conversation).
+// League (index.html's #navLeague/#leagueOverlay) — dedicated panel, backed
+// by the real League Beta backend now (party/leagueSeason.js via
+// src/net.js's fetchLeagueLeaderboard/fetchLeagueWeeklyLeaderboard) — used
+// to be wired to placeholder mock data before that backend existed, see git
+// history. Same toggle-on-reclick shape as About/Nimiq.
 const leagueOverlay = document.getElementById('leagueOverlay');
 const leagueBackBtn = document.getElementById('leagueBackBtn');
 const leagueFindMatchBtn = document.getElementById('leagueFindMatchBtn');
 const leagueRulesBtn = document.getElementById('leagueRulesBtn');
-let leagueRendered = false;
-// "me" flags this device's own row (highlighted, see .league-rank-row.me) —
-// swap this whole block for a real fetch once a League backend exists. An
-// "NQ…" name renders as a shortened address (mono), anything else as a
-// handle — same convention as ticket.js's resolveTeamDisplay.
-const LEAGUE_MOCK_MAIN = [
-  { name: '@stonecold', pts: 1284 }, { name: '@curlqueen', pts: 1197 },
-  { name: 'NQ04 8821 XPLM 22KT AB91 QQ02 991C L82M', pts: 1052 },
-  { name: '@nico', pts: 918, me: true }, { name: '@icebreaker', pts: 873 },
-  { name: 'NQ77 1102 90LK MMSN 22QT AK91 P02C 771M', pts: 801 },
-  { name: '@frostbite', pts: 754 }, { name: '@rockslinger', pts: 689 },
-  { name: '@glacequeen', pts: 612 }, { name: 'NQ55 2201 88TM KLPQ 11XT AB03 P44C 992M', pts: 540 },
-  { name: '@houseshot', pts: 498 }, { name: '@brokenbroom', pts: 461 },
-  { name: 'NQ33 6610 22PL MKST 99XQ AB04 P11C L92M', pts: 417 },
-  { name: '@sweepdream', pts: 389 }, { name: '@coldshoulder', pts: 350 },
-  { name: '@rinkrat', pts: 312 }, { name: 'NQ90 1145 77KM XPLS 33TQ AB01 P66C M09L', pts: 268 },
-];
-const LEAGUE_MOCK_WEEK = [
-  { name: '@icebreaker', pts: 216 }, { name: '@nico', pts: 184, me: true },
-  { name: '@stonecold', pts: 171 }, { name: 'NQ88 7712 LKMS 22PQ 9021 AABT 771C M02X', pts: 158 },
-  { name: '@curlqueen', pts: 139 }, { name: '@houseshot', pts: 122 },
-  { name: '@frostbite', pts: 97 }, { name: 'NQ21 9012 KPLM 33XQ 8801 TT02 551C M09M', pts: 84 },
-  { name: '@rockslinger', pts: 63 }, { name: '@glacequeen', pts: 41 },
-  { name: '@brokenbroom', pts: 37 }, { name: 'NQ44 2201 KMPT 55XL 66QS AB09 P02C L71M', pts: 29 },
-  { name: '@sweepdream', pts: 22 }, { name: '@coldshoulder', pts: 15 },
-];
-function renderLeagueRankPill(el, list) {
-  el.innerHTML = list.map((row, i) => {
-    const isAddr = row.name.startsWith('NQ');
-    const label = isAddr ? `${row.name.slice(0, 4)}...${row.name.slice(-4)}` : row.name;
-    return `<div class="league-rank-row${row.me ? ' me' : ''}">
-      <span class="league-rank-num">${i + 1}</span>
-      <span class="league-rank-avatar" data-address="${row.name}"></span>
+// row: { rank, address, lp, matches, wins, losses, streak } from
+// party/leagueSeason.js's onRequest — no handle/name field, just the raw
+// wallet address, so display name resolution reuses this file's existing
+// handleCache/refreshHandleCache/shortenAddressCompact helpers (same as the
+// identity pill above) rather than a new resolution path. "me" highlighting
+// compares against hubAddress, normalized the same way src/net.js already
+// normalizes every address before it's ever stored server-side (Nimiq's
+// user-friendly address format is space-separated; row.address here never
+// is, since it came from that same normalization).
+function renderLeagueRankPill(el, rows, emptyText) {
+  if (!rows || !rows.length) {
+    el.innerHTML = `<div class="league-rank-empty">${emptyText}</div>`;
+    return;
+  }
+  const myAddress = hubAddress ? normalizeAddress(hubAddress) : null;
+  el.innerHTML = rows.map((row) => {
+    const cached = handleCache.get(row.address);
+    const label = cached?.handle ? `@${cached.handle}` : shortenAddressCompact(row.address);
+    const isAddr = !cached?.handle;
+    const isMe = !!myAddress && row.address === myAddress;
+    return `<div class="league-rank-row${isMe ? ' me' : ''}">
+      <span class="league-rank-num">${row.rank}</span>
+      <span class="league-rank-avatar" data-address="${row.address}"></span>
       <span class="league-rank-name${isAddr ? ' addr' : ''}">${label}</span>
-      <span class="league-rank-pts">+${row.pts}<span class="league-rank-pts-suffix"> pts</span></span>
+      <span class="league-rank-pts">+${row.lp}<span class="league-rank-pts-suffix"> pts</span></span>
     </div>`;
   }).join('');
-  // Same fire-and-forget backgroundImage pattern as renderMyMatchesContent's
-  // own .week-match-avatar above — any string works as an identicon seed,
-  // real address or not, which is exactly what this mock data needs.
   el.querySelectorAll('.league-rank-avatar[data-address]').forEach((avatarEl) => {
     getIdenticonPngDataUrl(avatarEl.dataset.address).then((url) => { avatarEl.style.backgroundImage = `url(${url})`; });
   });
+  // Kick off (or reuse an in-flight/already-cached) handle resolution for
+  // every row, fire-and-forget same as every other call site of this
+  // shared helper — then one short-delayed repaint so a handle that
+  // resolves quickly still pops in, without blocking this pill's own first
+  // paint on the network round trip. Not a polling loop: if some entries
+  // are still unresolved after this single repaint, that repaint's own
+  // pending check schedules one more, so it naturally settles once
+  // everything's in cache instead of running forever.
+  rows.forEach((row) => refreshHandleCache(row.address));
+  const stillPending = rows.some((row) => !handleCache.get(row.address));
+  if (stillPending) setTimeout(() => renderLeagueRankPill(el, rows, emptyText), 700);
 }
-// Mobile-only (index.html's .league-rank-col--mobile, see conversation —
-// desktop keeps the side-by-side Main/Week pair above): one shared pill fed
-// by whichever of LEAGUE_MOCK_MAIN/WEEK the .seg-btn tab switch last picked.
+// Mobile-only (index.html's .league-rank-col--mobile): one shared pill fed
+// by whichever of leagueMainRows/leagueWeekRows the .seg-btn tab switch last
+// picked — the exact same fetched arrays the desktop Main/Week columns below
+// render, just re-painted locally on tab switch instead of re-fetched.
 let leagueMobileTab = 'main';
+let leagueMainRows = [];
+let leagueWeekRows = [];
 const leagueTabMain = document.getElementById('leagueTabMain');
 const leagueTabWeek = document.getElementById('leagueTabWeek');
 function renderLeagueMobileRanks() {
-  renderLeagueRankPill(document.getElementById('leagueMobileRanks'), leagueMobileTab === 'main' ? LEAGUE_MOCK_MAIN : LEAGUE_MOCK_WEEK);
+  const rows = leagueMobileTab === 'main' ? leagueMainRows : leagueWeekRows;
+  const emptyText = leagueMobileTab === 'main' ? 'No ranked players yet' : 'No matches this week yet';
+  renderLeagueRankPill(document.getElementById('leagueMobileRanks'), rows, emptyText);
 }
 function setLeagueMobileTab(tab) {
   if (tab === leagueMobileTab) return;
@@ -2188,22 +2191,31 @@ function setLeagueMobileTab(tab) {
 }
 leagueTabMain.addEventListener('click', () => setLeagueMobileTab('main'));
 leagueTabWeek.addEventListener('click', () => setLeagueMobileTab('week'));
-// This device's own row — points come straight from its LEAGUE_MOCK_MAIN
-// entry (kept in sync there, not duplicated), win/loss/streak are separate
-// mock fields since the ranking rows don't carry those. All placeholder
-// pending the real League backend, same as the ranking lists above.
-const LEAGUE_MOCK_ME_STATS = { wins: 14, losses: 6, streakCount: 3, streakType: 'win' };
+// This device's own stats bar — real data from party/leagueSeason.js via
+// fetchLeagueStats, keyed off hubAddress. Guests have none (League never
+// tracks guests, see that backend's own scope comment), hence the early
+// return below. "streak" here is the CALENDAR-DAY streak (spec section 6:
+// a win or a loss both count), not a win streak — labelled accordingly.
 function renderLeagueMeStats() {
-  const me = LEAGUE_MOCK_MAIN.find((row) => row.me);
-  getIdenticonPngDataUrl(me.name).then((url) => {
-    document.getElementById('leagueMeAvatar').style.backgroundImage = `url(${url})`;
+  const avatarEl = document.getElementById('leagueMeAvatar');
+  const ptsEl = document.getElementById('leagueMePts');
+  const winLossEl = document.getElementById('leagueMeWinLoss');
+  const streakEl = document.getElementById('leagueMeStreak');
+  if (!hubAddress) {
+    avatarEl.style.backgroundImage = '';
+    ptsEl.textContent = '';
+    winLossEl.textContent = '';
+    streakEl.textContent = 'Connect your wallet to track your League stats';
+    return;
+  }
+  getIdenticonPngDataUrl(hubAddress).then((url) => { avatarEl.style.backgroundImage = `url(${url})`; });
+  fetchLeagueStats(hubAddress).then((data) => {
+    const p = data?.player;
+    if (!p) return;
+    ptsEl.textContent = `+${p.lp} pts`;
+    winLossEl.innerHTML = `<span class="league-me-num">${p.wins}</span> wins · <span class="league-me-num">${p.losses}</span> losses`;
+    streakEl.innerHTML = `<span class="league-me-num">${p.streak}</span> day streak`;
   });
-  document.getElementById('leagueMePts').textContent = `+${me.pts} pts`;
-  const { wins, losses, streakCount, streakType } = LEAGUE_MOCK_ME_STATS;
-  document.getElementById('leagueMeWinLoss').innerHTML =
-    `<span class="league-me-num">${wins}</span> wins · <span class="league-me-num">${losses}</span> losses`;
-  document.getElementById('leagueMeStreak').innerHTML =
-    `<span class="league-me-num">${streakCount}</span> ${streakType} streak`;
 }
 function showLeagueScreen() {
   audio.play('button');
@@ -2213,13 +2225,29 @@ function showLeagueScreen() {
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
-  if (!leagueRendered) {
-    renderLeagueRankPill(document.getElementById('leagueMainRanks'), LEAGUE_MOCK_MAIN);
-    renderLeagueRankPill(document.getElementById('leagueWeekRanks'), LEAGUE_MOCK_WEEK);
-    renderLeagueMobileRanks();
-    renderLeagueMeStats();
-    leagueRendered = true;
-  }
+  // Re-fetched every time the panel opens, not cached after the first
+  // render — it's a running leaderboard, a session reopening the panel
+  // later shouldn't keep showing its very first pull.
+  // fetchLeagueLeaderboard/fetchLeagueWeeklyLeaderboard already resolve to
+  // { leaderboard: [] } on any fetch failure (see their own try/catch in
+  // net.js), so the render path below never has to special-case a network
+  // error separately from "no matches yet".
+  const mainEl = document.getElementById('leagueMainRanks');
+  const weekEl = document.getElementById('leagueWeekRanks');
+  mainEl.innerHTML = `<div class="league-rank-empty">Loading…</div>`;
+  weekEl.innerHTML = `<div class="league-rank-empty">Loading…</div>`;
+  document.getElementById('leagueMobileRanks').innerHTML = `<div class="league-rank-empty">Loading…</div>`;
+  fetchLeagueLeaderboard().then((data) => {
+    leagueMainRows = data?.leaderboard || [];
+    renderLeagueRankPill(mainEl, leagueMainRows, 'No ranked players yet');
+    if (leagueMobileTab === 'main') renderLeagueMobileRanks();
+  });
+  fetchLeagueWeeklyLeaderboard().then((data) => {
+    leagueWeekRows = data?.leaderboard || [];
+    renderLeagueRankPill(weekEl, leagueWeekRows, 'No matches this week yet');
+    if (leagueMobileTab === 'week') renderLeagueMobileRanks();
+  });
+  renderLeagueMeStats();
   leagueOverlay.classList.remove('hidden');
 }
 function hideLeagueScreen() {

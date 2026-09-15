@@ -17,6 +17,7 @@
 // unchanged.
 import { Server, getServerByName } from 'partyserver';
 import { RADAR_ROOM_NAME } from './radar.js';
+import { CURRENT_SEASON_ID, isClassicMatchConfig } from './leagueRating.js';
 
 const CHAT_COOLDOWN_MS = 30000;
 
@@ -106,6 +107,11 @@ export class Arbiter extends Server {
     this.addresses = { A: null, B: null };
     this.radarStartedNotified = false;
     this.radarCompletedNotified = false;
+    // League Beta (party/leagueSeason.js) — same one-shot-per-instance
+    // guard as radarCompletedNotified just above, and for the same reason
+    // (both clients independently detect the win locally and each send
+    // their own 'matchOver', see that branch below).
+    this.leagueCompletedNotified = false;
   }
 
   radarNotify(method, payload) {
@@ -121,6 +127,16 @@ export class Arbiter extends Server {
     getServerByName(this.env.RadarCollector, RADAR_ROOM_NAME)
       .then((radar) => radar[method](payload))
       .catch((err) => console.error(`[radar] ${method} failed:`, err));
+  }
+
+  // League Beta — same getServerByName/RPC shape as radarNotify above, just
+  // pointed at the season's own Durable Object (see party/leagueSeason.js's
+  // header comment on why this RPC boundary is itself the auth).
+  leagueNotify(method, payload) {
+    if (!this.env?.LeagueSeason) return; // e.g. local `npm run wrangler:dev` without the binding configured
+    getServerByName(this.env.LeagueSeason, CURRENT_SEASON_ID)
+      .then((league) => league[method](payload))
+      .catch((err) => console.error(`[league] ${method} failed:`, err));
   }
 
   send(connection, msg) {
@@ -280,6 +296,44 @@ export class Arbiter extends Server {
       if (!this.radarCompletedNotified) {
         this.radarCompletedNotified = true;
         this.radarNotify('recordMatchCompleted', { matchId: this.name, mode: 'live', timestampMs: Date.now() });
+      }
+      // League Beta (party/leagueSeason.js) — a LIVE match only counts for
+      // League if ALL of these hold (product scope decision):
+      // (a) both players actually connected — this.radarStartedNotified is
+      //     flipped exactly once that happened (see onConnect above), the
+      //     same "both present" bar Radar itself already uses, not just a
+      //     code that got generated and never joined;
+      // (b) both sides reported a real wallet address — LIVE stays
+      //     guest-playable, but League has no stable identity to track/rank
+      //     a guest against (same "no reliable, privacy-respecting stable
+      //     id for a guest" reasoning as Radar's own unique-player counting,
+      //     see CLAUDE.md);
+      // (c) the match was played with the exact Classic ruleset preset —
+      //     Custom-rules matches never count (scope decision). this.matchConfig
+      //     is the creator's own choice, relayed verbatim (see onConnect/
+      //     onMessage's 'matchConfig' branch) — never validated beyond
+      //     isClassicMatchConfig's own equality check, same trust model as
+      //     every other client-sent field this arbiter already relays as-is.
+      if (!this.leagueCompletedNotified && this.radarStartedNotified
+        && this.addresses.A && this.addresses.B
+        && isClassicMatchConfig(this.matchConfig)) {
+        const scoreA = Number(msg.scoreA) || 0;
+        const scoreB = Number(msg.scoreB) || 0;
+        // A tie shouldn't be reachable (the match only ends once one side's
+        // score crosses the win threshold) but is checked for defensively
+        // rather than ever crediting/blaming either side incorrectly.
+        const winner = scoreA > scoreB ? 'A' : scoreB > scoreA ? 'B' : null;
+        if (winner) {
+          this.leagueCompletedNotified = true;
+          this.leagueNotify('recordMatchCompleted', {
+            // 'live:' prefix keeps this globally distinct from WEEK's own
+            // 'week:'-prefixed ids (see party/weekArbiter.js) even though
+            // match codes are drawn from the same 4-character space —
+            // LeagueSeason's idempotency check keys off this exact string.
+            leagueMatchId: `live:${this.name}`, mode: 'live', timestampMs: Date.now(),
+            playerA: { address: this.addresses.A }, playerB: { address: this.addresses.B }, winner,
+          });
+        }
       }
     }
   }
