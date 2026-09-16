@@ -109,7 +109,11 @@ export class LeagueSeason extends Server {
         timestamp: timestampMs || Date.now(),
       };
       await Promise.all([this.persistPlayers(), this.persistMatches()]);
-      return { ok: true };
+      // lpAwardedA/lpAwardedB: the CALLER's job to relay each side's own
+      // figure back to that side's client (see party/arbiter.js's own
+      // 'matchOver' handler) — this class has no notion of which side is
+      // "the reader", it just hands both back.
+      return { ok: true, lpAwardedA: result.A.lpAwarded, lpAwardedB: result.B.lpAwarded };
     });
   }
 

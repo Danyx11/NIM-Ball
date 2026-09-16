@@ -21,7 +21,7 @@ const ASSET_BASE = import.meta.env.BASE_URL;
 // team (see src/nimiq.js's chooseAddress() — main.js's Hub test button wires
 // a real chosen address in for team A). The identicon pipeline below doesn't
 // care where the address string comes from.
-const DEFAULT_IDENTICON_ADDRESS = {
+export const DEFAULT_IDENTICON_ADDRESS = {
   A: 'NQ16 2SSN 82TL SMQS KXT3 Q01V CMAL NU6F 1LJG',
   B: 'NQ19 AXEU PPQ9 5610 YF48 VLTJ QR6Y 0HS1 UH89',
 };
@@ -1220,6 +1220,40 @@ export function startGame(opts = {}) {
   let totalCollisions = 0;
   let bestShotSpeed = 0;
   let stonesDestroyed = 0;
+  // WEEK match tickets (see main.js's showWeekMatchTicket) — collisions/
+  // stonesDestroyed since the LAST onMancheSettled report, not the session's
+  // running total: a WEEK session can chain through several manches in one
+  // sitting (see weekController.js), and party/weekArbiter.js accumulates
+  // these deltas into its own persisted running total across the whole
+  // (potentially multi-day, multi-session) match — reporting the session
+  // total every time would double-count everything already reported earlier
+  // in this same sitting. Meaningless outside WEEK (onMancheSettled is
+  // WEEK-only, see its own comment), so nothing else ever reads these.
+  let reportedCollisions = 0;
+  let reportedStonesDestroyed = 0;
+  // League Beta (party/arbiter.js's 'leagueResult' push, relayed by
+  // src/net.js) — the LP this match earned, arriving asynchronously shortly
+  // after net.sendMatchOver (LIVE only, and only once the match actually
+  // qualified — see arbiter.js's own eligibility comment: Classic ruleset,
+  // both sides a real wallet, both actually connected). Stays null when it
+  // never arrives (not a League match, custom rules, a guest on either
+  // side, Duel LAN, or simply no net at all) — showVictory() waits briefly
+  // for it (waitForLeagueLp) before baking the ticket's league stamp (see
+  // src/ticket.js), then gives up and renders without one.
+  let leagueLpAwarded = null;
+  let leagueLpWaiters = [];
+  function resolveLeagueLp(lp) {
+    leagueLpAwarded = lp;
+    leagueLpWaiters.forEach((resolve) => resolve(lp));
+    leagueLpWaiters = [];
+  }
+  function waitForLeagueLp(timeoutMs) {
+    if (leagueLpAwarded !== null) return Promise.resolve(leagueLpAwarded);
+    return new Promise((resolve) => {
+      leagueLpWaiters.push(resolve);
+      trackedTimeout(() => resolve(null), timeoutMs);
+    });
+  }
   // Which entity's glide whoosh (see audio.js's GLIDE_* — single voice only)
   // gets to sound for the round currently in flight: since every stone
   // launches on the same physics frame, picked once at launchSimulation()
@@ -1456,7 +1490,14 @@ export function startGame(opts = {}) {
         //     alive, until the orchestrator says what happens next.
         mancheSettledReported = true;
         phase = 'mancheHold';
-        onMancheSettled?.({ scoreA, scoreB, matchOver: scoreA >= WIN_SCORE || scoreB >= WIN_SCORE, scoredTeam: lastMancheScoringTeam });
+        const collisionsDelta = totalCollisions - reportedCollisions;
+        const stonesDestroyedDelta = stonesDestroyed - reportedStonesDestroyed;
+        reportedCollisions = totalCollisions;
+        reportedStonesDestroyed = stonesDestroyed;
+        onMancheSettled?.({
+          scoreA, scoreB, matchOver: scoreA >= WIN_SCORE || scoreB >= WIN_SCORE, scoredTeam: lastMancheScoringTeam,
+          collisionsDelta, stonesDestroyedDelta,
+        });
       }
       return;
     }
@@ -2926,6 +2967,7 @@ export function startGame(opts = {}) {
         showChatMessage(team, muted ? 'Chat OFF' : '');
       });
     }
+    net.onLeagueResult(({ lpAwarded }) => resolveLeagueLp(lpAwarded));
     net.onLaunch(({ shotsA, shotsB, sweepA, sweepB, mancheIndex }) => {
       clearLanWaitWatchdog();
       hideOverlay();
@@ -4162,6 +4204,17 @@ export function startGame(opts = {}) {
     // most recent points rather than all of them; short matches show every point.
     const allPoints = recorder.getPoints();
     const ticketPoints = allPoints.length <= MAX_POINTS_ON_TICKET ? allPoints : allPoints.slice(-MAX_POINTS_ON_TICKET);
+    // League Beta stamp (src/ticket.js) — only worth waiting on at all for a
+    // match that at least LOOKS eligible client-side (net present, Classic
+    // ruleset); the server stays the real authority (both sides an actual
+    // wallet, both actually connected — see arbiter.js's own eligibility
+    // comment), so this is just a cheap filter to skip the wait entirely for
+    // the common ineligible cases (Custom rules, Pass & Play/AI/Replay,
+    // Duel LAN) rather than always paying a timeout for nothing.
+    const looksClassic = matchConfig.skin === DEFAULT_MATCH_CONFIG.skin && matchConfig.stonesPerTeam === DEFAULT_MATCH_CONFIG.stonesPerTeam
+      && matchConfig.pointsToWin === DEFAULT_MATCH_CONFIG.pointsToWin && matchConfig.turnTime === DEFAULT_MATCH_CONFIG.turnTime
+      && matchConfig.curlingCycles === DEFAULT_MATCH_CONFIG.curlingCycles;
+    const leagueLp = (net && looksClassic) ? await waitForLeagueLp(2000) : null;
     const ticketCanvas = await renderTicket({
       scoreA, scoreB,
       teamA: { address: IDENTICON_ADDRESS.A, label: IDENTICON_LABEL.A },
@@ -4169,6 +4222,7 @@ export function startGame(opts = {}) {
       winner: winningTeam,
       stats,
       points: ticketPoints,
+      leagueLp,
     });
     // Rejouer/Menu (or a LAN disconnect) may have already moved the overlay on
     // by the time this async render resolves — don't stomp on it.
@@ -4185,7 +4239,13 @@ export function startGame(opts = {}) {
         <button class="bigbtn" id="goalShareBtn">📤 Share</button>
       </div>
     `);
-    document.getElementById('ticketImg').src = ticketCanvas.toDataURL('image/png');
+    const ticketImg = document.getElementById('ticketImg');
+    ticketImg.src = ticketCanvas.toDataURL('image/png');
+    // The league stamp itself is baked straight into the canvas pixels (see
+    // ticket.js's drawLeagueStamp) — nothing in the DOM for a screen reader
+    // to land on, so its info goes on the <img>'s own alt text instead (see
+    // conversation: the brief's own accessibility note).
+    if (leagueLp != null) ticketImg.alt = `Nim-Curl match ticket. League Beta match, +${leagueLp} points.`;
     // Each point QR baked onto the ticket is also directly clickable on the
     // same device (no second phone needed to scan it) — see CLAUDE.md replay
     // section. Covers the whole tile column (QR + label), not just the QR

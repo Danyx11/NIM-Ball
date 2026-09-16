@@ -174,8 +174,15 @@ function weekMatchHandle(socket, snapshot) {
     // side already reported — see that same handler for why this needed
     // splitting from "clear pendingShots for the next manche" in the first
     // place (each side's own reveal progress must stay independent).
-    async completeRound(scoredTeam) {
-      return socket.request({ type: 'completeRound', scoredTeam });
+    // collisionsDelta/stonesDestroyedDelta (both optional, default 0): this
+    // manche's own contribution to the match ticket's running stats (see
+    // party/weekArbiter.js's own accumulation, and main.js's
+    // showWeekMatchTicket) — only meaningful the FIRST time a given manche
+    // is reported (the server only applies them on that same branch, see its
+    // own comment; a later "I've now watched it too" ack from the other side
+    // sends these too but they're simply ignored there).
+    async completeRound(scoredTeam, collisionsDelta = 0, stonesDestroyedDelta = 0) {
+      return socket.request({ type: 'completeRound', scoredTeam, collisionsDelta, stonesDestroyedDelta });
     },
     // Either side can abandon at any point before the match is already over
     // (see party/weekArbiter.js's own 'abandon' handler) — frees this
@@ -314,6 +321,7 @@ function connectSocket(url) {
     let bothReadyCb = null;
     let mancheValidCb = null;
     let mancheInvalidCb = null;
+    let leagueResultCb = null;
 
     const net = {
       myTeam: null,
@@ -395,6 +403,14 @@ function connectSocket(url) {
       onBothReady(cb) { bothReadyCb = cb; },
       onMancheValid(cb) { mancheValidCb = cb; },
       onMancheInvalid(cb) { mancheInvalidCb = cb; },
+      // League Beta (party/arbiter.js's own 'matchOver' handler) — fires once,
+      // shortly after sendMatchOver, with THIS client's own LP gain for the
+      // match just played (see src/ticket.js's league stamp). Never fires at
+      // all on Duel LAN (server/arbiter.js has no League concept, see
+      // CLAUDE.md) or when this match didn't qualify for League (custom
+      // rules, a guest on either side, etc.) — callers must not assume it
+      // always arrives.
+      onLeagueResult(cb) { leagueResultCb = cb; },
       close() { ws.close(); },
     };
 
@@ -438,6 +454,8 @@ function connectSocket(url) {
         if (mancheValidCb) mancheValidCb({ mancheIndex: msg.mancheIndex });
       } else if (msg.type === 'mancheInvalid') {
         if (mancheInvalidCb) mancheInvalidCb({ mancheIndex: msg.mancheIndex, resultA: msg.resultA, resultB: msg.resultB });
+      } else if (msg.type === 'leagueResult') {
+        if (leagueResultCb) leagueResultCb({ lpAwarded: msg.lpAwarded });
       }
     });
   });

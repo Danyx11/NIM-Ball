@@ -17,6 +17,7 @@ import {
   BANNER_WIPE_X, BANNER_WIPE_Y, BANNER_WIPE_W, BANNER_WIPE_H, BANNER_WIPE_RADIUS,
   traceBannerTabPath,
   UPLOAD_LABEL_CX, UPLOAD_LABEL_Y,
+  LEAGUE_STAMP_CX, LEAGUE_STAMP_CY, LEAGUE_STAMP_R, LEAGUE_STAMP_ROTATE_DEG,
 } from './replay.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
@@ -57,11 +58,24 @@ function shortenAddress(address) {
   return `${groups[0]}...${groups[groups.length - 1]}`;
 }
 
+// M:SS for a real match duration (LIVE/local always under an hour). A WEEK
+// match's own "duration" is the calendar span it was open for (see main.js's
+// showWeekMatchTicket) — can legitimately span days, where M:SS overflows
+// into something unreadable ("2940:00") — so an hour or more switches to a
+// coarser "Dd HHh" / "HHh MMm" form instead.
 function formatDuration(ms) {
   const totalSec = Math.max(0, Math.round(ms / 1000));
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
+  if (totalSec < 3600) {
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+  const totalHours = Math.floor(totalSec / 3600);
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  if (days > 0) return `${days}d ${hours}h`;
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  return `${hours}h ${minutes}m`;
 }
 
 // team.label is identityLabelOverride()'s output (see main.js): undefined
@@ -111,7 +125,41 @@ function drawSpacedText(ctx, text, cx, y, font, color, spacing) {
   [...text].forEach((ch, i) => { ctx.fillText(ch, x, y); x += widths[i] + spacing; });
 }
 
-export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winner, stats, points = [] }) {
+// League Beta stamp — a solid, fully-opaque white badge sitting on top of
+// the ticket's top-left corner (see replay.js's LEAGUE_STAMP_* + game.js's
+// showVictory, which only ever passes a non-null leagueLp for a LIVE match
+// that actually qualified: Classic ruleset, both sides a real wallet, both
+// actually connected). An earlier translucent/multiply-blended "inked into
+// the paper" version (see git history) read as illegible sitting over the
+// busy photo — plain opaque white + solid ink text + a soft drop shadow for
+// separation reads far better there (see conversation: "fond blanc piqué et
+// très opaque").
+function drawLeagueStamp(ctx, lp) {
+  ctx.save();
+  ctx.translate(LEAGUE_STAMP_CX, LEAGUE_STAMP_CY);
+  ctx.rotate((LEAGUE_STAMP_ROTATE_DEG * Math.PI) / 180);
+  const r = LEAGUE_STAMP_R;
+  ctx.shadowColor = 'rgba(15, 28, 63, 0.35)';
+  ctx.shadowBlur = Math.round(14 * SCALE);
+  ctx.shadowOffsetY = Math.round(3 * SCALE);
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.lineWidth = Math.round(3 * SCALE);
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  drawSpacedText(ctx, 'LEAGUE BETA', 0, -r * 0.18, `800 ${Math.round(15 * SCALE)}px ${FONT}`, INK, 1.5 * SCALE);
+  ctx.font = `800 ${Math.round(34 * SCALE)}px ${FONT}`;
+  ctx.fillStyle = INK;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(`+${lp}pts`, 0, r * 0.34);
+  ctx.restore();
+}
+
+export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winner, stats, points = [], leagueLp = null }) {
   await document.fonts.ready;
   const [[polaroidImg, bannerImg, guestBlueImg, guestYellowImg], identiconA, identiconB] = await Promise.all([
     preloadTicketAssets(),
@@ -225,6 +273,8 @@ export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winn
   ctx.clip();
   ctx.drawImage(polaroidImg, 0, 0, W, H);
   ctx.restore();
+
+  if (leagueLp != null) drawLeagueStamp(ctx, leagueLp);
 
   return canvas;
 }

@@ -325,6 +325,17 @@ export class Arbiter extends Server {
         const winner = scoreA > scoreB ? 'A' : scoreB > scoreA ? 'B' : null;
         if (winner) {
           this.leagueCompletedNotified = true;
+          // Unlike radarNotify's other fire-and-forget calls, this one's
+          // result actually matters to the client — the ticket's league
+          // stamp (see src/ticket.js) needs to know how much LP THIS match
+          // just earned, and there's no other channel for that (a plain GET
+          // against LeagueSeason only ever returns the season TOTAL, not one
+          // match's own delta). leagueNotify already returns the RPC's own
+          // result (see its own comment), so .then() off it here rather than
+          // fire-and-forget. Sent to BOTH players at once, regardless of
+          // which one's own 'matchOver' happened to be the one that arrived
+          // first and actually triggered the RPC (both send it independently
+          // — see this branch's own leagueCompletedNotified guard).
           this.leagueNotify('recordMatchCompleted', {
             // 'live:' prefix keeps this globally distinct from WEEK's own
             // 'week:'-prefixed ids (see party/weekArbiter.js) even though
@@ -332,6 +343,10 @@ export class Arbiter extends Server {
             // LeagueSeason's idempotency check keys off this exact string.
             leagueMatchId: `live:${this.name}`, mode: 'live', timestampMs: Date.now(),
             playerA: { address: this.addresses.A }, playerB: { address: this.addresses.B }, winner,
+          }).then((result) => {
+            if (!result?.ok || result.duplicate) return; // no fresh lpAwarded to report — see leagueSeason.js
+            this.send(this.players.A, { type: 'leagueResult', lpAwarded: result.lpAwardedA });
+            this.send(this.players.B, { type: 'leagueResult', lpAwarded: result.lpAwardedB });
           });
         }
       }
