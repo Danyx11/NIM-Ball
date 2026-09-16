@@ -198,6 +198,28 @@ export async function joinWeekMatch(code, address) {
   return weekMatchHandle(socket, snapshot);
 }
 
+// Existence probe for a WEEK code, with no wallet address required — used by
+// "Join with a code" (main.js's joinWithCode) for a not-yet-connected player,
+// who otherwise has no way to open a WEEK connection at all (onConnect in
+// party/weekArbiter.js requires an address on every attempt). Lets that
+// screen tell a real WEEK code apart from a LIVE code (or a code that
+// matches nothing) BEFORE routing anywhere, instead of falling through to
+// LIVE's guest join and silently spinning up an unrelated empty room under
+// the same code string. Best-effort like fetchMyWeekMatches above — resolves
+// to `false` on any network failure rather than throwing, so a hiccup here
+// just falls through to the existing LIVE guest flow instead of stranding
+// the player.
+export async function checkWeekMatchExists(code) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/week-arbiter/${code}`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    return !!data.exists;
+  } catch {
+    return false;
+  }
+}
+
 // "My Matches" (main.js) — a plain GET against this address's PlayerIndex
 // room, not a WebSocket: a one-off read, nothing to hold open (see
 // party/playerIndex.js). Returns {} on any failure so the UI can render an

@@ -15,7 +15,7 @@ import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, se
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets, setModeSelectVibeBackground } from './background.js';
-import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress } from './net.js';
+import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, checkWeekMatchExists, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
@@ -2995,8 +2995,59 @@ async function joinWithCode(code, joinBtn, retryScreen) {
       if (err.reason !== 'notFound') { retryScreen(err.message); return; }
       // fall through to LIVE below
     }
+    return joinMatch(code, joinBtn, retryScreen);
+  }
+  // Not connected — WEEK has no guest concept (see party/weekArbiter.js's
+  // own header comment), so we can't just try WEEK-then-LIVE the way the
+  // connected branch above does: WEEK's onConnect requires an address on
+  // every attempt, before it even checks whether the code exists. Without
+  // this check, a disconnected player typing a real WEEK code used to fall
+  // straight through to joinMatch() below, which silently spun up a brand
+  // new, unrelated LIVE room under that same code string (the guest-routing
+  // bug this function's own commit fixes) instead of ever learning it was
+  // actually a WEEK code. checkWeekMatchExists (src/net.js) is the
+  // address-free existence probe that makes the distinction possible.
+  if (joinBtn) joinBtn.disabled = true;
+  showLoadingOverlay();
+  const isWeekMatch = await checkWeekMatchExists(code);
+  hideLoadingOverlay();
+  if (joinBtn) joinBtn.disabled = false;
+  if (isWeekMatch) {
+    showWeekConnectToJoinPanel(code, joinBtn, retryScreen);
+    return;
   }
   return joinMatch(code, joinBtn, retryScreen);
+}
+
+// Shown instead of routing into LIVE when a not-yet-connected player enters
+// a code that checkWeekMatchExists (src/net.js) confirms is a real WEEK
+// match (see joinWithCode above) — WEEK requires a connected wallet on both
+// sides, so there is nothing to join here without one first. Modeled
+// directly on showWeekWalletPanel above (same showNetPanel mechanism, same
+// connectIdentity() popup, which already handles both "create a new wallet"
+// and "connect an existing one" — see src/nimiq.js), except this path leads
+// back into THIS SAME code instead of into hostWeekMatch: once connected, it
+// re-invokes joinWithCode with hubAddress now set, so the connected branch
+// above (the already-correct path) is the one and only place that actually
+// performs a WEEK join — no second implementation of "how a code becomes a
+// WEEK match" here.
+function showWeekConnectToJoinPanel(code, joinBtn, retryScreen) {
+  showNetPanel(`
+    <h2>This is a WEEK match</h2>
+    <p>Connect your wallet to join it.</p>
+    <button class="bigbtn" id="weekJoinConnectBtn">Connect</button>
+  `);
+  document.getElementById('weekJoinConnectBtn').addEventListener('click', () => {
+    audio.play('button');
+    connectIdentity()
+      .then((address) => {
+        hubAddress = address;
+        syncIdentityPill();
+        hideNetPanel();
+        joinWithCode(code, joinBtn, retryScreen); // now connected — retries as WEEK automatically
+      })
+      .catch(() => {}); // cancelled/failed — stay on this panel
+  });
 }
 
 async function joinMatch(code, joinBtn, retryScreen) {
