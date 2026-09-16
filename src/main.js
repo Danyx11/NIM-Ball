@@ -9,7 +9,8 @@ import '@fontsource/mulish/800.css';
 // Nimiq UI Kit's monospace pairing for addresses/on-chain data — the sidebar
 // identity pill's address line (see style.css's #connectBtnLabel).
 import '@fontsource/fira-mono/500.css';
-import { startGame, preloadCoreAssets } from './game.js';
+import { startGame, preloadCoreAssets, DEFAULT_IDENTICON_ADDRESS } from './game.js';
+import { preloadTicketAssets, renderTicket } from './ticket.js';
 import { playSingleShot, playReveal } from './weekController.js';
 import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendClaimTransaction, getGuestCode } from './nimiq.js';
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
@@ -3138,8 +3139,7 @@ function enterWeekMatch(week) {
   }
   if (week.status === 'completed') {
     week.close();
-    showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${week.scoreA} · Team Yellow ${week.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
-    document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
+    showWeekMatchTicket(week);
     return;
   }
   // 'pending' (A alone, still waiting on B to join) and 'active' both funnel
@@ -3167,6 +3167,86 @@ function enterWeekMatch(week) {
 // `?? null`, the plain spread below would silently carry the ALREADY-SHOWN
 // message from `week`'s previous state forward instead of clearing it.
 function mergeWeek(week, snapshot) { return { ...week, ...snapshot, inboxMessage: snapshot.inboxMessage ?? null }; }
+
+// WEEK match-complete ticket (see game.js's showVictory for the LIVE/local
+// equivalent this mirrors) — rendered directly here rather than from inside
+// a game.js session, since WEEK's own engine has already been stopped by the
+// time a match is known to be over (see both call sites: playWeekReveal's
+// own 'completed' branch, and enterWeekMatch's static revisit branch for a
+// match that was already finished on a previous visit). No replay-QR points
+// (see conversation: WEEK doesn't persist the full point-by-point history
+// across sessions/days the way src/recorder.js does for one continuous
+// LIVE/local session) — points always empty, same reason game.js's own
+// showReplayEndTicket leaves them empty. Same "only my own side gets a real
+// address/label, the opponent stays the placeholder identicon" convention
+// game.js's own LIVE/local tickets already use (see DEFAULT_IDENTICON_ADDRESS's
+// own comment) — WEEK has no more insight into the opponent's identity than
+// LIVE does here.
+async function showWeekMatchTicket(week) {
+  const stats = {
+    // completedAt/joinedAt (see party/weekArbiter.js) — the real calendar
+    // span the match was open for, not "active play time" (there's no
+    // reliable way to measure that across several days/sessions the way a
+    // single continuous LIVE/local session's own matchStartTime can).
+    durationMs: (week.completedAt && week.joinedAt) ? week.completedAt - week.joinedAt : 0,
+    collisions: week.stats?.collisions || 0,
+    stonesDestroyed: week.stats?.stonesDestroyed || 0,
+  };
+  const addressOverride = identiconOverride(week.team);
+  const labelOverride = identityLabelOverride(week.team);
+  const teamA = { address: addressOverride.A || DEFAULT_IDENTICON_ADDRESS.A, label: labelOverride.A };
+  const teamB = { address: addressOverride.B || DEFAULT_IDENTICON_ADDRESS.B, label: labelOverride.B };
+  const ticketCanvas = await renderTicket({
+    scoreA: week.scoreA, scoreB: week.scoreB,
+    teamA, teamB,
+    winner: week.scoreA >= week.scoreB ? 'A' : 'B',
+    stats,
+    points: [],
+    leagueLp: week.leagueLp ?? null,
+  });
+  showNetPanel(`
+    <button class="config-back" id="weekTicketExitBtn" type="button" aria-label="Exit">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+    </button>
+    <div class="ticket-wrap"><img class="ticket-img" id="weekTicketImg" alt="Nim-Curl WEEK match ticket"></div>
+    <div class="goal-actions">
+      <button class="bigbtn" id="weekTicketShareBtn">📤 Share</button>
+    </div>
+  `);
+  document.getElementById('weekTicketImg').src = ticketCanvas.toDataURL('image/png');
+  document.getElementById('weekTicketExitBtn').addEventListener('click', () => {
+    audio.play('button');
+    hideNetPanel();
+    returnToModeSelect();
+  });
+  // Same Share behavior as game.js's showVictory (native share sheet on
+  // mobile, a download on desktop, a copy-to-clipboard fallback) — see that
+  // function's own comment for the reasoning behind each branch.
+  document.getElementById('weekTicketShareBtn').addEventListener('click', async () => {
+    audio.play('button');
+    const shareBtn = document.getElementById('weekTicketShareBtn');
+    const resultText = `Score final sur Nim-Curl : ${week.scoreA}–${week.scoreB}`;
+    const blob = await new Promise((resolve) => ticketCanvas.toBlob(resolve, 'image/png'));
+    const file = blob && new File([blob], 'nimcurl-ticket.png', { type: 'image/png' });
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'Nim-Curl', text: resultText }); }
+      catch { /* user cancelled the native share sheet — nothing to do */ }
+    } else if (blob) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'nimcurl-ticket.png';
+      a.click();
+      URL.revokeObjectURL(url);
+    } else if (navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(`${resultText} ${location.href}`);
+        const original = shareBtn.textContent;
+        shareBtn.textContent = 'Copied!';
+        setTimeout(() => { shareBtn.textContent = original; }, 1500);
+      } catch { /* e.g. document lost focus right as this fired — nothing to do */ }
+    }
+  });
+}
 
 // ---- WEEK's own board-panel overlay (index.html's #weekBoardPanel, see its
 // own comment there) — a small card floating over the rink instead of a
@@ -3567,7 +3647,7 @@ async function playWeekReveal(week, chained = false, liveSession = null) {
     // delta, so a freshly-zeroed game.js session can never again reset the
     // match's real running total (see the WEEK score-persistence bug in
     // conversation).
-    const snapshot = await week.completeRound(result.scoredTeam);
+    const snapshot = await week.completeRound(result.scoredTeam, result.collisionsDelta, result.stonesDestroyedDelta);
     // snapshot.status, not the client's own local result.matchOver — the
     // server is the authoritative source for the match's real running
     // score/completion now (see this call's own comment above).
@@ -3581,8 +3661,7 @@ async function playWeekReveal(week, chained = false, liveSession = null) {
       hideMatchChrome();
       hideWeekSpinner();
       week.close();
-      showNetPanel(`<h2>Match finished</h2><p>Final score — Team Blue ${snapshot.scoreA} · Team Yellow ${snapshot.scoreB}</p><button class="bigbtn" id="weekDoneBtn">OK</button>`);
-      document.getElementById('weekDoneBtn').addEventListener('click', () => { audio.play('button'); hideNetPanel(); returnToModeSelect(); });
+      showWeekMatchTicket(mergeWeek(week, snapshot));
       return;
     }
     // Straight back into the aim screen, chained=true unconditionally —

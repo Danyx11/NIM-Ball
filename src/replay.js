@@ -155,6 +155,25 @@ export function traceBannerTabPath(ctx) {
 // version before it, so this is drawn at runtime like everything else here. ----
 export const UPLOAD_LABEL_CX = s(724), UPLOAD_LABEL_Y = s(775);
 
+// ---- League Beta stamp — top-left corner, overlapping the polaroid photo's
+// own corner (see conversation: "un tampon visuel... encré dans le papier").
+// Only drawn when renderTicket() gets a non-null leagueLp (see game.js's
+// showVictory — LIVE only, and only once the match actually qualified for
+// League: Classic ruleset, both sides a real wallet, both actually
+// connected). Not part of any decode path, unlike the constants above — pure
+// drawing geometry, kept here anyway for consistency with everything else in
+// this file being hand-measured against the same 1448x1086 native art. ----
+// The card's own printed area doesn't fill the full native canvas — it's
+// inset with a big transparent margin on the sides (hand-measured: opaque
+// content starts around x=295/y=31, the card's own rounded top-left corner).
+// The polaroid PHOTO itself sits further in, tilted, its own top-left corner
+// around native (350,155) — see conversation: "carrément sur l'angle du
+// polaroid". Centered a bit right/down of that exact point (not squarely on
+// it) so the full circle still clears the CARD's own left/top edge — "à
+// l'intérieur du ticket" — while still visibly landing on the photo's corner.
+export const LEAGUE_STAMP_CX = s(418), LEAGUE_STAMP_CY = s(160), LEAGUE_STAMP_R = s(105);
+export const LEAGUE_STAMP_ROTATE_DEG = -9;
+
 // ---------- base64url <-> bytes ----------
 function bytesToBase64Url(bytes) {
   let binary = '';

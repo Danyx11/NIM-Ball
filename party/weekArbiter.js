@@ -112,6 +112,11 @@ export class WeekArbiter extends Server {
       round: m.round, scoreA: m.scoreA, scoreB: m.scoreB,
       team, opponentAddress: team === 'A' ? m.playerB : m.playerA,
       createdAt: m.createdAt, joinDeadline: m.joinDeadline, joinedAt: m.joinedAt, expiresAt: m.expiresAt,
+      completedAt: m.completedAt, stats: m.stats || { collisions: 0, stonesDestroyed: 0 },
+      // League Beta (see completeRound's own comment) — null until/unless
+      // this match actually qualified and the RPC resolved; once set it's
+      // persisted, so it keeps showing up here on any later reconnect too.
+      leagueLp: m.leagueResult ? m.leagueResult[team] : null,
       mySubmitted: !!m.pendingShots[team],
       opponentSubmitted: !!m.pendingShots[opp],
       reveal,
@@ -255,9 +260,16 @@ export class WeekArbiter extends Server {
       const now = Date.now();
       this.match = {
         game, config, playerA: address, playerB: null, status: 'pending',
-        createdAt: now, joinDeadline: now + JOIN_WINDOW_MS, joinedAt: null, expiresAt: null,
+        createdAt: now, joinDeadline: now + JOIN_WINDOW_MS, joinedAt: null, expiresAt: null, completedAt: null,
         round: 0, scoreA: 0, scoreB: 0,
         pendingShots: { A: null, B: null },
+        // Match-ticket running stats (see main.js's showWeekMatchTicket) —
+        // accumulated across the whole match, potentially several sessions
+        // over several days, unlike LIVE/local's own totalCollisions/
+        // stonesDestroyed which live entirely inside one game.js instance
+        // (see completeRound's own comment on why this has to be
+        // server-side at all for WEEK).
+        stats: { collisions: 0, stonesDestroyed: 0 },
         // The most recently resolved manche, kept around independently of
         // pendingShots (which already moves on to the next manche the
         // instant this one resolves) specifically so each team's OWN
@@ -443,6 +455,14 @@ export class WeekArbiter extends Server {
         if (scoredTeam === 'A') this.match.scoreA += 1;
         else if (scoredTeam === 'B') this.match.scoreB += 1;
         const pointScored = !!scoredTeam;
+        // Match-ticket running stats (see main.js's showWeekMatchTicket) —
+        // this manche's own delta, reported by whichever client actually
+        // just computed it (see net.js's own completeRound comment: the
+        // OTHER side's later "I've watched it too" ack falls into the
+        // pendingFinalAck/lastManche branch below, never this one, so its
+        // own copy of these same deltas is never double-applied here).
+        this.match.stats.collisions += Math.max(0, Number(msg.collisionsDelta) || 0);
+        this.match.stats.stonesDestroyed += Math.max(0, Number(msg.stonesDestroyedDelta) || 0);
         // The board this manche was played FROM — captured before the line
         // below reassigns pointManches, and carried on lastManche so a
         // straggler can reconstruct it (see lastManche's own priorManches
@@ -499,6 +519,14 @@ export class WeekArbiter extends Server {
       const matchOver = this.match.scoreA >= target || this.match.scoreB >= target;
       if (matchOver && this.match.status !== 'completed') {
         this.match.status = 'completed';
+        // Match-ticket duration (see main.js's showWeekMatchTicket) —
+        // completedAt - joinedAt, the real calendar span the match was open
+        // for (there's no reliable notion of "active play time" across
+        // several days/sessions the way a single continuous LIVE/local
+        // session's own matchStartTime has — see conversation). Written once
+        // here rather than computed as `Date.now() - joinedAt` on every read
+        // so a later revisit reports the exact same duration, not a growing one.
+        this.match.completedAt = Date.now();
         await this.ctx.storage.deleteAlarm();
         this.radarNotify('recordMatchCompleted', { matchId: this.name, mode: 'week', timestampMs: Date.now() });
         // League Beta (party/leagueSeason.js) — WEEK already structurally
@@ -517,13 +545,23 @@ export class WeekArbiter extends Server {
         // already treats as opaque.
         if (this.match.playerA && this.match.playerB && isClassicMatchConfig(this.match.config)) {
           const winner = this.match.scoreA >= target ? 'A' : 'B';
-          this.leagueNotify('recordMatchCompleted', {
+          // Awaited (not fire-and-forget like radarNotify above) — WEEK has
+          // no live push the way LIVE's arbiter does (see this file's own
+          // header comment), so the ticket's league stamp (main.js's
+          // showWeekMatchTicket) has no channel to learn the result on EXCEPT
+          // this same completeRound response, via snapshotFor's leagueLp
+          // below. Persisted either way so a later straggler reconnecting to
+          // watch this same deciding manche also gets it (see snapshotFor).
+          const result = await this.leagueNotify('recordMatchCompleted', {
             // 'week:' prefix keeps this globally distinct from LIVE's own
             // 'live:'-prefixed ids (see party/arbiter.js) even though match
             // codes are drawn from the same 4-character space.
             leagueMatchId: `week:${this.name}`, mode: 'week', timestampMs: Date.now(),
             playerA: { address: this.match.playerA }, playerB: { address: this.match.playerB }, winner,
           });
+          if (result?.ok && !result.duplicate) {
+            this.match.leagueResult = { A: result.lpAwardedA, B: result.lpAwardedB };
+          }
         }
       }
       await this.persist();
