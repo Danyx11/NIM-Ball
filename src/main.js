@@ -2268,10 +2268,10 @@ navLeague.addEventListener('click', () => {
   else hideLeagueScreen();
 });
 leagueBackBtn.addEventListener('click', hideLeagueScreen);
-// No dedicated matchmaking flow to send this to yet — closing back to
-// mode-select (same real action #navHome offers) is what's actually
-// available today, rather than a dead stub.
-leagueFindMatchBtn.addEventListener('click', hideLeagueScreen);
+// No dedicated matchmaking flow to send this to yet — same destination as
+// #navFindPlayer/#navTelegram (openNimicurlTelegram, defined further below —
+// a function declaration, so hoisted and safe to reference here).
+leagueFindMatchBtn.addEventListener('click', openNimicurlTelegram);
 // League rules — its own panel (#leagueRulesOverlay), reached only from here
 // and always closing back INTO the League panel rather than mode-select
 // (explicit request — every other sidebar panel's back button goes to
