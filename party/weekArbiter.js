@@ -586,4 +586,35 @@ export class WeekArbiter extends Server {
       await Promise.all([this.removeFromIndex(this.match.playerA), this.removeFromIndex(this.match.playerB)]);
     }
   }
+
+  // Plain HTTP GET (no WebSocket) — lets a client find out whether a 4-char
+  // code belongs to a real WEEK match BEFORE it has any wallet address to
+  // open a WS connection with. onConnect above requires `address` on every
+  // connect attempt and rejects with 'addressRequired' before ever checking
+  // this.match — so a disconnected/guest client had no way to distinguish
+  // "this is a real WEEK code, go connect a wallet" from "no such code
+  // anywhere" without this. Fixes the bug where a guest typing a friend's
+  // real WEEK code was silently dropped into a brand-new, unrelated LIVE
+  // room instead (see src/main.js's joinWithCode/showWeekConnectToJoinPanel
+  // and CLAUDE.md's Arbiter.onConnect comment for why LIVE can't tell a
+  // reused code apart from a fresh one on its own).
+  // Existence only, deliberately no player-identifying data in the
+  // response — same "yes, this code exists" sensitivity level as LIVE's own
+  // guest-anyone-can-connect behavior, just answered without opening a
+  // socket. `exists` reflects whether a match was EVER created under this
+  // code, regardless of its current status (pending/active/expired/
+  // abandoned/completed) — a connected client still gets the real
+  // notFound/expired/full/etc. distinction from the normal WS join path
+  // (see openWeekSocket in src/net.js); this endpoint only needs to answer
+  // "is this a WEEK code at all". Same CORS/response shape as
+  // party/playerIndex.js's and party/leagueSeason.js's own onRequest.
+  async onRequest(request) {
+    await this.ready();
+    const cors = { 'Access-Control-Allow-Origin': '*' };
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: { ...cors, 'Access-Control-Allow-Methods': 'GET', 'Access-Control-Allow-Headers': 'Content-Type' } });
+    }
+    if (request.method !== 'GET') return new Response('Method not allowed', { status: 405, headers: cors });
+    return Response.json({ exists: !!this.match }, { headers: cors });
+  }
 }
