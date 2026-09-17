@@ -1081,7 +1081,16 @@
         <p class="notif-panel-desc">Get notified when it's your turn.</p>
         <div class="notif-switch-row">
           <span>Turn notifications</span>
-          <button class="notif-switch" id="notifSwitch" type="button" role="switch" aria-checked="false" aria-label="Turn notifications"></button>
+          <!-- ON/OFF spelled out as text (per explicit request — the plain
+               knob-only version read as unclear/not moving), not just an
+               empty knob: whichever one is current stays legible, the other
+               fades out, so the state is never ambiguous even before the
+               knob finishes sliding. See style.css's own comment. -->
+          <button class="notif-switch" id="notifSwitch" type="button" role="switch" aria-checked="false" aria-label="Turn notifications">
+            <span class="notif-switch-label notif-switch-label-on" aria-hidden="true">ON</span>
+            <span class="notif-switch-label notif-switch-label-off" aria-hidden="true">OFF</span>
+            <span class="notif-switch-knob"></span>
+          </button>
         </div>
         <div id="notifTelegramRow" class="notif-telegram-row"></div>
       </div>
