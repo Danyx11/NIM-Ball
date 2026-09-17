@@ -16,7 +16,7 @@ import { Server } from 'partyserver';
 
 // How many WEEK matches one wallet can have running at once. Kept in sync
 // with src/main.js's MY_MATCHES_SLOTS, which draws exactly this many rows.
-const MAX_ACTIVE_MATCHES = 3;
+const MAX_ACTIVE_MATCHES = 5;
 
 export class PlayerIndex extends Server {
   onStart() {

@@ -3796,7 +3796,7 @@ function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<
 // match cap — per explicit request, rather than a variable-length list; an
 // unused slot renders as a greyed "Empty" placeholder instead of shrinking.
 const myMatchesContent = document.getElementById('myMatchesContent');
-const MY_MATCHES_SLOTS = 3; // keep in sync with party/playerIndex.js's MAX_ACTIVE_MATCHES
+const MY_MATCHES_SLOTS = 5; // keep in sync with party/playerIndex.js's MAX_ACTIVE_MATCHES
 // 'yourTurn' (this team hasn't submitted their own current-manche shot yet)
 // and 'revealReady' (party/weekArbiter.js's turnLabelFor — this team has a
 // reveal genuinely ready for them, independent of whether the opponent has

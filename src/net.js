@@ -120,7 +120,7 @@ function openWeekSocket(code, address, intent, extra = {}) {
         if (msg.type === 'connected') { resolve({ socket, snapshot: msg }); return; }
         const errors = {
           occupied: 'This code is already in use — try again.',
-          limitReached: 'You already have 3 active WEEK matches.',
+          limitReached: 'You already have 5 active WEEK matches.',
           notFound: 'This match code is no longer valid.',
           expired: 'This challenge has expired.',
           full: 'This match already has two players.',
