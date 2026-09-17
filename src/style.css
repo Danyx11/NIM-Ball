@@ -2691,7 +2691,11 @@ button:disabled { opacity: 0.35; cursor: default; }
 .my-matches-header { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; max-width: 360px; margin: 0 0 20px; }
 .my-matches-header .config-create-label { margin: 0; }
 .notif-bell-btn {
-  flex: none; width: 30px; height: 30px; border-radius: 50%;
+  /* padding:0 — without it, button's own base padding:10px 20px (style.css's
+     `button` reset) wins over min-width:auto on this flex item and stretches
+     it to an oval instead of the 30x30 circle below (same fix
+     .notif-panel-close already needed). */
+  flex: none; width: 30px; height: 30px; padding: 0; border-radius: 50%;
   background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18);
   display: flex; align-items: center; justify-content: center;
   transition: background .15s ease, border-color .15s ease;
