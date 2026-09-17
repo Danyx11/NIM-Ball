@@ -597,9 +597,24 @@ fsRecommendIcon.addEventListener('click', () => {
 // Purely illustrative icon, no tap target — dismisses itself once the
 // orientation media query actually flips (see the listener below), same
 // "no menu detour until the real thing happened" spirit as everything else
-// gating #modeOverlay.
+// gating #modeOverlay. Its CSS z-index sits above #homeOverlay's own (see
+// style.css's .gate-overlay comment) so it can cover that screen too, not
+// just the ones after it.
 const rotateOverlay = document.getElementById('rotateOverlay');
 function isPortraitMobile() { return IS_MOBILE && window.matchMedia('(orientation: portrait)').matches; }
+function showRotateOverlay() {
+  rotateOverlay.style.display = '';
+  rotateOverlay.classList.remove('hidden');
+}
+function hideRotateOverlay() { rotateOverlay.classList.add('hidden'); }
+// Checked synchronously at module load, ahead of #loadingOverlay ever lifting
+// (see hideLoadingOverlay's own call site above) — so a phone that starts out
+// in portrait never even gets a flash of #homeOverlay underneath; this just
+// sits on top of it (z-index, see above) until the device is turned. Not the
+// same as awaitingLandscapeToContinue below: #homeOverlay is untouched here
+// (still there, still tappable once this lifts), so no revealAfterGates()
+// chain needs to fire when it does.
+if (isPortraitMobile()) showRotateOverlay();
 // What comes after the gate(s): the fullscreen-recommend prompt if that
 // parked feature gets switched back on (IOS_FULLSCREEN_FIX_ENABLED above),
 // otherwise the connect gate (#connectGateOverlay, see showConnectGate below)
@@ -627,13 +642,28 @@ function revealAfterGates() {
     showModeDrawer();
   }
 }
+// Set only by revealMenu() below, right when it finds the device still in
+// portrait after the #homeOverlay tap and parks on the rotate gate instead of
+// continuing — i.e. "the rotate gate is standing in for the very next step of
+// the intro chain, so finish that step once landscape comes back". Every
+// other time the gate shows (the boot-time check above, or any later
+// portrait rotation mid-menu/mid-match, see the listener below) it's just a
+// scrim thrown over whatever's already on screen, with nothing to continue
+// into once it lifts.
+let awaitingLandscapeToContinue = false;
 window.matchMedia('(orientation: portrait)').addEventListener('change', (e) => {
-  // Only acts while the rotate gate is actually the thing on screen — a
-  // later rotation back to portrait (already past it, mid mode-select or
-  // mid-match) is out of scope for what's just a one-time intro screen.
-  if (IS_MOBILE && !e.matches && !rotateOverlay.classList.contains('hidden')) {
-    rotateOverlay.classList.add('hidden');
-    revealAfterGates();
+  if (!IS_MOBILE) return;
+  if (e.matches) {
+    // Rotated to portrait — cover whatever's currently on screen (home,
+    // mode-select, mid-match, anything) so nothing mis-laid-out for
+    // landscape is visible until the phone is turned back.
+    showRotateOverlay();
+  } else if (!rotateOverlay.classList.contains('hidden')) {
+    hideRotateOverlay();
+    if (awaitingLandscapeToContinue) {
+      awaitingLandscapeToContinue = false;
+      revealAfterGates();
+    }
   }
 });
 
@@ -3849,17 +3879,19 @@ async function renderMyMatchesContent() {
 }
 
 // ---- Title/splash screen (see index.html's #homeOverlay comment) — the
-// very first thing a normal (non-magic-link) entry sees, above even the
-// mobile rotate/fullscreen gates. Its own reveal logic is exactly what used
-// to run unconditionally at the bottom of this file for a plain mobile
-// entry; pulled into a function so both the mobile and desktop paths (which
-// previously just relied on #modeOverlay's default-visible markup) go
-// through the same explicit call once the player actually taps PLAY.
+// very first thing a normal (non-magic-link) entry sees on desktop, or on a
+// mobile phone that's already landscape (a phone that boots in portrait sees
+// the rotate gate sitting on top of it instead — see the boot-time check
+// above). Its own reveal logic is exactly what used to run unconditionally
+// at the bottom of this file for a plain mobile entry; pulled into a
+// function so both the mobile and desktop paths (which previously just
+// relied on #modeOverlay's default-visible markup) go through the same
+// explicit call once the player actually taps PLAY.
 const homeOverlay = document.getElementById('homeOverlay');
 function revealMenu() {
   if (IS_MOBILE && isPortraitMobile()) {
-    rotateOverlay.style.display = '';
-    rotateOverlay.classList.remove('hidden');
+    awaitingLandscapeToContinue = true;
+    showRotateOverlay();
   } else {
     revealAfterGates();
   }
