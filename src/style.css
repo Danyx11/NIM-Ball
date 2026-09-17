@@ -983,11 +983,16 @@ body.howto-active #helpBtn { display: none; }
    actually rotates to landscape) and #fsRecommendOverlay (parked behind
    IOS_FULLSCREEN_FIX_ENABLED, see main.js) — each keeps its own scoped
    `.hidden` rule, same convention as #overlay/#modeOverlay/etc. above,
-   rather than a shared utility class. */
+   rather than a shared utility class. z-index deliberately above
+   #homeOverlay's own (40): main.js can throw #rotateOverlay up as a scrim
+   over the splash screen itself (portrait at boot) or over any later screen
+   (mode-select, mid-match) on any subsequent rotation to portrait, not just
+   the pre-#modeOverlay intro gate this comment used to describe it as. Still
+   below #loadingOverlay (100), which always wins while it's up. */
 .gate-overlay {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 45;
   display: flex;
   align-items: center;
   justify-content: center;
