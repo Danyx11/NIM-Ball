@@ -999,6 +999,18 @@
       </div>
       <div id="matchNetworkContent" class="config-lobby-content"></div>
     </div>
+    <!-- WEEK's match-complete ticket (main.js's showWeekMatchTicket) — its
+         own full-bleed panel rather than #matchNetworkOverlay's .config-panel
+         (a shrink-wrapped, header-iconed lobby card — reads as "a card inside
+         a card" around the ticket's own already-card-shaped art, and its
+         fixed Remote Match icon has nothing to do with a match result, see
+         conversation). Mirrors game.js's own #overlay (LIVE/local's ticket
+         screen) as closely as a #menuStage-joining panel can: no header,
+         just the exit pill + the ticket itself — see that element's own
+         index.html comment for why #overlay itself can't be reused here
+         (#game-card, which it lives in, is deliberately kept behind
+         #menuStage on desktop). -->
+    <div id="weekTicketOverlay" class="hidden"></div>
     <!-- Curling's "not plugged in yet" placeholder (see conversation) — its
          own small .config-panel rather than reusing #overlay/showLobby:
          #overlay lives inside #game-card, which desktop's menuHost move

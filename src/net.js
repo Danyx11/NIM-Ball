@@ -394,6 +394,15 @@ function connectSocket(url) {
       // to match this instead of trusting whatever tile the joiner happened
       // to pick before typing the code in).
       vibe: null,
+      // The opponent's own connected wallet address (or null: not connected
+      // yet, or they're a guest) — see party/arbiter.js's own 'joined'/
+      // 'opponentJoined' comment. Same trust level as everything else this
+      // relay hands the client verbatim: not cryptographically verified (see
+      // CLAUDE.md's Radar trust-model section, which already documents this
+      // for hubAddress itself). Used by game.js's showVictory for the
+      // ticket's opponent identicon (see conversation) — never gates
+      // gameplay.
+      opponentAddress: null,
       sendMatchConfig(config, vibe) {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matchConfig', config, vibe }));
       },
@@ -484,6 +493,7 @@ function connectSocket(url) {
         net.myTeam = msg.team;
         net.matchConfig = msg.matchConfig || null;
         net.vibe = msg.vibe || null;
+        net.opponentAddress = msg.opponentAddress || null;
         settled = true;
         resolve(net);
       } else if (msg.type === 'full') {
@@ -493,6 +503,7 @@ function connectSocket(url) {
         if (!settled) { settled = true; reject(new Error('This match code is no longer valid.')); }
         ws.close();
       } else if (msg.type === 'opponentJoined') {
+        net.opponentAddress = msg.address || null;
         if (opponentJoinedCb) opponentJoinedCb();
       } else if (msg.type === 'opponentLeft') {
         if (disconnectCb) disconnectCb();
