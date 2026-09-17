@@ -194,7 +194,7 @@ if (IS_MOBILE) document.body.classList.add('mobile-layout');
   // running) stays with #game-card above, same as #overlay/#syncToast — it's
   // gameplay chrome, not a menu screen, so this change doesn't touch it.
   const menuHost = document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -1177,6 +1177,8 @@ function hideRemoteMatchStack() {
   // hides the other; an exit mid-transition (the brief server-round-trip
   // window) needs both covered here.
   hideWeekSpinner();
+  // Same bug class again — showWeekMatchTicket's own full-bleed panel.
+  weekTicketOverlay.classList.add('hidden');
 }
 function showModeDrawer() {
   hideRemoteMatchStack();
@@ -1573,6 +1575,9 @@ const matchNetworkOverlay = document.getElementById('matchNetworkOverlay');
 const matchNetworkContent = document.getElementById('matchNetworkContent');
 const matchNetworkBackBtn = document.getElementById('matchNetworkBackBtn');
 const matchNetworkModeIcon = document.getElementById('matchNetworkModeIcon');
+// WEEK's match-complete ticket — its own full-bleed #menuStage panel, not
+// matchNetworkOverlay (see index.html's #weekTicketOverlay comment).
+const weekTicketOverlay = document.getElementById('weekTicketOverlay');
 
 const MODE_LABELS = { passplay: 'PASS & PLAY', remote: 'REMOTE MATCH', joincode: 'JOIN WITH A CODE' };
 // Reuses #modeOverlay's own tile icons (cloned, never a new asset) — see
@@ -3207,11 +3212,7 @@ function mergeWeek(week, snapshot) { return { ...week, ...snapshot, inboxMessage
 // (see conversation: WEEK doesn't persist the full point-by-point history
 // across sessions/days the way src/recorder.js does for one continuous
 // LIVE/local session) — points always empty, same reason game.js's own
-// showReplayEndTicket leaves them empty. Same "only my own side gets a real
-// address/label, the opponent stays the placeholder identicon" convention
-// game.js's own LIVE/local tickets already use (see DEFAULT_IDENTICON_ADDRESS's
-// own comment) — WEEK has no more insight into the opponent's identity than
-// LIVE does here.
+// showReplayEndTicket leaves them empty.
 async function showWeekMatchTicket(week) {
   const stats = {
     // completedAt/joinedAt (see party/weekArbiter.js) — the real calendar
@@ -3222,31 +3223,56 @@ async function showWeekMatchTicket(week) {
     collisions: week.stats?.collisions || 0,
     stonesDestroyed: week.stats?.stonesDestroyed || 0,
   };
-  const addressOverride = identiconOverride(week.team);
-  const labelOverride = identityLabelOverride(week.team);
-  const teamA = { address: addressOverride.A || DEFAULT_IDENTICON_ADDRESS.A, label: labelOverride.A };
-  const teamB = { address: addressOverride.B || DEFAULT_IDENTICON_ADDRESS.B, label: labelOverride.B };
+  const myTeam = week.team, oppTeam = myTeam === 'A' ? 'B' : 'A';
+  const addressOverride = identiconOverride(myTeam);
+  const labelOverride = identityLabelOverride(myTeam);
+  const teams = { A: { address: DEFAULT_IDENTICON_ADDRESS.A }, B: { address: DEFAULT_IDENTICON_ADDRESS.B } };
+  teams[myTeam] = { address: addressOverride[myTeam] || DEFAULT_IDENTICON_ADDRESS[myTeam], label: labelOverride[myTeam] };
+  // The opponent's real identicon/address/handle (see conversation) — WEEK
+  // always knows this (week.opponentAddress, a connected wallet on both
+  // sides unconditionally — no guest mode at all, see party/weekArbiter.js's
+  // own header comment), unlike LIVE where it has to arrive over the wire
+  // (see game.js's own showVictory for that version of this same fix).
+  // Best-effort: resolveIdentity never rejects to "not found" (see
+  // nimconnect.js), so a missing handle just falls through to ticket.js's
+  // own shortened-address fallback.
+  if (week.opponentAddress) {
+    teams[oppTeam] = { address: week.opponentAddress };
+    try {
+      const identity = await resolveIdentity(week.opponentAddress);
+      if (identity?.handle) teams[oppTeam].label = `@${identity.handle}`;
+    } catch { /* best-effort — ticket falls back to the shortened address */ }
+  }
   const ticketCanvas = await renderTicket({
     scoreA: week.scoreA, scoreB: week.scoreB,
-    teamA, teamB,
+    teamA: teams.A, teamB: teams.B,
     winner: week.scoreA >= week.scoreB ? 'A' : 'B',
     stats,
     points: [],
     leagueLp: week.leagueLp ?? null,
   });
-  showNetPanel(`
+  weekTicketOverlay.innerHTML = `
     <button class="config-back" id="weekTicketExitBtn" type="button" aria-label="Exit">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
     </button>
-    <div class="ticket-wrap"><img class="ticket-img" id="weekTicketImg" alt="Nim-Curl WEEK match ticket"></div>
-    <div class="goal-actions">
-      <button class="bigbtn" id="weekTicketShareBtn">📤 Share</button>
+    <div class="ticket-row">
+      <div class="ticket-wrap"><img class="ticket-img" id="weekTicketImg" alt="Nim-Curl WEEK match ticket"></div>
+      <div class="goal-actions">
+        <button class="bigbtn" id="weekTicketShareBtn">📤 Share</button>
+      </div>
     </div>
-  `);
+  `;
+  hideLobby();
+  hideRemoteMatchStack();
+  weekTicketOverlay.classList.remove('mode-hockey', 'mode-curling');
+  weekTicketOverlay.classList.add(week.game === 'curling' ? 'mode-curling' : 'mode-hockey');
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  weekTicketOverlay.classList.remove('hidden');
   document.getElementById('weekTicketImg').src = ticketCanvas.toDataURL('image/png');
   document.getElementById('weekTicketExitBtn').addEventListener('click', () => {
     audio.play('button');
-    hideNetPanel();
+    weekTicketOverlay.classList.add('hidden');
     returnToModeSelect();
   });
   // Same Share behavior as game.js's showVictory (native share sheet on

@@ -15,6 +15,7 @@ import * as recorder from './recorder.js';
 import { MAX_POINTS_ON_TICKET, pointTileRect, buildReplayUrl, TICKET_W, TICKET_H } from './replay.js';
 import { DEFAULT_MATCH_CONFIG, STONE_SLOTS_BY_COUNT, TIMER_WARNING_SECONDS_BY_TURN_TIME, sanitizeMatchConfig } from './matchConfig.js';
 import { HOWTO_STEPS_MOBILE, HOWTO_STEPS_DESKTOP } from './howto.js';
+import { resolveIdentity } from './nimconnect.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 // Placeholder demo addresses, used unless opts.identiconAddress overrides a
@@ -4215,10 +4216,28 @@ export function startGame(opts = {}) {
       && matchConfig.pointsToWin === DEFAULT_MATCH_CONFIG.pointsToWin && matchConfig.turnTime === DEFAULT_MATCH_CONFIG.turnTime
       && matchConfig.curlingCycles === DEFAULT_MATCH_CONFIG.curlingCycles;
     const leagueLp = (net && looksClassic) ? await waitForLeagueLp(2000) : null;
+    // Opponent's real identicon/address/handle for a net match (see
+    // conversation) — IDENTICON_ADDRESS/LABEL only ever carry a real value
+    // for myTeam (see DEFAULT_IDENTICON_ADDRESS's own comment: the opponent
+    // side is a placeholder unless overridden), and net.opponentAddress
+    // (party/arbiter.js's 'joined'/'opponentJoined' relay) is the only place
+    // that placeholder can be overridden from. Best-effort: resolveIdentity
+    // never rejects to "not found" (see nimconnect.js), so a missing handle
+    // just falls through to ticket.js's own shortened-address fallback.
+    const ticketAddresses = { ...IDENTICON_ADDRESS };
+    const ticketLabels = { ...IDENTICON_LABEL };
+    if (net?.opponentAddress && myTeam) {
+      const oppTeam = myTeam === 'A' ? 'B' : 'A';
+      ticketAddresses[oppTeam] = net.opponentAddress;
+      try {
+        const identity = await resolveIdentity(net.opponentAddress);
+        if (identity?.handle) ticketLabels[oppTeam] = `@${identity.handle}`;
+      } catch { /* best-effort — ticket falls back to the shortened address */ }
+    }
     const ticketCanvas = await renderTicket({
       scoreA, scoreB,
-      teamA: { address: IDENTICON_ADDRESS.A, label: IDENTICON_LABEL.A },
-      teamB: { address: IDENTICON_ADDRESS.B, label: IDENTICON_LABEL.B },
+      teamA: { address: ticketAddresses.A, label: ticketLabels.A },
+      teamB: { address: ticketAddresses.B, label: ticketLabels.B },
       winner: winningTeam,
       stats,
       points: ticketPoints,
@@ -4231,12 +4250,14 @@ export function startGame(opts = {}) {
       <button class="config-back" id="goalExitBtn" type="button" aria-label="Exit">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
       </button>
-      <div class="ticket-wrap" id="ticketWrap">
-        <img class="ticket-img" id="ticketImg" alt="Nim-Curl match ticket">
-      </div>
-      <div class="goal-actions">
-        <button class="bigbtn" id="goalPlayAgainBtn">▶ Play Again</button>
-        <button class="bigbtn" id="goalShareBtn">📤 Share</button>
+      <div class="ticket-row">
+        <div class="ticket-wrap" id="ticketWrap">
+          <img class="ticket-img" id="ticketImg" alt="Nim-Curl match ticket">
+        </div>
+        <div class="goal-actions">
+          <button class="bigbtn" id="goalPlayAgainBtn">▶ Play Again</button>
+          <button class="bigbtn" id="goalShareBtn">📤 Share</button>
+        </div>
       </div>
     `);
     const ticketImg = document.getElementById('ticketImg');

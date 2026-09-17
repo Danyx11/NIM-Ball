@@ -193,11 +193,16 @@ export class Arbiter extends Server {
     // at this point — it already knows its own choice locally, see main.js)
     // and team B (joiner) gets whatever A already stored, assuming the
     // normal flow (Custom Settings -> SAVE -> only then share the code).
-    this.send(connection, { type: 'joined', team, matchConfig: this.matchConfig, vibe: this.vibe });
+    // opponentAddress (see src/ticket.js's league stamp/opponent identicon
+    // work, conversation) — whatever's already known for the other side at
+    // this moment: null if they haven't connected yet (backfilled below once
+    // they do) or are a guest. Same 'no proof of ownership, just relayed
+    // verbatim' trust level as this.addresses itself already documents.
+    this.send(connection, { type: 'joined', team, matchConfig: this.matchConfig, vibe: this.vibe, opponentAddress: this.addresses[otherTeam(team)] });
     const opponent = this.players[otherTeam(team)];
     if (opponent) {
-      this.send(opponent, { type: 'opponentJoined' });
-      this.send(connection, { type: 'opponentJoined' });
+      this.send(opponent, { type: 'opponentJoined', address: this.addresses[team] });
+      this.send(connection, { type: 'opponentJoined', address: this.addresses[otherTeam(team)] });
       // "Match started" = both players actually present, not just a code
       // generated (see CLAUDE.md's Radar section — an unshared/unjoined code
       // isn't a real match). Fires once per DO instance (see the field's own

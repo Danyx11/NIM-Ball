@@ -1996,7 +1996,20 @@ button:disabled { opacity: 0.35; cursor: default; }
 .goal-address { font-size: 12px; word-break: break-all; max-width: 320px; }
 .goal-score { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
 .goal-score-sep { padding: 0 8px; }
-.goal-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+/* Column by default — sits beside the ticket now (see .ticket-row below),
+   not in a row underneath it — back to a row on mobile, stacked below the
+   ticket, where there's no width to spare beside a portrait image. */
+.goal-actions { display: flex; flex-direction: column; gap: 12px; justify-content: center; }
+.mobile-layout .goal-actions { flex-direction: row; flex-wrap: wrap; }
+
+/* Ticket + its actions side by side (see conversation: "le but du jeu c'est
+   d'avoir de la place pour le ticket" — freeing the row underneath it, not
+   just shrinking the actions, is what actually buys the ticket more room).
+   Back to a column on mobile: no width to spare beside a portrait ticket
+   there, same reasoning as .goal-actions above. Used by both game.js's own
+   #overlay (LIVE/local) and #weekTicketOverlay (WEEK) below. */
+.ticket-row { display: flex; flex-direction: row; align-items: center; gap: 24px; }
+.mobile-layout .ticket-row { flex-direction: column; gap: 18px; }
 
 /* Match-win ticket (see src/ticket.js/showVictory) — a single portrait PNG
    (drawn on an offscreen canvas, dropped in here as a data-URL <img>) doubling
@@ -2006,6 +2019,25 @@ button:disabled { opacity: 0.35; cursor: default; }
    moved to the small corner .config-back exit pill, which sits outside the
    flex flow entirely) — the freed vertical room goes to the ticket itself. */
 .ticket-img { max-width: 100%; max-height: 76vh; width: auto; border-radius: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
+
+/* WEEK's own match-complete ticket screen (main.js's showWeekMatchTicket) —
+   see index.html's #weekTicketOverlay comment for why this can't just be
+   #matchNetworkOverlay's .config-panel (wrong shape: shrink-wrapped card +
+   header icon) or game.js's own #overlay (wrong stacking context: lives
+   inside #game-card, behind #menuStage on desktop). Reproduces #overlay's
+   own full-bleed/centered/tinted treatment instead, scoped to this
+   #menuStage-joining element — no header icon, just the exit pill + the
+   ticket, same as LIVE's screen. */
+#weekTicketOverlay {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  padding: 30px; box-sizing: border-box; text-align: center;
+  background: var(--scrim-92);
+}
+#weekTicketOverlay.hidden { display: none; }
+#weekTicketOverlay.mode-hockey { background: rgba(5, 130, 202, 0.72); }
+#weekTicketOverlay.mode-curling { background: rgba(233, 178, 19, 0.72); color: var(--bg-deep); }
+#weekTicketOverlay.mode-curling .config-back { color: var(--bg-deep); }
 
 /* Inset to the physics/ice rect only (FX0/FY0/FX1/FY1 in game.js — as % of the
    V2 3312x1896 canvas: 32.79%/33.02%/31.70%/32.81%, left/top/right/bottom),
@@ -3400,7 +3432,10 @@ button:disabled { opacity: 0.35; cursor: default; }
    displaying the ticket (see game.js showVictory) — invisible hit regions
    layered over the baked-in QR pixels, positioned as percentages of the
    ticket canvas so they track .ticket-img regardless of its displayed size. */
-.ticket-wrap { position: relative; display: inline-block; }
+/* min-width:0 — a flex item's default min-width:auto would otherwise refuse
+   to shrink below the ticket's own intrinsic width inside .ticket-row's row
+   layout, on a narrower desktop window with the actions column beside it. */
+.ticket-wrap { position: relative; display: inline-block; min-width: 0; }
 .ticket-point-hit { position: absolute; display: block; border-radius: 12px; }
 .ticket-point-hit:hover { background: rgba(255,255,255,0.08); }
 
