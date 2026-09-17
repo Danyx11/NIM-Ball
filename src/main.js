@@ -194,7 +194,7 @@ if (IS_MOBILE) document.body.classList.add('mobile-layout');
   // running) stays with #game-card above, same as #overlay/#syncToast — it's
   // gameplay chrome, not a menu screen, so this change doesn't touch it.
   const menuHost = document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'weekMatchDialogOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -3853,6 +3853,20 @@ function showWeekErrorScreen(message) {
 
 function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
+// Stand-in for window.prompt()/confirm() (see index.html's own comment on
+// #weekMatchDialogOverlay) — every other confirm-style dialog in the game
+// already builds its own DOM instead of a native one (see triggerExit/
+// navHome's showLobby confirms); this is that same title/subtitle/buttons
+// shape, just its own overlay so it can sit above My Matches without
+// tearing the list down like showLobby() does.
+const weekMatchDialogOverlay = document.getElementById('weekMatchDialogOverlay');
+const weekMatchDialogContent = document.getElementById('weekMatchDialogContent');
+function showWeekMatchDialog(html) {
+  weekMatchDialogContent.innerHTML = html;
+  weekMatchDialogOverlay.classList.remove('hidden');
+}
+function hideWeekMatchDialog() { weekMatchDialogOverlay.classList.add('hidden'); }
+
 // ---- My Matches (party/playerIndex.js) — a UX shortcut back into an
 // existing WEEK match, rendered into the bottom half of the merged Join & My
 // Matches panel (#joinCodeOverlay, see showJoinCodeScreen below — the two
@@ -3963,14 +3977,29 @@ async function renderMyMatchesContent() {
       e.stopPropagation();
       audio.play('button');
       const code = btn.dataset.code;
-      // prompt(), not an inline input — this is a rare, one-off action (per
-      // explicit request, just a way to tell matches apart at a glance), not
-      // worth a dedicated edit-in-place UI. Blank/cancelled input clears any
-      // existing custom label rather than leaving it half-edited.
-      const next = prompt('Name this match', getWeekMatchLabel(code));
-      if (next === null) return;
-      setWeekMatchLabel(code, next.trim());
-      renderMyMatchesContent();
+      // Own dialog, not window.prompt() (see index.html's own comment on
+      // #weekMatchDialogOverlay — prompt() silently doesn't work inside the
+      // Nimiq Pay Mini App WebView). Cancel leaves the existing label
+      // untouched; Save with a blank field clears it, same "blank clears"
+      // behavior the old prompt()-based flow had.
+      showWeekMatchDialog(`
+        <h2>Name this match</h2>
+        <input type="text" id="weekMatchNameInput" maxlength="40" autocomplete="off" value="${escapeHtml(getWeekMatchLabel(code))}" />
+        <div style="display:flex; gap:12px;">
+          <button class="bigbtn" id="weekMatchNameSaveBtn">Save</button>
+          <button class="bigbtn" id="weekMatchNameCancelBtn">Cancel</button>
+        </div>
+      `);
+      const input = document.getElementById('weekMatchNameInput');
+      input.focus();
+      input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); document.getElementById('weekMatchNameSaveBtn').click(); } });
+      document.getElementById('weekMatchNameSaveBtn').addEventListener('click', () => {
+        audio.play('button');
+        setWeekMatchLabel(code, input.value.trim());
+        hideWeekMatchDialog();
+        renderMyMatchesContent();
+      });
+      document.getElementById('weekMatchNameCancelBtn').addEventListener('click', () => { audio.play('button'); hideWeekMatchDialog(); });
     });
   });
   myMatchesContent.querySelectorAll('.week-match-abandon[data-code]').forEach((btn) => {
@@ -3988,21 +4017,35 @@ async function renderMyMatchesContent() {
         renderMyMatchesContent();
         return;
       }
-      if (!confirm('Abandon this match? This cannot be undone.')) return;
-      showLoadingOverlay();
-      try {
-        const week = await joinWeekMatch(code, hubAddress);
-        await week.abandon();
-        week.close();
-      } catch (err) {
-        // Already gone (expired/completed elsewhere) reads the same as a
-        // successful abandon here — either way it shouldn't show in the
-        // list anymore, so just refresh rather than surfacing an error for
-        // what the player was trying to do anyway.
-      }
-      setWeekMatchLabel(code, '');
-      hideLoadingOverlay();
-      renderMyMatchesContent();
+      // Own dialog, not window.confirm() — same reasoning as the rename
+      // dialog above (see index.html's #weekMatchDialogOverlay comment).
+      showWeekMatchDialog(`
+        <h2>Abandon this match?</h2>
+        <p>This cannot be undone.</p>
+        <div style="display:flex; gap:12px;">
+          <button class="bigbtn" id="weekMatchAbandonYesBtn">Yes</button>
+          <button class="bigbtn" id="weekMatchAbandonNoBtn">No</button>
+        </div>
+      `);
+      document.getElementById('weekMatchAbandonYesBtn').addEventListener('click', async () => {
+        audio.play('button');
+        hideWeekMatchDialog();
+        showLoadingOverlay();
+        try {
+          const week = await joinWeekMatch(code, hubAddress);
+          await week.abandon();
+          week.close();
+        } catch (err) {
+          // Already gone (expired/completed elsewhere) reads the same as a
+          // successful abandon here — either way it shouldn't show in the
+          // list anymore, so just refresh rather than surfacing an error for
+          // what the player was trying to do anyway.
+        }
+        setWeekMatchLabel(code, '');
+        hideLoadingOverlay();
+        renderMyMatchesContent();
+      });
+      document.getElementById('weekMatchAbandonNoBtn').addEventListener('click', () => { audio.play('button'); hideWeekMatchDialog(); });
     });
   });
 }
