@@ -120,7 +120,7 @@ function openWeekSocket(code, address, intent, extra = {}) {
         if (msg.type === 'connected') { resolve({ socket, snapshot: msg }); return; }
         const errors = {
           occupied: 'This code is already in use — try again.',
-          limitReached: 'You already have 3 active WEEK matches.',
+          limitReached: 'You already have 5 active WEEK matches.',
           notFound: 'This match code is no longer valid.',
           expired: 'This challenge has expired.',
           full: 'This match already has two players.',
@@ -239,9 +239,20 @@ function weekMatchHandle(socket, snapshot, address) {
     // Either side can abandon at any point before the match is already over
     // (see party/weekArbiter.js's own 'abandon' handler) — frees this
     // player's PlayerIndex slot immediately, used by the trash icon on each
-    // My Matches row (main.js).
+    // My Matches row (main.js). Also reachable from a *completed* match's
+    // own ticket screen now, as a decline when the opponent's already
+    // waiting on a rematch (see main.js's showWeekMatchTicket) — same
+    // "your opponent has left" result either way.
     async abandon() {
       return request({ type: 'abandon' });
+    },
+    // "Play Again" from the match-complete ticket (see party/weekArbiter.js's
+    // own 'rematch' handler + main.js's showWeekMatchTicket) — resolves with
+    // { type: 'rematchStarted', ...snapshot } once BOTH sides have called
+    // this (the same room, reset for another round), or
+    // { type: 'rematchWaiting', ...snapshot } if only this side has so far.
+    async rematch() {
+      return request({ type: 'rematch' });
     },
     close() { live.close(); },
   };
@@ -353,6 +364,72 @@ export async function fetchLeagueWeeklyLeaderboard(limit = 20) {
     return await res.json();
   } catch {
     return { leaderboard: [] };
+  }
+}
+
+// ---------------------------------------------------------------------
+// WEEK turn-notification linking (party/telegramLink.js, party/playerIndex.js,
+// see CLAUDE.md's WEEK Telegram section) — the Notifications panel behind My
+// Matches' own 🔔. Same "plain fetch, best-effort" shape as fetchMyWeekMatches
+// above; none of this is gameplay-critical, a hiccup here just leaves the
+// panel showing its previous (or a safely-off) state.
+
+// A public identifier, not a secret — the bot's own @username, needed client-
+// side to build the t.me deep link. Set once, after creating the bot via
+// @BotFather (see CLAUDE.md's WEEK Telegram section for the exact setup
+// steps) — a separate bot from Radar's, dedicated to player-facing turn
+// notifications only.
+export const TELEGRAM_NOTIFY_BOT_USERNAME = 'NimiCurlNotifyBot'; // TODO: replace with the real @BotFather username once created
+
+export async function fetchTelegramStatus(address) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/player-index/${normalizeAddress(address)}?telegram=1`);
+    if (!res.ok) return { connected: false, notifyTurnEnabled: false };
+    return await res.json();
+  } catch {
+    return { connected: false, notifyTurnEnabled: false };
+  }
+}
+
+// Starts the linking flow: asks party/telegramLink.js for a fresh one-time
+// token, to be opened as https://t.me/<bot>?start=<token> by the caller (see
+// main.js) — never constructed here, this module has no DOM/window access
+// assumptions elsewhere. Returns null on any failure so the caller can leave
+// the "Connect Telegram" pill as-is instead of navigating nowhere.
+export async function startTelegramLink(address) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/telegram-link/start?address=${encodeURIComponent(normalizeAddress(address))}`, { method: 'POST' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.token || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setTelegramNotifyEnabled(address, enabled) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/player-index/${normalizeAddress(address)}?telegram=toggle`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) return { ok: false };
+    return await res.json();
+  } catch {
+    return { ok: false };
+  }
+}
+
+// Trash icon — removes this address's Telegram association only (see
+// party/playerIndex.js's clearTelegram). Best-effort: a failure here just
+// means the panel still shows "Connected" next time it's opened, not a
+// broken account.
+export async function disconnectTelegram(address) {
+  try {
+    await fetch(`${weekHttpHost()}/parties/player-index/${normalizeAddress(address)}?telegram=1`, { method: 'DELETE' });
+  } catch {
+    // best-effort, see comment above
   }
 }
 

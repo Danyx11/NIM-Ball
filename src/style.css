@@ -2038,6 +2038,8 @@ button:disabled { opacity: 0.35; cursor: default; }
 #weekTicketOverlay.mode-hockey { background: rgba(5, 130, 202, 0.72); }
 #weekTicketOverlay.mode-curling { background: rgba(233, 178, 19, 0.72); color: var(--bg-deep); }
 #weekTicketOverlay.mode-curling .config-back { color: var(--bg-deep); }
+/* "Your opponent wants a rematch!" — see main.js's showWeekMatchTicket. */
+#weekTicketRematchNote { margin: 0 0 4px; font-size: 13px; font-weight: 600; opacity: 0.9; }
 
 /* Inset to the physics/ice rect only (FX0/FY0/FX1/FY1 in game.js — as % of the
    V2 3312x1896 canvas: 32.79%/33.02%/31.70%/32.81%, left/top/right/bottom),
@@ -2558,6 +2560,11 @@ button:disabled { opacity: 0.35; cursor: default; }
    own fixed tint instead, the same Nimiq Green as its own tile
    (#modeOverlay .half.d above). */
 .config-panel.mode-joincode { background: rgba(33, 188, 165, 0.72); }
+/* Rename/abandon confirm dialog for a My Matches row (#weekMatchDialogOverlay)
+   — stacks above #joinCodeOverlay's own .config-panel (both z-index:5
+   otherwise) so My Matches stays visible, dimmed, underneath instead of
+   being torn down like showLobby()'s full-screen confirms do. */
+.config-panel.week-match-dialog { z-index: 6; }
 /* Small entrance every time ANY of these menu panels opens (Classic/Custom,
    Custom Settings, Remote Match's 3 sub-screens, the connect gate) — one
    shared rule/keyframe rather than one per screen, since they're all the
@@ -2636,6 +2643,15 @@ button:disabled { opacity: 0.35; cursor: default; }
 .config-panel.mode-joincode .week-match-expiry { color: rgba(11,31,42,0.45); }
 .config-panel.mode-joincode .week-match-rename,
 .config-panel.mode-joincode .week-match-abandon { color: var(--bg-deep); }
+/* Notifications panel (see index.html/style.css's own .notif-* rules above)
+   — same dark-ink-on-green swap as every other literal-white element on
+   this panel, for exactly the same reason .week-match-* needed it. */
+.config-panel.mode-joincode .notif-bell-btn,
+.config-panel.mode-joincode .notif-panel,
+.config-panel.mode-joincode .notif-panel-close,
+.config-panel.mode-joincode .notif-telegram-disconnect { color: var(--bg-deep); }
+.config-panel.mode-joincode .notif-panel-desc { color: rgba(11,31,42,0.7); }
+.config-panel.mode-joincode .notif-switch::after { background: var(--bg-deep); }
 /* Symmetric side padding reserves the exit button's own footprint
    (top-right, see .config-back below) on both sides, so centering the
    title+icon within this narrower box keeps it visually centered in the
@@ -2667,6 +2683,67 @@ button:disabled { opacity: 0.35; cursor: default; }
    same panel language rather than a harsh divider. */
 .join-mymatches-divider { width: 100%; max-width: 360px; height: 1px; margin: 24px 0 20px; background: rgba(255,255,255,0.18); }
 .join-mymatches-section { gap: 10px; }
+/* Notifications entry point (see index.html, main.js's notifBellBtn wiring)
+   — .config-create-label is normally full-width/centered (shared by every
+   other config-panel screen, see that rule above); wrapping just this one
+   instance in a flex row and clearing its own margin here keeps every other
+   user of the class untouched. */
+.my-matches-header { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; max-width: 360px; margin: 0 0 20px; }
+.my-matches-header .config-create-label { margin: 0; }
+.notif-bell-btn {
+  flex: none; width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18);
+  font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  transition: background .15s ease, border-color .15s ease;
+}
+.notif-bell-btn:hover { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.4); }
+/* Small popover, not a new overlay/screen — sits inline in the same flow as
+   the join-code form + My Matches below it (per explicit request: don't
+   redesign My Matches), same card language (.week-match-card's own
+   background/border/radius) as everything else on this panel. */
+.notif-panel {
+  position: relative; width: 100%; max-width: 360px; margin: 0 0 20px;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 14px; padding: 18px 20px; color: #fff;
+}
+.notif-panel.hidden { display: none; }
+.notif-panel-close {
+  position: absolute; top: 10px; right: 10px; width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.7); font-size: 18px; line-height: 1; border-radius: 50%;
+  transition: background .15s ease, color .15s ease;
+}
+.notif-panel-close:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.notif-panel-title { margin: 0 0 6px; font-size: 16px; font-weight: 700; }
+.notif-panel-desc { margin: 0 0 16px; font-size: 13px; color: rgba(255,255,255,0.7); }
+.notif-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; margin-bottom: 14px; }
+/* Two-state pill toggle — [aria-checked] (not a class) drives the slid
+   state, so a screen reader's own state and the visual one can never drift
+   apart. */
+.notif-switch {
+  flex: none; width: 44px; height: 26px; border-radius: 13px;
+  background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.25);
+  position: relative; transition: background .15s ease, border-color .15s ease;
+}
+.notif-switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; transition: transform .15s ease;
+}
+.notif-switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.notif-switch[aria-checked="true"]::after { transform: translateX(18px); }
+.notif-telegram-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.notif-telegram-connected { flex: 1; color: rgba(255,255,255,0.85); }
+.notif-telegram-connect {
+  background: var(--accent); color: #3a2900; font-weight: 700; font-size: 13px;
+  border-radius: 999px; padding: 8px 18px;
+}
+.notif-telegram-disconnect {
+  flex: none; width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.notif-telegram-disconnect:hover { background: rgba(220,70,70,0.3); border-color: rgba(220,70,70,0.55); color: #ff8080; }
 /* Empty slot (see main.js's renderMyMatchesContent) — this wallet's active-
    WEEK-match cap always renders as exactly 2 slots now, per explicit
    request, rather than a variable-length list; an unused one gets this

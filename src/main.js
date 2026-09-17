@@ -16,7 +16,7 @@ import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, se
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets, setModeSelectVibeBackground } from './background.js';
-import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, checkWeekMatchExists, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress } from './net.js';
+import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, checkWeekMatchExists, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress, fetchTelegramStatus, startTelegramLink, setTelegramNotifyEnabled, disconnectTelegram, TELEGRAM_NOTIFY_BOT_USERNAME } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
@@ -194,7 +194,7 @@ if (IS_MOBILE) document.body.classList.add('mobile-layout');
   // running) stays with #game-card above, same as #overlay/#syncToast — it's
   // gameplay chrome, not a menu screen, so this change doesn't touch it.
   const menuHost = document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'weekMatchDialogOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -2053,7 +2053,73 @@ modeJoinCode.addEventListener('click', () => { audio.play('button'); showJoinCod
 joinCodeBackBtn.addEventListener('click', () => {
   audio.play('button');
   joinCodeOverlay.classList.add('hidden');
+  notifPanel.classList.add('hidden');
   returnToModeSelect();
+});
+
+// ---- Notifications panel (party/playerIndex.js, party/telegramLink.js) —
+// the small 🔔 popover next to MY MATCHES' own header (see index.html's own
+// comment). Status is fetched lazily, only when the bell is actually opened
+// — My Matches itself already refreshes on every visit to this screen, no
+// need for this panel to add its own request to that same page load.
+const notifBellBtn = document.getElementById('notifBellBtn');
+const notifPanel = document.getElementById('notifPanel');
+const notifPanelClose = document.getElementById('notifPanelClose');
+const notifSwitch = document.getElementById('notifSwitch');
+const notifTelegramRow = document.getElementById('notifTelegramRow');
+let notifStatus = { connected: false, notifyTurnEnabled: false };
+
+function renderNotifPanel() {
+  notifSwitch.setAttribute('aria-checked', String(notifStatus.notifyTurnEnabled));
+  notifTelegramRow.innerHTML = notifStatus.connected
+    ? `<span class="notif-telegram-connected">Connected to Telegram</span>
+       <button class="notif-telegram-disconnect" id="notifDisconnectBtn" type="button" aria-label="Disconnect Telegram">
+         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+       </button>`
+    : `<button class="notif-telegram-connect" id="notifConnectBtn" type="button">Connect Telegram</button>`;
+  document.getElementById('notifConnectBtn')?.addEventListener('click', startTelegramConnect);
+  document.getElementById('notifDisconnectBtn')?.addEventListener('click', async () => {
+    audio.play('button');
+    await disconnectTelegram(hubAddress);
+    notifStatus = { connected: false, notifyTurnEnabled: false };
+    renderNotifPanel();
+  });
+}
+
+async function refreshNotifStatus() {
+  if (!hubAddress) return;
+  notifStatus = await fetchTelegramStatus(hubAddress);
+  renderNotifPanel();
+}
+
+// Opens the bot's own Telegram deep link with a fresh one-time token (see
+// party/telegramLink.js) — a new tab/app switch, not something this page can
+// detect the outcome of, so the panel just re-checks status next time it's
+// opened rather than trying to await the link completing here.
+async function startTelegramConnect() {
+  audio.play('button');
+  if (!hubAddress) return;
+  const token = await startTelegramLink(hubAddress);
+  if (!token) return;
+  window.open(`https://t.me/${TELEGRAM_NOTIFY_BOT_USERNAME}?start=${token}`, '_blank');
+}
+
+notifBellBtn.addEventListener('click', () => {
+  audio.play('button');
+  notifPanel.classList.toggle('hidden');
+  if (!notifPanel.classList.contains('hidden')) refreshNotifStatus();
+});
+notifPanelClose.addEventListener('click', () => { notifPanel.classList.add('hidden'); });
+notifSwitch.addEventListener('click', async () => {
+  audio.play('button');
+  // Connected while OFF and OFF while not connected are both real states —
+  // but turning ON with nothing to deliver through would silently do
+  // nothing, so route that case into Connect instead (per explicit spec:
+  // "guide them to connect Telegram rather than silently failing").
+  if (!notifStatus.connected) { await startTelegramConnect(); return; }
+  const next = !notifStatus.notifyTurnEnabled;
+  const res = await setTelegramNotifyEnabled(hubAddress, next);
+  if (res.ok) { notifStatus.notifyTurnEnabled = next; renderNotifPanel(); }
 });
 // About (index.html's #navAbout/#aboutOverlay) — static info screen, same
 // show/hide dance as Replay's own sidebar entry above (guarded the same way
@@ -3258,6 +3324,8 @@ async function showWeekMatchTicket(week) {
     <div class="ticket-row">
       <div class="ticket-wrap"><img class="ticket-img" id="weekTicketImg" alt="Nim-Curl WEEK match ticket"></div>
       <div class="goal-actions">
+        ${week.rematch?.opponent ? '<p id="weekTicketRematchNote">Your opponent wants a rematch!</p>' : ''}
+        <button class="bigbtn" id="weekTicketPlayAgainBtn">▶ Play Again</button>
         <button class="bigbtn" id="weekTicketShareBtn">📤 Share</button>
       </div>
     </div>
@@ -3270,10 +3338,45 @@ async function showWeekMatchTicket(week) {
   modeDrawer.classList.add('hidden');
   weekTicketOverlay.classList.remove('hidden');
   document.getElementById('weekTicketImg').src = ticketCanvas.toDataURL('image/png');
-  document.getElementById('weekTicketExitBtn').addEventListener('click', () => {
+  // Exit doubles as a decline when the opponent is already waiting on a
+  // rematch (see conversation: "si l'opponent a quitté on met un message
+  // 'your opponent has left'") — same abandon() used everywhere else in WEEK,
+  // now reachable from a completed match too (see party/weekArbiter.js's own
+  // widened guard). A plain exit with nobody waiting sends nothing — this
+  // match just sits there, rematchable later by either side, same as any
+  // other WEEK match waiting on a turn.
+  document.getElementById('weekTicketExitBtn').addEventListener('click', async () => {
     audio.play('button');
+    if (week.rematch?.opponent) {
+      try { await week.abandon(); } catch { /* best-effort */ }
+    }
     weekTicketOverlay.classList.add('hidden');
     returnToModeSelect();
+  });
+  // PLAY AGAIN: resets THIS SAME room (see party/weekArbiter.js's own
+  // 'rematch' handler — same players/config/game, everything else back to a
+  // freshly-created match's own shape) once BOTH sides have asked for it.
+  // If I'm first, there's nothing more to do locally right now — WEEK has
+  // no live push (see this file's own header comment), so the other side
+  // simply sees "Your opponent wants a rematch!" whenever they next open
+  // this match themselves.
+  document.getElementById('weekTicketPlayAgainBtn').addEventListener('click', async () => {
+    audio.play('button');
+    const btn = document.getElementById('weekTicketPlayAgainBtn');
+    btn.disabled = true;
+    let result;
+    try {
+      result = await week.rematch();
+    } catch {
+      btn.disabled = false;
+      return;
+    }
+    if (result.type === 'rematchStarted') {
+      weekTicketOverlay.classList.add('hidden');
+      enterWeekMatch(mergeWeek(week, result));
+      return;
+    }
+    btn.textContent = 'Waiting for opponent…';
   });
   // Same Share behavior as game.js's showVictory (native share sheet on
   // mobile, a download on desktop, a copy-to-clipboard fallback) — see that
@@ -3750,6 +3853,20 @@ function showWeekErrorScreen(message) {
 
 function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
+// Stand-in for window.prompt()/confirm() (see index.html's own comment on
+// #weekMatchDialogOverlay) — every other confirm-style dialog in the game
+// already builds its own DOM instead of a native one (see triggerExit/
+// navHome's showLobby confirms); this is that same title/subtitle/buttons
+// shape, just its own overlay so it can sit above My Matches without
+// tearing the list down like showLobby() does.
+const weekMatchDialogOverlay = document.getElementById('weekMatchDialogOverlay');
+const weekMatchDialogContent = document.getElementById('weekMatchDialogContent');
+function showWeekMatchDialog(html) {
+  weekMatchDialogContent.innerHTML = html;
+  weekMatchDialogOverlay.classList.remove('hidden');
+}
+function hideWeekMatchDialog() { weekMatchDialogOverlay.classList.add('hidden'); }
+
 // ---- My Matches (party/playerIndex.js) — a UX shortcut back into an
 // existing WEEK match, rendered into the bottom half of the merged Join & My
 // Matches panel (#joinCodeOverlay, see showJoinCodeScreen below — the two
@@ -3759,7 +3876,7 @@ function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<
 // match cap — per explicit request, rather than a variable-length list; an
 // unused slot renders as a greyed "Empty" placeholder instead of shrinking.
 const myMatchesContent = document.getElementById('myMatchesContent');
-const MY_MATCHES_SLOTS = 3; // keep in sync with party/playerIndex.js's MAX_ACTIVE_MATCHES
+const MY_MATCHES_SLOTS = 5; // keep in sync with party/playerIndex.js's MAX_ACTIVE_MATCHES
 // 'yourTurn' (this team hasn't submitted their own current-manche shot yet)
 // and 'revealReady' (party/weekArbiter.js's turnLabelFor — this team has a
 // reveal genuinely ready for them, independent of whether the opponent has
@@ -3860,14 +3977,29 @@ async function renderMyMatchesContent() {
       e.stopPropagation();
       audio.play('button');
       const code = btn.dataset.code;
-      // prompt(), not an inline input — this is a rare, one-off action (per
-      // explicit request, just a way to tell matches apart at a glance), not
-      // worth a dedicated edit-in-place UI. Blank/cancelled input clears any
-      // existing custom label rather than leaving it half-edited.
-      const next = prompt('Name this match', getWeekMatchLabel(code));
-      if (next === null) return;
-      setWeekMatchLabel(code, next.trim());
-      renderMyMatchesContent();
+      // Own dialog, not window.prompt() (see index.html's own comment on
+      // #weekMatchDialogOverlay — prompt() silently doesn't work inside the
+      // Nimiq Pay Mini App WebView). Cancel leaves the existing label
+      // untouched; Save with a blank field clears it, same "blank clears"
+      // behavior the old prompt()-based flow had.
+      showWeekMatchDialog(`
+        <h2>Name this match</h2>
+        <input type="text" id="weekMatchNameInput" maxlength="40" autocomplete="off" value="${escapeHtml(getWeekMatchLabel(code))}" />
+        <div style="display:flex; gap:12px;">
+          <button class="bigbtn" id="weekMatchNameSaveBtn">Save</button>
+          <button class="bigbtn" id="weekMatchNameCancelBtn">Cancel</button>
+        </div>
+      `);
+      const input = document.getElementById('weekMatchNameInput');
+      input.focus();
+      input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); document.getElementById('weekMatchNameSaveBtn').click(); } });
+      document.getElementById('weekMatchNameSaveBtn').addEventListener('click', () => {
+        audio.play('button');
+        setWeekMatchLabel(code, input.value.trim());
+        hideWeekMatchDialog();
+        renderMyMatchesContent();
+      });
+      document.getElementById('weekMatchNameCancelBtn').addEventListener('click', () => { audio.play('button'); hideWeekMatchDialog(); });
     });
   });
   myMatchesContent.querySelectorAll('.week-match-abandon[data-code]').forEach((btn) => {
@@ -3885,21 +4017,35 @@ async function renderMyMatchesContent() {
         renderMyMatchesContent();
         return;
       }
-      if (!confirm('Abandon this match? This cannot be undone.')) return;
-      showLoadingOverlay();
-      try {
-        const week = await joinWeekMatch(code, hubAddress);
-        await week.abandon();
-        week.close();
-      } catch (err) {
-        // Already gone (expired/completed elsewhere) reads the same as a
-        // successful abandon here — either way it shouldn't show in the
-        // list anymore, so just refresh rather than surfacing an error for
-        // what the player was trying to do anyway.
-      }
-      setWeekMatchLabel(code, '');
-      hideLoadingOverlay();
-      renderMyMatchesContent();
+      // Own dialog, not window.confirm() — same reasoning as the rename
+      // dialog above (see index.html's #weekMatchDialogOverlay comment).
+      showWeekMatchDialog(`
+        <h2>Abandon this match?</h2>
+        <p>This cannot be undone.</p>
+        <div style="display:flex; gap:12px;">
+          <button class="bigbtn" id="weekMatchAbandonYesBtn">Yes</button>
+          <button class="bigbtn" id="weekMatchAbandonNoBtn">No</button>
+        </div>
+      `);
+      document.getElementById('weekMatchAbandonYesBtn').addEventListener('click', async () => {
+        audio.play('button');
+        hideWeekMatchDialog();
+        showLoadingOverlay();
+        try {
+          const week = await joinWeekMatch(code, hubAddress);
+          await week.abandon();
+          week.close();
+        } catch (err) {
+          // Already gone (expired/completed elsewhere) reads the same as a
+          // successful abandon here — either way it shouldn't show in the
+          // list anymore, so just refresh rather than surfacing an error for
+          // what the player was trying to do anyway.
+        }
+        setWeekMatchLabel(code, '');
+        hideLoadingOverlay();
+        renderMyMatchesContent();
+      });
+      document.getElementById('weekMatchAbandonNoBtn').addEventListener('click', () => { audio.play('button'); hideWeekMatchDialog(); });
     });
   });
 }
