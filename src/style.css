@@ -2712,13 +2712,17 @@ button:disabled { opacity: 0.35; cursor: default; }
   border-radius: 14px; padding: 18px 20px; color: #fff;
 }
 .notif-panel.hidden { display: none; }
+/* Same round chip as .config-back elsewhere (background explicitly set, not
+   left to button's own bare browser default — that gap was the "white
+   thing" this replaces) — smaller since it sits inside a small popover, not
+   a full-screen panel corner. */
 .notif-panel-close {
-  position: absolute; top: 10px; right: 10px; width: 24px; height: 24px;
+  position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; padding: 0;
   display: flex; align-items: center; justify-content: center;
-  color: rgba(255,255,255,0.7); border-radius: 50%;
+  background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.85); border-radius: 50%;
   transition: background .15s ease, color .15s ease;
 }
-.notif-panel-close:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.notif-panel-close:hover { background: rgba(255,255,255,0.22); color: #fff; }
 .notif-panel-close svg { flex-shrink: 0; }
 .notif-panel-title { margin: 0 0 6px; font-size: 16px; font-weight: 700; }
 .notif-panel-desc { margin: 0 0 16px; font-size: 13px; color: rgba(255,255,255,0.7); }
