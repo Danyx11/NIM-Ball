@@ -13,19 +13,27 @@ import { normalizeAddress } from './net.js';
 
 window.NIMIQ_IDENTICONS_SVG_PATH = identiconsSvgUrl;
 
+// The lib hashes the literal characters it's given, and the real Nimiq
+// Wallet/Hub feed it the address in its canonical "user-friendly" IBAN
+// format — space-separated in groups of 4, e.g. "NQ07 0000 0000 0000 0000
+// 0000 0000 0000 0000" (@nimiq/core's `toUserFriendlyAddress()`, which is
+// exactly what hubAddress already is straight out of Nimiq Hub). Every
+// server-sourced address (League rows, WEEK opponentAddress) has instead
+// been through net.js's normalizeAddress, which strips those spaces for
+// storage — so it must be reshaped back into the spaced form here, or it
+// hashes to a different identicon than the same wallet's real one.
+function toUserFriendlyAddress(address) {
+  return normalizeAddress(address).match(/.{1,4}/g).join(' ');
+}
+
 // address -> Promise<HTMLCanvasElement>, so concurrent requests for the same
 // address share one render instead of racing.
 const canvasCache = new Map();
 
 // Rasterized identicon at `size`x`size`, cached per address (size is fixed at
-// first request — this game only ever needs one size per address). The lib
-// hashes the literal characters it's given, so the space-separated
-// user-friendly format (hubAddress, straight from Nimiq Hub) and the
-// space-stripped format every server-sourced address goes through
-// (net.js's normalizeAddress) produce different identicons for the same
-// wallet — normalize here so every call site agrees on one image per address.
+// first request — this game only ever needs one size per address).
 export function getIdenticonCanvas(address, size = 512) {
-  address = normalizeAddress(address);
+  address = toUserFriendlyAddress(address);
   if (!canvasCache.has(address)) canvasCache.set(address, rasterize(address, size));
   return canvasCache.get(address);
 }
@@ -54,7 +62,7 @@ const stoneBustCanvasCache = new Map();
 const bgColorCache = new Map();
 
 export function getIdenticonCanvasStoneBust(address, size = 512) {
-  address = normalizeAddress(address);
+  address = toUserFriendlyAddress(address);
   const key = `${address}:${size}`;
   if (!stoneBustCanvasCache.has(key)) stoneBustCanvasCache.set(key, rasterize(address, size, { stripBackground: true, stripLegs: true }));
   return stoneBustCanvasCache.get(key);
@@ -65,7 +73,7 @@ export function getIdenticonCanvasStoneBust(address, size = 512) {
 // (game.js's bakeBubble) to color the hex window's floor per-player instead
 // of the fixed per-team navy/gold from the stone art.
 export function getIdenticonBgColor(address) {
-  address = normalizeAddress(address);
+  address = toUserFriendlyAddress(address);
   if (!bgColorCache.has(address)) {
     bgColorCache.set(address, Identicons.svg(address).then((svgMarkup) => {
       const rect = svgMarkup.match(BG_RECT_RE);
