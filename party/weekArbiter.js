@@ -117,6 +117,10 @@ export class WeekArbiter extends Server {
       // this match actually qualified and the RPC resolved; once set it's
       // persisted, so it keeps showing up here on any later reconnect too.
       leagueLp: m.leagueResult ? m.leagueResult[team] : null,
+      // "Play Again" (see onMessage's own 'rematch' comment) — only
+      // meaningful once status is 'completed'; mine/opponent both false the
+      // rest of the time.
+      rematch: { mine: !!m.rematch?.[team], opponent: !!m.rematch?.[opp] },
       mySubmitted: !!m.pendingShots[team],
       opponentSubmitted: !!m.pendingShots[opp],
       reveal,
@@ -282,6 +286,12 @@ export class WeekArbiter extends Server {
         pointManches: [],
         // One-slot-per-recipient message inbox — see consumeInbox above.
         inbox: { A: null, B: null },
+        // "Play Again" from the match-complete ticket (see conversation +
+        // main.js's showWeekMatchTicket, onMessage's own 'rematch' handler
+        // below) — each side's own request to reset THIS SAME room for
+        // another round with the same opponent/config. Reset back to this
+        // once both actually agree (see 'rematch' below).
+        rematch: { A: false, B: false },
       };
       await this.persist();
       await this.ctx.storage.setAlarm(this.match.joinDeadline);
@@ -584,14 +594,55 @@ export class WeekArbiter extends Server {
       return;
     }
 
+    // "Play Again" from the match-complete ticket (see main.js's
+    // showWeekMatchTicket) — each side's own request to reset THIS SAME
+    // room for another round, not a new code/match (per explicit request:
+    // "on fait attention à bien reset pour pas avoir d'artefacts du match
+    // précédent"). Only meaningful once the match is actually over; a stray
+    // retry/race lands here with nothing to do.
+    if (msg.type === 'rematch') {
+      if (this.match.status !== 'completed') return;
+      this.match.rematch[team] = true;
+      if (this.match.rematch.A && this.match.rematch.B) {
+        // Both sides want another round — reset in place: same playerA/
+        // playerB/config/game (a rematch, not a new match), everything else
+        // back to exactly what a freshly created match starts with (see
+        // onConnect's intent==='create' branch above — every field below is
+        // listed there too, kept in sync by hand). expiresAt/its alarm are
+        // refreshed from now, same as B actually joining a match does.
+        const now = Date.now();
+        Object.assign(this.match, {
+          status: 'active', round: 0, scoreA: 0, scoreB: 0,
+          pendingShots: { A: null, B: null }, stats: { collisions: 0, stonesDestroyed: 0 },
+          lastManche: null, pointManches: [], inbox: { A: null, B: null },
+          rematch: { A: false, B: false }, completedAt: null, leagueResult: null,
+          expiresAt: now + MATCH_LIFETIME_MS,
+        });
+        await this.ctx.storage.setAlarm(this.match.expiresAt);
+        await this.persist();
+        // Back on both players' own "My Matches" list — completeRound's own
+        // matchOver branch removed them from it once both had watched the
+        // final reveal (see that branch's own comment).
+        await Promise.all([this.pushIndexUpdate('A'), this.pushIndexUpdate('B')]);
+        this.send(connection, { type: 'rematchStarted', ...this.snapshotFor(team) });
+        return;
+      }
+      await this.persist();
+      this.send(connection, { type: 'rematchWaiting', ...this.snapshotFor(team) });
+      return;
+    }
+
     // Either side can abandon at any point before the match is already
-    // over — frees this player's PlayerIndex slot immediately (see
-    // conversation: the active-matches cap was blocking testing with no
-    // way to bail out of a stuck/unwanted match). A deliberate abandon, not
-    // the same thing as the natural 24h/7-day expiry (see onAlarm below),
-    // but terminal the same way — same alarm/index cleanup either path.
+    // over (including a just-completed one they're declining to rematch,
+    // see conversation — same "your opponent has left" convention below,
+    // now also reachable from the ticket's own Exit) — frees this player's
+    // PlayerIndex slot immediately (see conversation: the active-matches cap
+    // was blocking testing with no way to bail out of a stuck/unwanted
+    // match). A deliberate abandon, not the same thing as the natural
+    // 24h/7-day expiry (see onAlarm below), but terminal the same way —
+    // same alarm/index cleanup either path.
     if (msg.type === 'abandon') {
-      if (this.match.status !== 'pending' && this.match.status !== 'active') return;
+      if (this.match.status !== 'pending' && this.match.status !== 'active' && this.match.status !== 'completed') return;
       this.match.status = 'abandoned';
       await this.ctx.storage.deleteAlarm();
       await this.persist();

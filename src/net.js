@@ -239,9 +239,20 @@ function weekMatchHandle(socket, snapshot, address) {
     // Either side can abandon at any point before the match is already over
     // (see party/weekArbiter.js's own 'abandon' handler) — frees this
     // player's PlayerIndex slot immediately, used by the trash icon on each
-    // My Matches row (main.js).
+    // My Matches row (main.js). Also reachable from a *completed* match's
+    // own ticket screen now, as a decline when the opponent's already
+    // waiting on a rematch (see main.js's showWeekMatchTicket) — same
+    // "your opponent has left" result either way.
     async abandon() {
       return request({ type: 'abandon' });
+    },
+    // "Play Again" from the match-complete ticket (see party/weekArbiter.js's
+    // own 'rematch' handler + main.js's showWeekMatchTicket) — resolves with
+    // { type: 'rematchStarted', ...snapshot } once BOTH sides have called
+    // this (the same room, reset for another round), or
+    // { type: 'rematchWaiting', ...snapshot } if only this side has so far.
+    async rematch() {
+      return request({ type: 'rematch' });
     },
     close() { live.close(); },
   };

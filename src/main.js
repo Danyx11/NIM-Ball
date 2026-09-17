@@ -3258,6 +3258,8 @@ async function showWeekMatchTicket(week) {
     <div class="ticket-row">
       <div class="ticket-wrap"><img class="ticket-img" id="weekTicketImg" alt="Nim-Curl WEEK match ticket"></div>
       <div class="goal-actions">
+        ${week.rematch?.opponent ? '<p id="weekTicketRematchNote">Your opponent wants a rematch!</p>' : ''}
+        <button class="bigbtn" id="weekTicketPlayAgainBtn">▶ Play Again</button>
         <button class="bigbtn" id="weekTicketShareBtn">📤 Share</button>
       </div>
     </div>
@@ -3270,10 +3272,45 @@ async function showWeekMatchTicket(week) {
   modeDrawer.classList.add('hidden');
   weekTicketOverlay.classList.remove('hidden');
   document.getElementById('weekTicketImg').src = ticketCanvas.toDataURL('image/png');
-  document.getElementById('weekTicketExitBtn').addEventListener('click', () => {
+  // Exit doubles as a decline when the opponent is already waiting on a
+  // rematch (see conversation: "si l'opponent a quitté on met un message
+  // 'your opponent has left'") — same abandon() used everywhere else in WEEK,
+  // now reachable from a completed match too (see party/weekArbiter.js's own
+  // widened guard). A plain exit with nobody waiting sends nothing — this
+  // match just sits there, rematchable later by either side, same as any
+  // other WEEK match waiting on a turn.
+  document.getElementById('weekTicketExitBtn').addEventListener('click', async () => {
     audio.play('button');
+    if (week.rematch?.opponent) {
+      try { await week.abandon(); } catch { /* best-effort */ }
+    }
     weekTicketOverlay.classList.add('hidden');
     returnToModeSelect();
+  });
+  // PLAY AGAIN: resets THIS SAME room (see party/weekArbiter.js's own
+  // 'rematch' handler — same players/config/game, everything else back to a
+  // freshly-created match's own shape) once BOTH sides have asked for it.
+  // If I'm first, there's nothing more to do locally right now — WEEK has
+  // no live push (see this file's own header comment), so the other side
+  // simply sees "Your opponent wants a rematch!" whenever they next open
+  // this match themselves.
+  document.getElementById('weekTicketPlayAgainBtn').addEventListener('click', async () => {
+    audio.play('button');
+    const btn = document.getElementById('weekTicketPlayAgainBtn');
+    btn.disabled = true;
+    let result;
+    try {
+      result = await week.rematch();
+    } catch {
+      btn.disabled = false;
+      return;
+    }
+    if (result.type === 'rematchStarted') {
+      weekTicketOverlay.classList.add('hidden');
+      enterWeekMatch(mergeWeek(week, result));
+      return;
+    }
+    btn.textContent = 'Waiting for opponent…';
   });
   // Same Share behavior as game.js's showVictory (native share sheet on
   // mobile, a download on desktop, a copy-to-clipboard fallback) — see that

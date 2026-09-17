@@ -4371,10 +4371,14 @@ export function startGame(opts = {}) {
     });
     if (phase !== 'gameover') return;
     showOverlay(`
-      <img class="ticket-img" id="ticketImg" alt="Replay ticket">
-      <div class="goal-actions">
-        <button class="bigbtn" id="goalReplayAgainBtn">🔁 Watch Again</button>
-        <button class="bigbtn" id="goalMenuBtn">🚪 Menu</button>
+      <button class="config-back" id="replayTicketExitBtn" type="button" aria-label="Exit">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="ticket-row">
+        <div class="ticket-wrap"><img class="ticket-img" id="ticketImg" alt="Replay ticket"></div>
+        <div class="goal-actions">
+          <button class="bigbtn" id="goalReplayAgainBtn">🔁 Watch Again</button>
+        </div>
       </div>
     `);
     document.getElementById('ticketImg').src = ticketCanvas.toDataURL('image/png');
@@ -4388,8 +4392,9 @@ export function startGame(opts = {}) {
     };
     // See replayExitBtn's own comment above: no navigation, just strip a
     // still-present ?replay= param so a future real refresh doesn't
-    // relaunch this same replay.
-    document.getElementById('goalMenuBtn').onclick = () => {
+    // relaunch this same replay. Small corner exit pill now, same
+    // simplification as showVictory's own goalExitBtn (see conversation).
+    document.getElementById('replayTicketExitBtn').onclick = () => {
       audio.play('button');
       history.replaceState(null, '', location.pathname);
       stopGame();

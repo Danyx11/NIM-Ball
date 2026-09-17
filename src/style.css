@@ -2038,6 +2038,8 @@ button:disabled { opacity: 0.35; cursor: default; }
 #weekTicketOverlay.mode-hockey { background: rgba(5, 130, 202, 0.72); }
 #weekTicketOverlay.mode-curling { background: rgba(233, 178, 19, 0.72); color: var(--bg-deep); }
 #weekTicketOverlay.mode-curling .config-back { color: var(--bg-deep); }
+/* "Your opponent wants a rematch!" — see main.js's showWeekMatchTicket. */
+#weekTicketRematchNote { margin: 0 0 4px; font-size: 13px; font-weight: 600; opacity: 0.9; }
 
 /* Inset to the physics/ice rect only (FX0/FY0/FX1/FY1 in game.js — as % of the
    V2 3312x1896 canvas: 32.79%/33.02%/31.70%/32.81%, left/top/right/bottom),
