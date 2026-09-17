@@ -103,6 +103,7 @@ function openWeekSocket(code, address, intent, extra = {}) {
           else rej(new Error('Not connected.'));
         });
       },
+      isOpen() { return ws.readyState === WebSocket.OPEN; },
       close() { ws.close(); },
     };
     ws.addEventListener('error', () => {
@@ -139,10 +140,61 @@ function openWeekSocket(code, address, intent, extra = {}) {
   });
 }
 
-function weekMatchHandle(socket, snapshot) {
+function weekMatchHandle(socket, snapshot, address) {
   const { type: _type, ...rest } = snapshot;
+  const code = socket.code;
+  let live = socket;
+  // Held when a reconnect's own 'connected' frame carried a message — see
+  // withCarriedInbox below.
+  let carriedInbox = null;
+
+  // This file's header describes WEEK as connect/fetch/act/disconnect, but
+  // one socket was in fact being kept for a whole sitting — and a WEEK turn
+  // is an unbounded human pause (the player is aiming) during which nothing
+  // travels over it. An idle WebSocket gets dropped by the edge, or by a
+  // phone changing network, and the next action then failed outright: the
+  // match existed but the shot it was carrying never arrived, surfaced to
+  // the player as a bare "Not connected." (reported). So don't assume the
+  // socket survived — reopen and retry once. 'join' is the right intent for
+  // a reconnect: party/weekArbiter.js's onConnect treats a returning player
+  // exactly like a fresh join.
+  async function request(msg) {
+    if (live.isOpen()) {
+      try {
+        return withCarriedInbox(await live.request(msg));
+      } catch {
+        // Dropped mid-flight (the close handler rejects everything queued) —
+        // fall through and try once on a fresh socket.
+      }
+    }
+    let reopened;
+    try {
+      reopened = await openWeekSocket(code, address, 'join');
+    } catch (err) {
+      // A reconnect can fail for a reason the player actually needs to see
+      // (the match expired, or the opponent abandoned it) — those carry
+      // .reason and keep their own wording. Anything else is the connection
+      // problem it is, said in words a player can act on rather than
+      // "Not connected."
+      throw err.reason ? err : new Error('Connection lost — try again.');
+    }
+    live = reopened.socket;
+    // onConnect consumes the inbox, so reconnecting silently would swallow a
+    // message the opponent had left. Carry it onto the reply the caller is
+    // about to merge (main.js's mergeWeek reads inboxMessage off it).
+    if (reopened.snapshot.inboxMessage) carriedInbox = reopened.snapshot.inboxMessage;
+    return withCarriedInbox(await live.request(msg));
+  }
+  function withCarriedInbox(reply) {
+    if (carriedInbox && reply && typeof reply === 'object') {
+      reply.inboxMessage = carriedInbox;
+      carriedInbox = null;
+    }
+    return reply;
+  }
+
   return {
-    code: socket.code,
+    code,
     ...rest,
     // { stones, sweep } in, resolves with the fresh snapshot (see
     // WeekArbiter's 'shotAccepted' reply) — including the opponent's shot
@@ -150,7 +202,7 @@ function weekMatchHandle(socket, snapshot) {
     // see sendMessage below, a fully separate, optional, later action (a
     // message belongs to its recipient, not to this shot — see conversation).
     async sendShot(stones, sweep) {
-      return socket.request({ type: 'shot', stones, sweep });
+      return request({ type: 'shot', stones, sweep });
     },
     // Leaves a message for the opponent — reachable any time after this
     // team has already submitted its own shot for the current manche (the
@@ -159,7 +211,7 @@ function weekMatchHandle(socket, snapshot) {
     // party/weekArbiter.js's own inbox/consumeInbox — no unread/multi-
     // message queue for now, per explicit request).
     async sendMessage(text) {
-      return socket.request({ type: 'message', message: text });
+      return request({ type: 'message', message: text });
     },
     // Reports the locally-computed outcome of a revealed manche (this game
     // never runs physics server-side, see CLAUDE.md) so the persisted match
@@ -182,27 +234,29 @@ function weekMatchHandle(socket, snapshot) {
     // own comment; a later "I've now watched it too" ack from the other side
     // sends these too but they're simply ignored there).
     async completeRound(scoredTeam, collisionsDelta = 0, stonesDestroyedDelta = 0) {
-      return socket.request({ type: 'completeRound', scoredTeam, collisionsDelta, stonesDestroyedDelta });
+      return request({ type: 'completeRound', scoredTeam, collisionsDelta, stonesDestroyedDelta });
     },
     // Either side can abandon at any point before the match is already over
     // (see party/weekArbiter.js's own 'abandon' handler) — frees this
     // player's PlayerIndex slot immediately, used by the trash icon on each
     // My Matches row (main.js).
     async abandon() {
-      return socket.request({ type: 'abandon' });
+      return request({ type: 'abandon' });
     },
-    close() { socket.close(); },
+    close() { live.close(); },
   };
 }
 
 export async function createWeekMatch(code, address, game, config) {
-  const { socket, snapshot } = await openWeekSocket(code, normalizeAddress(address), 'create', { game, config });
-  return weekMatchHandle(socket, snapshot);
+  const normalized = normalizeAddress(address);
+  const { socket, snapshot } = await openWeekSocket(code, normalized, 'create', { game, config });
+  return weekMatchHandle(socket, snapshot, normalized);
 }
 
 export async function joinWeekMatch(code, address) {
-  const { socket, snapshot } = await openWeekSocket(code, normalizeAddress(address), 'join');
-  return weekMatchHandle(socket, snapshot);
+  const normalized = normalizeAddress(address);
+  const { socket, snapshot } = await openWeekSocket(code, normalized, 'join');
+  return weekMatchHandle(socket, snapshot, normalized);
 }
 
 // Existence probe for a WEEK code, with no wallet address required — used by
