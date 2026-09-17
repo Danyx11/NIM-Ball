@@ -379,7 +379,7 @@ export async function fetchLeagueWeeklyLeaderboard(limit = 20) {
 // @BotFather (see CLAUDE.md's WEEK Telegram section for the exact setup
 // steps) — a separate bot from Radar's, dedicated to player-facing turn
 // notifications only.
-export const TELEGRAM_NOTIFY_BOT_USERNAME = 'NimiCurlNotifyBot'; // TODO: replace with the real @BotFather username once created
+export const TELEGRAM_NOTIFY_BOT_USERNAME = 'Nimicurl_Notif_bot';
 
 export async function fetchTelegramStatus(address) {
   try {

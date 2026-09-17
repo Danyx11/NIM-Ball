@@ -1059,14 +1059,24 @@
       <div class="join-mymatches-divider"></div>
       <!-- Notifications (see CLAUDE.md's WEEK Telegram section, src/main.js's
            renderNotifPanel/refreshNotifStatus) — a small popover anchored off
-           the 🔔 next to MY MATCHES' own label, not a separate overlay/screen
-           (per explicit request: don't redesign My Matches). -->
+           the bell next to MY MATCHES' own label, not a separate overlay/
+           screen (per explicit request: don't redesign My Matches). -->
       <div class="my-matches-header">
         <h2 class="config-create-label">MY MATCHES</h2>
-        <button class="notif-bell-btn" id="notifBellBtn" type="button" aria-label="Notifications">🔔</button>
+        <button class="notif-bell-btn" id="notifBellBtn" type="button" aria-label="Notifications">
+          <!-- Lucide's "bell" icon (lucide.dev), verbatim path data — same
+               reuse convention as #navHowTo's lightbulb/#navFindPlayer's
+               handshake above. -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>
+        </button>
       </div>
       <div id="notifPanel" class="notif-panel hidden">
-        <button class="notif-panel-close" id="notifPanelClose" type="button" aria-label="Close">×</button>
+        <!-- Same "exit" glyph as #joinCodeBackBtn/#replayExitBtn just below/
+             elsewhere on this panel (see .config-back's own svg) instead of a
+             bare "×" on a plain circle. -->
+        <button class="notif-panel-close" id="notifPanelClose" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+        </button>
         <h3 class="notif-panel-title">Notifications</h3>
         <p class="notif-panel-desc">Get notified when it's your turn.</p>
         <div class="notif-switch-row">
