@@ -9,6 +9,7 @@ import Identicons from '@nimiq/identicons/dist/identicons.min.js';
 // rest of the build output instead of leaving the package's dead-in-prod
 // default path (`/node_modules/@nimiq/identicons/...`) in place.
 import identiconsSvgUrl from '@nimiq/identicons/dist/identicons.min.svg?url';
+import { normalizeAddress } from './net.js';
 
 window.NIMIQ_IDENTICONS_SVG_PATH = identiconsSvgUrl;
 
@@ -17,8 +18,14 @@ window.NIMIQ_IDENTICONS_SVG_PATH = identiconsSvgUrl;
 const canvasCache = new Map();
 
 // Rasterized identicon at `size`x`size`, cached per address (size is fixed at
-// first request — this game only ever needs one size per address).
+// first request — this game only ever needs one size per address). The lib
+// hashes the literal characters it's given, so the space-separated
+// user-friendly format (hubAddress, straight from Nimiq Hub) and the
+// space-stripped format every server-sourced address goes through
+// (net.js's normalizeAddress) produce different identicons for the same
+// wallet — normalize here so every call site agrees on one image per address.
 export function getIdenticonCanvas(address, size = 512) {
+  address = normalizeAddress(address);
   if (!canvasCache.has(address)) canvasCache.set(address, rasterize(address, size));
   return canvasCache.get(address);
 }
@@ -47,6 +54,7 @@ const stoneBustCanvasCache = new Map();
 const bgColorCache = new Map();
 
 export function getIdenticonCanvasStoneBust(address, size = 512) {
+  address = normalizeAddress(address);
   const key = `${address}:${size}`;
   if (!stoneBustCanvasCache.has(key)) stoneBustCanvasCache.set(key, rasterize(address, size, { stripBackground: true, stripLegs: true }));
   return stoneBustCanvasCache.get(key);
@@ -57,6 +65,7 @@ export function getIdenticonCanvasStoneBust(address, size = 512) {
 // (game.js's bakeBubble) to color the hex window's floor per-player instead
 // of the fixed per-team navy/gold from the stone art.
 export function getIdenticonBgColor(address) {
+  address = normalizeAddress(address);
   if (!bgColorCache.has(address)) {
     bgColorCache.set(address, Identicons.svg(address).then((svgMarkup) => {
       const rect = svgMarkup.match(BG_RECT_RE);
