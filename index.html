@@ -1057,8 +1057,38 @@
       </div>
       <div id="joinCodeContent" class="config-lobby-content"></div>
       <div class="join-mymatches-divider"></div>
-      <h2 class="config-create-label">MY MATCHES</h2>
+      <!-- Notifications (see CLAUDE.md's WEEK Telegram section, src/main.js's
+           renderNotifPanel/refreshNotifStatus) — a small popover anchored off
+           the 🔔 next to MY MATCHES' own label, not a separate overlay/screen
+           (per explicit request: don't redesign My Matches). -->
+      <div class="my-matches-header">
+        <h2 class="config-create-label">MY MATCHES</h2>
+        <button class="notif-bell-btn" id="notifBellBtn" type="button" aria-label="Notifications">🔔</button>
+      </div>
+      <div id="notifPanel" class="notif-panel hidden">
+        <button class="notif-panel-close" id="notifPanelClose" type="button" aria-label="Close">×</button>
+        <h3 class="notif-panel-title">Notifications</h3>
+        <p class="notif-panel-desc">Get notified when it's your turn.</p>
+        <div class="notif-switch-row">
+          <span>Turn notifications</span>
+          <button class="notif-switch" id="notifSwitch" type="button" role="switch" aria-checked="false" aria-label="Turn notifications"></button>
+        </div>
+        <div id="notifTelegramRow" class="notif-telegram-row"></div>
+      </div>
       <div id="myMatchesContent" class="config-lobby-content join-mymatches-section"></div>
+    </div>
+    <!-- Rename / abandon confirm for a My Matches row (see main.js's
+         showWeekMatchDialog/hideWeekMatchDialog). Replaces the old native
+         window.prompt()/confirm() calls: the Nimiq Pay Mini App's WebView
+         host doesn't implement those (no visible dialog ever appears), and
+         the failed native-dialog attempt was also cutting the ambience
+         audio via #overlay's own visibilitychange-driven pause/resume
+         misfiring (see conversation). Same .config-panel shell + mode-
+         joincode tint as #joinCodeOverlay itself (this only ever opens from
+         there), just a higher z-index (see style.css) so it stacks above it
+         instead of replacing it — My Matches stays visible underneath. -->
+    <div id="weekMatchDialogOverlay" class="config-panel mode-joincode week-match-dialog hidden">
+      <div id="weekMatchDialogContent" class="config-lobby-content"></div>
     </div>
     <!-- "Claim a handle" (see main.js's openClaimHandleDialog/renderClaimStep,
          reached from the sidebar identity pill, never a mode tile — no back

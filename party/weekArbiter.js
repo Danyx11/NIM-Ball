@@ -243,6 +243,34 @@ export class WeekArbiter extends Server {
       .catch((err) => console.error(`[league] ${method} failed:`, err));
   }
 
+  // Telegram turn notifications (party/playerIndex.js) — same RPC shape as
+  // radarNotify/leagueNotify above, but routed to the OTHER team's own
+  // PlayerIndex instance (their Telegram association lives there, keyed by
+  // their address) rather than a fixed room. This file stays unaware of
+  // Telegram entirely: PlayerIndex.notifyTurnReady decides whether that
+  // address actually has it connected/enabled, this just reports "this
+  // address's turn is now ready".
+  //
+  // No-op if address is null (e.g. team A's very first shot, before B has
+  // even joined — there's no opponent to notify yet).
+  //
+  // Idempotency: every call site below sits inside a branch already guarded
+  // by a check on PERSISTED match state (this.match.pendingShots[team],
+  // lastManche.seenBy — see 'shot'/'completeRound' in onMessage) that makes
+  // the surrounding mutation itself impossible to run twice for the same
+  // logical transition, whether the repeat comes from a client retry, a
+  // reconnect, or this Durable Object cold-starting and reloading `match`
+  // from storage. Since the notify call only ever executes as a side effect
+  // of that same one-shot mutation, it inherits the same guarantee — no
+  // separate dedup flag needed, same reasoning radarNotify's own comment
+  // above already relies on for Radar's events.
+  notifyTurnReady(address, matchId) {
+    if (!address || !this.env?.PlayerIndex) return;
+    this.playerIndex(address)
+      .then((stub) => stub.notifyTurnReady({ matchId }))
+      .catch((err) => console.error('[week] notifyTurnReady failed:', err));
+  }
+
   async onConnect(connection, ctx) {
     await this.ready();
     const url = new URL(ctx.request.url);
@@ -405,6 +433,12 @@ export class WeekArbiter extends Server {
       // today" on every day they actually play, without re-counting the
       // match itself as started again.
       this.radarNotify('recordPlayerActive', { address: team === 'A' ? this.match.playerA : this.match.playerB, timestampMs: Date.now() });
+      // The OTHER team's turn just became actionable — either they can now
+      // aim (this was the first of the two shots) or their reveal is now
+      // ready (this was the second) — turnLabelFor treats both the same way
+      // (see that function's own comment), and so does the notification.
+      const oppTeam = otherTeam(team);
+      this.notifyTurnReady(oppTeam === 'A' ? this.match.playerA : this.match.playerB, this.name);
       await Promise.all([this.pushIndexUpdate('A'), this.pushIndexUpdate('B')]);
       this.send(connection, { type: 'shotAccepted', ...this.snapshotFor(team) });
       return;
@@ -460,6 +494,11 @@ export class WeekArbiter extends Server {
         && this.match.lastManche && !this.match.lastManche.seenBy[team];
       if (this.match.status !== 'active' && !pendingFinalAck) return;
       const bothIn = !!(this.match.pendingShots.A && this.match.pendingShots.B);
+      // Set inside the bothIn branch below, read after this.persist() — see
+      // that call site's own comment for why the notify itself has to wait
+      // until the resolved manche is actually durable, not just mutated
+      // in-memory.
+      let turnReadyAddress = null;
       if (bothIn) {
         const scoredTeam = msg.scoredTeam === 'A' || msg.scoredTeam === 'B' ? msg.scoredTeam : null;
         if (scoredTeam === 'A') this.match.scoreA += 1;
@@ -520,6 +559,17 @@ export class WeekArbiter extends Server {
         };
         this.match.round += 1;
         this.match.pendingShots = { A: null, B: null };
+        // The OTHER team's reveal just became ready — whether this manche
+        // continues the current point or (per explicit product decision)
+        // ends the whole match, either way it's something the other side
+        // needs to come back and watch. Captured here (not after the outer
+        // if/else-if below) because only a freshly-resolved manche is a real
+        // transition for them — the else-if branch just below is this SAME
+        // team belatedly acking an already-resolved reveal, which changes
+        // nothing about the other team's own state. The actual notify call
+        // is deferred to after this.persist() below, not fired here — see
+        // that call site's own comment.
+        turnReadyAddress = team === 'A' ? this.match.playerB : this.match.playerA;
       } else if (this.match.lastManche && !this.match.lastManche.seenBy[team]) {
         this.match.lastManche.seenBy[team] = true;
       } else {
@@ -575,6 +625,23 @@ export class WeekArbiter extends Server {
         }
       }
       await this.persist();
+      // Fired only now, after the resolved manche (pendingShots reset,
+      // lastManche/round/score) is durably persisted — not back where it was
+      // decided, inside the bothIn branch above. This matters: if this
+      // Durable Object were evicted between deciding and persisting, a
+      // retried completeRound would still see the pre-resolution state and
+      // legitimately re-enter that branch, re-running the mutation. Once
+      // persist() above has actually completed, though, that can never
+      // happen again for this same manche — the reloaded state already
+      // shows pendingShots cleared, so a later retry falls through to the
+      // else-if/else branches instead and never reaches this line a second
+      // time. And if persist() itself never completed (the crash landed
+      // before this line), this line was never reached either, so nothing
+      // was sent to double up on. Either way, by the time this call happens,
+      // it can only ever happen once per real manche resolution — same
+      // guarantee 'shot' above already has, restored here by matching its
+      // persist-then-notify order.
+      if (turnReadyAddress) this.notifyTurnReady(turnReadyAddress, this.name);
       if (matchOver) {
         // Not both at once any more: removing the row of a player who still
         // has the final reveal to watch takes away their only route back to

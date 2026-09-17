@@ -16,7 +16,7 @@ import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, se
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets, setModeSelectVibeBackground } from './background.js';
-import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, checkWeekMatchExists, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress } from './net.js';
+import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, checkWeekMatchExists, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress, fetchTelegramStatus, startTelegramLink, setTelegramNotifyEnabled, disconnectTelegram, TELEGRAM_NOTIFY_BOT_USERNAME } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
@@ -2053,7 +2053,73 @@ modeJoinCode.addEventListener('click', () => { audio.play('button'); showJoinCod
 joinCodeBackBtn.addEventListener('click', () => {
   audio.play('button');
   joinCodeOverlay.classList.add('hidden');
+  notifPanel.classList.add('hidden');
   returnToModeSelect();
+});
+
+// ---- Notifications panel (party/playerIndex.js, party/telegramLink.js) —
+// the small 🔔 popover next to MY MATCHES' own header (see index.html's own
+// comment). Status is fetched lazily, only when the bell is actually opened
+// — My Matches itself already refreshes on every visit to this screen, no
+// need for this panel to add its own request to that same page load.
+const notifBellBtn = document.getElementById('notifBellBtn');
+const notifPanel = document.getElementById('notifPanel');
+const notifPanelClose = document.getElementById('notifPanelClose');
+const notifSwitch = document.getElementById('notifSwitch');
+const notifTelegramRow = document.getElementById('notifTelegramRow');
+let notifStatus = { connected: false, notifyTurnEnabled: false };
+
+function renderNotifPanel() {
+  notifSwitch.setAttribute('aria-checked', String(notifStatus.notifyTurnEnabled));
+  notifTelegramRow.innerHTML = notifStatus.connected
+    ? `<span class="notif-telegram-connected">Connected to Telegram</span>
+       <button class="notif-telegram-disconnect" id="notifDisconnectBtn" type="button" aria-label="Disconnect Telegram">
+         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+       </button>`
+    : `<button class="notif-telegram-connect" id="notifConnectBtn" type="button">Connect Telegram</button>`;
+  document.getElementById('notifConnectBtn')?.addEventListener('click', startTelegramConnect);
+  document.getElementById('notifDisconnectBtn')?.addEventListener('click', async () => {
+    audio.play('button');
+    await disconnectTelegram(hubAddress);
+    notifStatus = { connected: false, notifyTurnEnabled: false };
+    renderNotifPanel();
+  });
+}
+
+async function refreshNotifStatus() {
+  if (!hubAddress) return;
+  notifStatus = await fetchTelegramStatus(hubAddress);
+  renderNotifPanel();
+}
+
+// Opens the bot's own Telegram deep link with a fresh one-time token (see
+// party/telegramLink.js) — a new tab/app switch, not something this page can
+// detect the outcome of, so the panel just re-checks status next time it's
+// opened rather than trying to await the link completing here.
+async function startTelegramConnect() {
+  audio.play('button');
+  if (!hubAddress) return;
+  const token = await startTelegramLink(hubAddress);
+  if (!token) return;
+  window.open(`https://t.me/${TELEGRAM_NOTIFY_BOT_USERNAME}?start=${token}`, '_blank');
+}
+
+notifBellBtn.addEventListener('click', () => {
+  audio.play('button');
+  notifPanel.classList.toggle('hidden');
+  if (!notifPanel.classList.contains('hidden')) refreshNotifStatus();
+});
+notifPanelClose.addEventListener('click', () => { notifPanel.classList.add('hidden'); });
+notifSwitch.addEventListener('click', async () => {
+  audio.play('button');
+  // Connected while OFF and OFF while not connected are both real states —
+  // but turning ON with nothing to deliver through would silently do
+  // nothing, so route that case into Connect instead (per explicit spec:
+  // "guide them to connect Telegram rather than silently failing").
+  if (!notifStatus.connected) { await startTelegramConnect(); return; }
+  const next = !notifStatus.notifyTurnEnabled;
+  const res = await setTelegramNotifyEnabled(hubAddress, next);
+  if (res.ok) { notifStatus.notifyTurnEnabled = next; renderNotifPanel(); }
 });
 // About (index.html's #navAbout/#aboutOverlay) — static info screen, same
 // show/hide dance as Replay's own sidebar entry above (guarded the same way

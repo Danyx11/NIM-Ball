@@ -66,6 +66,30 @@ Then register the webhook once (replace the two placeholders):
 curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://nim-ball.nim-ball.workers.dev/radar/telegram-webhook&secret_token=<TELEGRAM_WEBHOOK_SECRET>"
 ```
 
+### WEEK Telegram turn notifications
+
+A player can opt into a private Telegram DM ("🥌 Your turn / Your WEEK match is waiting for you.") the moment the server decides their WEEK turn is ready — entry point is the 🔔 next to My Matches' own header (`index.html`'s `#joinCodeOverlay`, `src/main.js`'s `renderNotifPanel`/`refreshNotifStatus`/`startTelegramConnect`). Uses a **separate** Telegram bot from the one above (that one stays a personal ops tool — Radar reports + the LIVE desync alert — and is never DM'd out to players); this bot only ever sends turn-ready DMs and never needs to be looked at.
+
+Two Durable Object classes, both new alongside the five existing ones (`wrangler.jsonc`'s `v5` migration):
+- **`PlayerIndex`** (`party/playerIndex.js`, already the per-wallet-address DO backing My Matches) gained a `telegram: { chatId, connectedAt, notifyTurnEnabled }` field — the permanent association, since this instance is already "this player's own stuff". `setTelegram`/`clearTelegram`/`setNotifyEnabled` are called by RPC (from `TelegramLink` and `WeekArbiter` respectively); `notifyTurnReady({ matchId })` is the notification entry point, a no-op unless `telegram.chatId` and `notifyTurnEnabled` are both set. Its `onRequest` grew three routes alongside the two pre-existing ones (`GET` -> matches dict, `DELETE ?code=` -> remove one match), all gated behind a `telegram` query param so the originals are untouched: `GET ?telegram=1` (status), `POST ?telegram=toggle` (the switch), `DELETE ?telegram=1` (disconnect — clears the association only, never touches the Telegram conversation itself, the Nimiq identity, or any match).
+- **`TelegramLink`** (`party/telegramLink.js`) is a single fixed-name instance (same pattern as `RadarCollector`/`LeagueSeason`) holding only short-lived (10 min), single-use linking tokens — `token -> address`, deleted on first use regardless of outcome. It exists purely to solve linking's bootstrap problem: the deep-link flow deliberately never puts the wallet address in the Telegram URL (an opaque random token is the only thing exposed), so the webhook — which only ever learns a Telegram `chat.id` — needs *something* global to resolve that token back to an address before it can hand off to that address's own `PlayerIndex`.
+
+**Linking flow**: client (already has `hubAddress`, same "no auth beyond knowing the address" trust model as every other WEEK endpoint — see `party/playerIndex.js`'s own comment) does `POST /parties/telegram-link/start?address=<addr>` → gets `{ token }` → opens `https://t.me/<bot>?start=<token>`. Telegram POSTs the update to `/notify/telegram-webhook` (`party/index.js`'s `handleNotifyWebhook`, verified against its own `TELEGRAM_NOTIFY_WEBHOOK_SECRET` — a **different** secret from Radar's `TELEGRAM_WEBHOOK_SECRET`, on a different bot); only a well-formed `/start <token>` is ever acted on, from any chat id (unlike Radar's webhook, which only accepts commands from its one fixed admin `TELEGRAM_CHAT_ID` — this one has no such allowlist by design, since the whole point is previously-unknown chats reaching it). The webhook resolves the token via `TelegramLink#completeLink`, which RPCs `PlayerIndex#setTelegram` (notifications start **ON**) and sends a short confirmation DM.
+
+**Trigger seam** (`party/weekArbiter.js`'s `notifyTurnReady(address, matchId)`, same RPC shape as `radarNotify`/`leagueNotify`): called from exactly two places in `onMessage`, both already one-shot-guarded by the same persisted-state checks that make the surrounding mutation itself impossible to double-run (a client retry/reconnect/DO cold-start all fall into an early `return` before ever reaching these calls — see that method's own comment, same reasoning `radarNotify` already documents for Radar) — no separate idempotency flag needed:
+- in `'shot'`, right after `pendingShots[team]` is set — notifies the OTHER team (their aim, or their reveal if this was the second shot).
+- in `'completeRound'`'s `bothIn` branch, right after a manche actually resolves — notifies the OTHER team's now-ready reveal, whether or not this manche also ends the match (deliberately placed inside that branch, not the sibling `else if` where a team belatedly acks an already-resolved reveal — that changes nothing for the other side).
+
+**Setup** (separate from Radar's bot/secrets above): create the notifications bot via [@BotFather](https://t.me/BotFather), then:
+```bash
+npx wrangler secret put TELEGRAM_NOTIFY_BOT_TOKEN
+npx wrangler secret put TELEGRAM_NOTIFY_WEBHOOK_SECRET   # any long random string, must match the setWebhook call below
+```
+```bash
+curl "https://api.telegram.org/bot<TELEGRAM_NOTIFY_BOT_TOKEN>/setWebhook?url=https://nim-ball.nim-ball.workers.dev/notify/telegram-webhook&secret_token=<TELEGRAM_NOTIFY_WEBHOOK_SECRET>"
+```
+Also set `src/net.js`'s `TELEGRAM_NOTIFY_BOT_USERNAME` to the real `@BotFather` username (a public identifier, not a secret — needed client-side to build the deep link) and redeploy the frontend.
+
 ## Architecture
 
 This is a 2-player physics game rendered on a single `<canvas>`, playable locally (Pass & Play, vs AI) or against a remote opponent (LIVE, WEEK — see "Production remote backend" below; Duel LAN is a dev-only extra, see "LAN mode"). Almost all gameplay logic lives in one file, `src/game.js` (~7,500 lines), structured as one big `startGame()` closure with no external state/rendering libraries — it's plain Canvas2D + `requestAnimationFrame`.
