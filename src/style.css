@@ -2651,7 +2651,12 @@ button:disabled { opacity: 0.35; cursor: default; }
 .config-panel.mode-joincode .notif-panel-close,
 .config-panel.mode-joincode .notif-telegram-disconnect { color: var(--bg-deep); }
 .config-panel.mode-joincode .notif-panel-desc { color: rgba(11,31,42,0.7); }
-.config-panel.mode-joincode .notif-switch::after { background: var(--bg-deep); }
+.config-panel.mode-joincode .notif-switch-knob { background: var(--bg-deep); }
+/* "OFF" sits on the pale translucent-white track (same low-contrast problem
+   every other literal-white element on this green panel already needed
+   fixing for) — "ON" stays as-is, it's already dark text on solid gold
+   regardless of panel theme (set directly in the base rule above). */
+.config-panel.mode-joincode .notif-switch-label-off { color: rgba(11,31,42,0.7); }
 /* Symmetric side padding reserves the exit button's own footprint
    (top-right, see .config-back below) on both sides, so centering the
    title+icon within this narrower box keeps it visually centered in the
@@ -2731,20 +2736,41 @@ button:disabled { opacity: 0.35; cursor: default; }
 .notif-panel-title { margin: 0 0 6px; font-size: 16px; font-weight: 700; }
 .notif-panel-desc { margin: 0 0 16px; font-size: 13px; color: rgba(255,255,255,0.7); }
 .notif-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; margin-bottom: 14px; }
-/* Two-state pill toggle — [aria-checked] (not a class) drives the slid
-   state, so a screen reader's own state and the visual one can never drift
-   apart. */
+/* Two-state pill toggle — [aria-checked] (not a class) drives both the slid
+   knob and which ON/OFF label shows, so a screen reader's own state and the
+   visual one can never drift apart. Widened from the old knob-only 44px to
+   fit real "ON"/"OFF" text legibly (per explicit request: the plain knob
+   read as unclear, and didn't visibly move). padding:0 — without it, the
+   base `button` rule's own padding:10px 20px wins over this fixed width on
+   a flex-item button with no normal-flow content (same bug already fixed
+   on .notif-bell-btn/.notif-panel-close — every child here is
+   position:absolute specifically so none of them count toward intrinsic
+   content size either). */
 .notif-switch {
-  flex: none; width: 44px; height: 26px; border-radius: 13px;
+  flex: none; width: 58px; height: 28px; padding: 0; border-radius: 14px;
   background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.25);
   position: relative; transition: background .15s ease, border-color .15s ease;
 }
-.notif-switch::after {
-  content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%;
-  background: #fff; transition: transform .15s ease;
+.notif-switch-knob {
+  position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  transition: transform .18s ease;
 }
+/* 58 - 22 (knob) - 2*2 (top/left inset, mirrored on the right) = 30px travel. */
+.notif-switch[aria-checked="true"] .notif-switch-knob { transform: translateX(30px); }
+.notif-switch-label {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center;
+  font-size: 9px; font-weight: 800; letter-spacing: 0.4px; color: rgba(255,255,255,0.8);
+  transition: opacity .15s ease; pointer-events: none;
+}
+/* Each label sits on the side the knob ISN'T covering, and only the current
+   state's label is visible — "ON" appears once the knob has moved right and
+   freed the left side, "OFF" only while the knob still sits on the left. */
+.notif-switch-label-on { left: 7px; opacity: 0; }
+.notif-switch-label-off { right: 7px; opacity: 1; }
 .notif-switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
-.notif-switch[aria-checked="true"]::after { transform: translateX(18px); }
+.notif-switch[aria-checked="true"] .notif-switch-label-on { opacity: 1; color: #3a2900; }
+.notif-switch[aria-checked="true"] .notif-switch-label-off { opacity: 0; }
 .notif-telegram-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .notif-telegram-connected { flex: 1; color: rgba(255,255,255,0.85); }
 .notif-telegram-connect {
