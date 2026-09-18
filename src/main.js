@@ -22,7 +22,7 @@ import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimO
 import { PARTNERSHIP_PAYMENT_ADDRESS } from './partnership.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets, setModeSelectVibeBackground } from './background.js';
-import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, checkWeekMatchExists, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress, fetchTelegramStatus, startTelegramLink, setTelegramNotifyEnabled, disconnectTelegram, TELEGRAM_NOTIFY_BOT_USERNAME, fetchPartnershipWeeks, reservePartnershipWeeks, releasePartnershipWeeks, confirmPartnershipPayment } from './net.js';
+import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, checkWeekMatchExists, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress, fetchTelegramStatus, startTelegramLink, setTelegramNotifyEnabled, disconnectTelegram, TELEGRAM_NOTIFY_BOT_USERNAME, fetchPartnershipWeeks, reservePartnershipWeeks, releasePartnershipWeeks, confirmPartnershipPayment, uploadPartnershipBanner } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
@@ -2494,10 +2494,68 @@ function renderPartnershipBook(step, ctx = {}) {
     partnershipBookContent.innerHTML = `
       <h2>${ctx.weekIds.length === 1 ? 'Your week is booked' : 'Your weeks are booked'}</h2>
       <p>${ctx.weekIds.map((id) => formatWeekRange(partnershipWeeksById[id].weekStart, partnershipWeeksById[id].weekEnd)).join(' · ')}</p>
+      <div class="partnership-banner-upload">
+        <p class="partnership-banner-hint">Recommended: 1600 × 200 px<br>PNG or WebP · max 1 MB</p>
+        <div class="partnership-banner-drop" id="partnershipBannerDrop">
+          <img id="partnershipBannerPreview" class="partnership-banner-preview hidden" alt="">
+          <span id="partnershipBannerDropLabel">Drop your banner here, or choose a file</span>
+        </div>
+        <input type="file" id="partnershipBannerInput" accept="image/png,image/webp" hidden>
+        <p class="lan-error" id="partnershipBannerError"></p>
+        <button class="bigbtn" id="partnershipBannerUploadBtn" disabled>Upload banner</button>
+      </div>
       <button class="bigbtn" id="partnershipDoneBtn">Done</button>
     `;
     document.getElementById('partnershipDoneBtn').addEventListener('click', hidePartnershipScreen);
+    wirePartnershipBannerUpload(ctx.weekIds);
   }
+}
+const PARTNERSHIP_BANNER_MAX_BYTES = 1024 * 1024;
+const PARTNERSHIP_BANNER_TYPES = ['image/png', 'image/webp'];
+// Client-side checks are a UX convenience only — party/partnership.js's
+// uploadBanner() re-validates size and, more importantly, the REAL file
+// bytes (never trusting a spoofed .type) before ever writing to R2, so
+// nothing here needs to be airtight. Uploads the same file to every week in
+// this booking batch (one sponsor banner covers the whole purchase, not one
+// per week) — see conversation.
+function wirePartnershipBannerUpload(weekIds) {
+  let selectedFile = null;
+  const drop = document.getElementById('partnershipBannerDrop');
+  const input = document.getElementById('partnershipBannerInput');
+  const preview = document.getElementById('partnershipBannerPreview');
+  const label = document.getElementById('partnershipBannerDropLabel');
+  const errorEl = document.getElementById('partnershipBannerError');
+  const uploadBtn = document.getElementById('partnershipBannerUploadBtn');
+  function pickFile(file) {
+    errorEl.textContent = '';
+    if (!file) return;
+    if (!PARTNERSHIP_BANNER_TYPES.includes(file.type)) { errorEl.textContent = 'Must be a PNG or WebP image.'; return; }
+    if (file.size > PARTNERSHIP_BANNER_MAX_BYTES) { errorEl.textContent = 'File is too large (max 1 MB).'; return; }
+    selectedFile = file;
+    preview.src = URL.createObjectURL(file);
+    preview.classList.remove('hidden');
+    label.classList.add('hidden');
+    uploadBtn.disabled = false;
+  }
+  drop.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => pickFile(input.files[0]));
+  ['dragover', 'dragenter'].forEach((evt) => drop.addEventListener(evt, (e) => { e.preventDefault(); drop.classList.add('dragover'); }));
+  ['dragleave', 'drop'].forEach((evt) => drop.addEventListener(evt, (e) => { e.preventDefault(); drop.classList.remove('dragover'); }));
+  drop.addEventListener('drop', (e) => pickFile(e.dataTransfer.files && e.dataTransfer.files[0]));
+  uploadBtn.addEventListener('click', () => {
+    if (!selectedFile) return;
+    audio.play('button');
+    uploadBtn.disabled = true;
+    errorEl.textContent = '';
+    Promise.all(weekIds.map((id) => uploadPartnershipBanner(id, hubAddress, selectedFile))).then((results) => {
+      const failed = results.find((r) => !r.ok);
+      if (failed) { errorEl.textContent = partnershipErrorMessage(failed.error); uploadBtn.disabled = false; return; }
+      label.textContent = 'Banner uploaded ✓';
+      label.classList.remove('hidden');
+      uploadBtn.textContent = 'Replace banner';
+      uploadBtn.disabled = false;
+    });
+  });
 }
 // Server errors are short machine-readable strings (party/partnership.js's
 // own confirmPayment/reserve) — fine to show as-is, this is the one spot

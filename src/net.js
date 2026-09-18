@@ -410,6 +410,29 @@ export function confirmPartnershipPayment({ weekIds, wallet, paymentTx, sponsorN
   return postPartnership('confirm', { weekIds, wallet, paymentTx, sponsorName });
 }
 
+// Raw binary POST (not JSON like every other action above) — the file's own
+// bytes are the body, weekId/wallet ride along as query params since
+// there's no multipart form here to carry them as fields. `file` is a
+// browser File/Blob; its declared .type is sent as Content-Type purely as a
+// hint — party/partnership.js's uploadBanner() re-derives the real type
+// from the bytes themselves and ignores this header for validation.
+export async function uploadPartnershipBanner(weekId, wallet, file) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/partnership/${PARTNERSHIP_ROOM_NAME}?action=uploadBanner&weekId=${encodeURIComponent(weekId)}&wallet=${encodeURIComponent(wallet)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+    return await res.json();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+export function partnershipBannerUrl(weekId) {
+  return `${weekHttpHost()}/parties/partnership/${PARTNERSHIP_ROOM_NAME}?banner=${encodeURIComponent(weekId)}`;
+}
+
 // ---------------------------------------------------------------------
 // WEEK turn-notification linking (party/telegramLink.js, party/playerIndex.js,
 // see CLAUDE.md's WEEK Telegram section) — the Notifications panel behind My

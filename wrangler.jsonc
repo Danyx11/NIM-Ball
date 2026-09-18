@@ -66,4 +66,12 @@
     "NIMIQ_RPC_URL": "https://rpc.nimiqwatch.com",
     "PARTNERSHIP_PAYMENT_ADDRESS": "NQ55 YBJ1 QDMF KHT2 25PJ KVAT YTVD 2JHE RHX7",
   },
+  // Sponsor banner storage (party/partnership.js's uploadBanner/getBanner) —
+  // the bucket itself must exist in Cloudflare before this binding resolves
+  // (`wrangler r2 bucket create nim-ball-partnership-banners`, a real cloud
+  // resource, not created automatically by this config); `wrangler dev`
+  // emulates it locally with no such step needed.
+  "r2_buckets": [
+    { "binding": "PARTNERSHIP_BANNERS", "bucket_name": "nim-ball-partnership-banners" },
+  ],
 }

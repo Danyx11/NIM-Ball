@@ -1974,6 +1974,29 @@ button:disabled { opacity: 0.35; cursor: default; }
 .partnership-week-tile.selected { background: var(--accent); border-color: var(--accent); color: #3a2900; }
 .partnership-week-tile.disabled { opacity: 0.45; cursor: default; }
 .partnership-week-status { font-size: 12px; font-weight: 600; opacity: 0.85; }
+/* Banner upload on the 'booked' step (main.js's wirePartnershipBannerUpload)
+   — same translucent-white/dashed-drop-zone idea as the tiles above, sized
+   for the recommended 1600x200 (8:1) banner rather than copied from
+   #replayUploadBox (that one's a whole separate tinted overlay panel; this
+   lives inside the existing .mode-connect blue panel). No generic .hidden
+   utility class exists in this file (see conversation) — every element
+   scopes its own, same convention #helpBtn.hidden/.nq-connect-btn.hidden
+   already use, so these get their own two rules below. */
+.partnership-banner-hint { font-size: 12px; line-height: 1.4; opacity: 0.8; margin: 2px 0 8px; }
+.partnership-banner-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; min-height: 70px; padding: 14px; border-radius: 14px; cursor: pointer;
+  background: rgba(255,255,255,0.1); border: 2px dashed rgba(255,255,255,0.35);
+  font-size: 13px; font-weight: 600; text-align: center;
+  transition: border-color .15s ease, background .15s ease;
+}
+.partnership-banner-drop.dragover { border-color: var(--accent); background: rgba(233,178,19,0.18); }
+.partnership-banner-preview { max-width: 100%; max-height: 60px; border-radius: 6px; }
+.partnership-banner-preview.hidden { display: none; }
+#partnershipBannerDropLabel.hidden { display: none; }
+.partnership-banner-upload { display: flex; flex-direction: column; align-items: center; width: 100%; margin: 6px 0; }
+.partnership-banner-upload .bigbtn { margin-top: 10px; }
+.partnership-banner-upload .bigbtn:disabled { opacity: 0.5; cursor: default; }
 /* Remote Match's 3 sub-screens (see main.js's showNetPanel) rebuild
    #matchNetworkContent's innerHTML from scratch on every screen change, so a
    fresh entrance for its button(s) needs no JS bookkeeping — new DOM nodes
