@@ -2074,6 +2074,15 @@ const notifPanelClose = document.getElementById('notifPanelClose');
 const notifSwitch = document.getElementById('notifSwitch');
 const notifTelegramRow = document.getElementById('notifTelegramRow');
 let notifStatus = { connected: false, notifyTurnEnabled: false };
+// Notifications need Telegram deep-linking, which stays unusable inside
+// Nimiq Pay (see startTelegramConnect's own comment below for the full
+// investigation — window.open/tg://Telegram Web-in-WebView are all
+// confirmed broken there, and it's an acknowledged host-level gap, not
+// something fixable from here — per explicit decision, hide the entry
+// point entirely there rather than ship a button that leads nowhere).
+// Desktop and any other browser context (including a plain mobile browser
+// outside Nimiq Pay, where the flow already works) are untouched.
+if (window.nimiqPay) notifBellBtn.classList.add('hidden');
 
 function renderNotifPanel() {
   notifSwitch.setAttribute('aria-checked', String(notifStatus.notifyTurnEnabled));
@@ -2798,13 +2807,44 @@ navHowTo.addEventListener('click', () => {
   else hideHowToScreen();
 });
 
-// "Find a player" (sidebar) / "Telegram" (inside Info) — same external
-// destination, the NimiCurl Telegram channel (see conversation), just two
-// different entry points/framings. Plain external link, opened in a new tab
-// rather than navigating this one away from a live match.
+// "Find a player" (sidebar) / "Telegram" (inside Info) / "Find a match"
+// (League panel) — same external destination, the NimiCurl Telegram
+// channel (see conversation), just three different entry points/framings.
+// Plain external link, opened in a new tab rather than navigating this one
+// away from a live match.
+//
+// Inside Nimiq Pay, window.open() is confirmed broken the same way it is
+// for WEEK's own Telegram connect flow (see startTelegramConnect's own
+// comment, and CLAUDE.md) — every t.me link shares this WebView limitation,
+// not just that feature. Rather than leave the button doing nothing there,
+// show the link itself in a small pill (#tgLinkPill) so the player can read
+// it and switch to Telegram themselves (confirmed acceptable — see
+// conversation), same workaround another Nimiq Mini App developer
+// independently landed on for the identical platform gap. Tried an
+// automatic navigator.clipboard.writeText() + label-swap feedback first
+// (see git history) — on-device testing showed clipboard writes ALSO fail
+// there, and worse, the failure label ("Copy failed") stuck in place of the
+// nav item's own text instead of reverting. This still attempts the copy
+// silently as a bonus (nothing user-visible depends on its outcome
+// anymore), but the pill's readable text is what actually carries the
+// feature now — the nav item itself is never touched.
 const NIMICURL_TELEGRAM_URL = 'https://t.me/Nimicurl';
+const tgLinkPill = document.getElementById('tgLinkPill');
+let tgLinkPillTimer = null;
+function showTgLinkPill() {
+  navigator.clipboard.writeText(NIMICURL_TELEGRAM_URL).catch(() => {}); // best-effort, see comment above
+  tgLinkPill.textContent = NIMICURL_TELEGRAM_URL;
+  tgLinkPill.classList.remove('hidden');
+  clearTimeout(tgLinkPillTimer);
+  tgLinkPillTimer = setTimeout(() => tgLinkPill.classList.add('hidden'), 4000);
+}
+tgLinkPill.addEventListener('click', () => tgLinkPill.classList.add('hidden'));
 function openNimicurlTelegram() {
   audio.play('button');
+  if (window.nimiqPay) {
+    showTgLinkPill();
+    return;
+  }
   window.open(NIMICURL_TELEGRAM_URL, '_blank', 'noopener,noreferrer');
 }
 document.getElementById('navFindPlayer').addEventListener('click', openNimicurlTelegram);
