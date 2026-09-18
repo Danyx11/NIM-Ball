@@ -65,14 +65,31 @@ export function getStaticMarkImage(kind) {
   return staticMarkCache.get(kind);
 }
 
-export async function getStaticMarkPngDataUrl(kind, bgColor, size = 512) {
+// The baked mark art is plain white — solid white on the gold floor read too
+// harsh/glaring (see conversation), so every consumer recolors it per the
+// floor it's about to sit on instead (navy on gold, left white on blue).
+// `source-in` swaps the icon's own color while keeping its alpha shape,
+// same trick used elsewhere for recoloring flat art.
+export async function getTintedMarkCanvas(kind, color, size = 512) {
   const img = await getStaticMarkImage(kind);
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, size, size);
+  ctx.globalCompositeOperation = 'source-in';
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, size, size);
+  return canvas;
+}
+
+export async function getStaticMarkPngDataUrl(kind, bgColor, iconColor, size = 512) {
+  const mark = await getTintedMarkCanvas(kind, iconColor, size);
   const canvas = document.createElement('canvas');
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = bgColor;
   ctx.fillRect(0, 0, size, size);
-  ctx.drawImage(img, 0, 0, size, size);
+  ctx.drawImage(mark, 0, 0, size, size);
   return canvas.toDataURL('image/png');
 }
 

@@ -6,7 +6,7 @@
 // still resolve when the app is served from a subpath, e.g. GitHub Pages at
 // https://danyx11.github.io/NIM-Ball/.
 import { audio } from './audio.js';
-import { getIdenticonCanvasStoneBust, getIdenticonPngDataUrl, getIdenticonBgColor, getStaticMarkImage, getStaticMarkPngDataUrl } from './identicons.js';
+import { getIdenticonCanvasStoneBust, getIdenticonPngDataUrl, getIdenticonBgColor, getTintedMarkCanvas, getStaticMarkPngDataUrl } from './identicons.js';
 import { COLORS } from './colors.js';
 import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
 import { isBasicLaser } from './settings.js';
@@ -296,7 +296,7 @@ export function startGame(opts = {}) {
     return address.length <= 8 ? address : `${address.slice(0, 3)}…${address.slice(-3)}`;
   }
   // Guest/Bot detection for the static-mark identicon swap (see
-  // identicons.js's getStaticMarkImage/getStaticMarkPngDataUrl) — isBot is
+  // identicons.js's getTintedMarkCanvas/getStaticMarkPngDataUrl) — isBot is
   // just `team === aiTeam` (aiTeam is always 'B', see main.js), isGuest
   // reuses the exact "Guest " prefix convention ticket.js's own
   // resolveTeamDisplay already relies on (IDENTICON_LABEL is only ever
@@ -307,6 +307,12 @@ export function startGame(opts = {}) {
   function isGuestTeam(team) { return !isBotTeam(team) && (IDENTICON_LABEL[team] || '').startsWith('Guest'); }
   function staticMarkKind(team) { return isBotTeam(team) ? 'bot' : isGuestTeam(team) ? 'guest' : null; }
   function teamAccentColor(team) { return team === 'A' ? COLORS.teamA : COLORS.teamB; }
+  // Solid white on team B's gold floor read too harsh/glaring (see
+  // conversation) — navy there instead, still plain white on team A's blue
+  // floor where the contrast was already fine. Only ever applies to the
+  // static Guest/Bot marks above (a real per-address identicon keeps its
+  // own colors, untouched).
+  function staticMarkIconColor(team) { return team === 'B' ? COLORS.bgDeep : '#ffffff'; }
   function identityLabelFor(team) {
     if (IDENTICON_LABEL[team]) return IDENTICON_LABEL[team];
     if (isBotTeam(team)) return 'AI';
@@ -620,9 +626,9 @@ export function startGame(opts = {}) {
   for (const team of ['A', 'B']) {
     const markKind = staticMarkKind(team);
     if (markKind) {
-      getStaticMarkImage(markKind).then((img) => {
+      getTintedMarkCanvas(markKind, staticMarkIconColor(team)).then((canvas) => {
         identiconBgColors[team] = teamAccentColor(team);
-        identiconSources[team] = mirrorForTeamB(team, img);
+        identiconSources[team] = mirrorForTeamB(team, canvas);
         tryBakeBubble(team);
       });
     } else {
@@ -2526,7 +2532,7 @@ export function startGame(opts = {}) {
   Promise.all(['A', 'B'].map((team) => {
     const markKind = staticMarkKind(team);
     return markKind
-      ? getStaticMarkPngDataUrl(markKind, teamAccentColor(team), 128)
+      ? getStaticMarkPngDataUrl(markKind, teamAccentColor(team), staticMarkIconColor(team), 128)
       : getIdenticonPngDataUrl(IDENTICON_ADDRESS[team], 128);
   })).then(([a, b]) => { chatAvatarUrl.A = a; chatAvatarUrl.B = b; });
   // Two independent native scrollbars (chatFeedB starts +32px lower than
@@ -4172,7 +4178,7 @@ export function startGame(opts = {}) {
   function fillResultIdenticon(team) {
     const markKind = staticMarkKind(team);
     const urlPromise = markKind
-      ? getStaticMarkPngDataUrl(markKind, teamAccentColor(team), RESULT_IDENTICON_SIZE)
+      ? getStaticMarkPngDataUrl(markKind, teamAccentColor(team), staticMarkIconColor(team), RESULT_IDENTICON_SIZE)
       : getIdenticonPngDataUrl(IDENTICON_ADDRESS[team], RESULT_IDENTICON_SIZE);
     urlPromise.then((url) => {
       const img = document.getElementById('goalIdenticonImg');
