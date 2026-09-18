@@ -2731,6 +2731,10 @@ button:disabled { opacity: 0.35; cursor: default; }
   display: flex; align-items: center; justify-content: center;
   transition: background .15s ease, border-color .15s ease;
 }
+/* This codebase has no generic bare .hidden{display:none} utility (see
+   style.css's own note elsewhere) — main.js's window.nimiqPay check needs
+   its own rule here to actually hide the bell inside Nimiq Pay. */
+#notifBellBtn.hidden { display: none; }
 .notif-bell-btn:hover { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.4); }
 /* Explicit size, not left to the flex box — a viewBox'd SVG with no CSS
    width/height of its own collapses to a sliver in a flex-centered button
@@ -2977,6 +2981,24 @@ button:disabled { opacity: 0.35; cursor: default; }
   display: inline-flex; align-items: center; gap: 6px;
 }
 .league-rules-btn svg { width: 14px; height: 14px; opacity: 0.55; }
+/* "Here's the link" pill (index.html/main.js's copyNimicurlTelegramLink) —
+   same white-pill look as .league-beta-pill/.league-rules-btn just above,
+   reused here even though this element isn't League-specific (it's the
+   Nimiq-Pay-only fallback for Find a player/Telegram/Find a match, all
+   outside League's own panel most of the time) — just borrowing the same
+   established "pill" visual language, not actually part of that panel.
+   Fixed/centered so it works identically regardless of which of the three
+   buttons triggered it. */
+.tg-link-pill {
+  position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%);
+  z-index: 500; max-width: 86vw;
+  background: #fff; color: var(--nb-100);
+  border-radius: 999px; box-shadow: 0 6px 20px rgba(0,0,0,0.3), 0 0 0 1px rgba(31,35,72,0.08);
+  padding: 12px 22px; font-family: 'Fira Mono', monospace; font-size: 13px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer;
+}
+.tg-link-pill.hidden { display: none; }
 /* This device's own row (main.js's renderLeagueMeStats — same LEAGUE_MOCK_MAIN
    "me" row the ranking list already flags, points still placeholder pending
    the real backend). A pill like the rank rows themselves; win/loss/streak
