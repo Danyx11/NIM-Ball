@@ -2117,18 +2117,28 @@ async function refreshNotifStatus() {
 // the host before this page's own script ever runs, whenever it's genuinely
 // running inside Nimiq Pay (see @nimiq/mini-app-sdk's own doc comment on
 // getHostLanguage) — a reliable way to tell that environment apart from
-// every other context, where a top-level navigation (location.href) is used
-// instead: the one mechanism every mobile OS/WebView already knows how to
-// intercept and route to the installed Telegram app (a universal/app link),
-// popup support or not.
+// every other context.
+//
+// Inside Nimiq Pay, a plain https://t.me/... link (tried first, see git
+// history) still rendered as Telegram Web INSIDE Nimiq Pay's own WebView
+// instead of handing off to the real Telegram app — the chat appeared, but
+// its "START" button is a Telegram Web-side JS interaction that silently
+// never fired there (reported: visible, unresponsive to taps), same shell
+// that already blocks window.prompt()/confirm()/window.open(). The tg://
+// URI scheme is not something any WebView knows how to render itself, so
+// there's nothing for it to try rendering in-shell — the OS resolves it
+// directly to the installed Telegram app instead, skipping the broken
+// in-WebView Telegram Web render entirely.
 async function startTelegramConnect() {
   audio.play('button');
   if (!hubAddress) return;
   const token = await startTelegramLink(hubAddress);
   if (!token) return;
-  const url = `https://t.me/${TELEGRAM_NOTIFY_BOT_USERNAME}?start=${token}`;
-  if (window.nimiqPay) window.location.href = url;
-  else window.open(url, '_blank');
+  if (window.nimiqPay) {
+    window.location.href = `tg://resolve?domain=${TELEGRAM_NOTIFY_BOT_USERNAME}&start=${token}`;
+  } else {
+    window.open(`https://t.me/${TELEGRAM_NOTIFY_BOT_USERNAME}?start=${token}`, '_blank');
+  }
 }
 
 notifBellBtn.addEventListener('click', () => {
