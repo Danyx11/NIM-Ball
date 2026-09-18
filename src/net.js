@@ -403,8 +403,11 @@ async function postPartnership(action, body) {
 
 export function reservePartnershipWeeks(weekIds, wallet) { return postPartnership('reserve', { weekIds, wallet }); }
 export function releasePartnershipWeeks(weekIds, wallet) { return postPartnership('release', { weekIds, wallet }); }
-export function confirmPartnershipPayment({ weekIds, wallet, paymentTx, amountLuna, sponsorName }) {
-  return postPartnership('confirm', { weekIds, wallet, paymentTx, amountLuna, sponsorName });
+// No amount is sent here any more — party/partnership.js verifies the real
+// on-chain value against the price it itself locked in at reserve() time,
+// never a client-reported number (see that file's own confirmPayment comment).
+export function confirmPartnershipPayment({ weekIds, wallet, paymentTx, sponsorName }) {
+  return postPartnership('confirm', { weekIds, wallet, paymentTx, sponsorName });
 }
 
 // ---------------------------------------------------------------------

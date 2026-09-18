@@ -5,20 +5,63 @@
 // for "is this week free" — see reserve() below for how two concurrent
 // requests for the same week are kept from both succeeding.
 //
-// Scope note (see conversation): this class only tracks reservation state.
-// It does NOT verify payment on-chain yet — confirmPayment() below currently
-// trusts whatever paymentTx/amountLuna the client reports, same shape as
-// every other "trust the client, RPC/room-key IS the boundary" spot already
-// documented in this codebase (party/radar.js, party/playerIndex.js's own
-// header comments) — except this one gates a real paid feature, not just
-// analytics or a display label, so it must be hardened with a real on-chain
-// check before this ever goes live. That hardening is a deliberately
-// separate next step, not done here.
+// confirmPayment() below verifies the reported paymentTx against the real
+// Nimiq chain (existence, confirmations, sender, recipient, value, reuse) —
+// see that method's own comment for exactly what "verified" means here.
+// This is the ONE class in this codebase that gates a real paid feature, so
+// it deliberately does NOT follow the "RPC/room-key IS the trust boundary"
+// pattern party/radar.js/party/playerIndex.js document for themselves.
 import { Server } from 'partyserver';
 
 export const PARTNERSHIP_ROOM_NAME = 'v1';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Pricing model duplicated from src/partnership.js's own constant (not
+// imported — party/ is a separate Cloudflare Worker bundle from the browser
+// build, same "duplicate small pure constants, keep in sync by hand" reason
+// src/net.js's LEAGUE_SEASON_ID already documents for itself). The SERVER's
+// own copy is the one that matters here: it's what reserve() below actually
+// locks a price against, never a client-supplied number.
+const PARTNERSHIP_WEEKLY_USD = 10;
+const LUNA_PER_NIM = 1e5;
+
+// Public, keyless, CORS-open (server-side fetch anyway, so CORS wouldn't
+// matter, but this is the exact same endpoint src/partnership.js's
+// quotePartnership() already verified working — see that file's own
+// comment on why CryptoCompare, getExchangeRates' default provider, is
+// unusable at all: it has no Access-Control-Allow-Origin header, which
+// blocks browsers but NOT a server-to-server fetch like this one. Kept as
+// a plain fetch rather than importing @nimiq/utils here — one endpoint, no
+// need for that package's full provider abstraction in this bundle.
+const COINGECKO_NIM_USD_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=nimiq-2&vs_currencies=usd';
+
+// Default public Nimiq Albatross RPC node used to verify a reported payment
+// transaction — see confirmPayment()'s own comment. Overridable via
+// wrangler.jsonc's `vars.NIMIQ_RPC_URL` (this default has "no uptime
+// guarantees" per its own operator, nimiqwatch.com — swap it for a
+// dedicated/self-hosted node before relying on this for real money at
+// scale, no code change needed, just the var).
+const DEFAULT_NIMIQ_RPC_URL = 'https://rpc.nimiqwatch.com';
+
+// How many blocks must confirm a transaction before it's trusted enough to
+// finalize a booking. Albatross blocks land roughly every ~1s (observed:
+// see conversation), so this is roughly a 20s wait — a confirmation-COUNT
+// safety margin against the RPC node's own view of the chain reorganizing,
+// not a claim about Albatross's macro-block finality proofs specifically.
+// Tune up if a deeper margin is wanted; this is not a protocol constant.
+const REQUIRED_CONFIRMATIONS = 20;
+
+const RPC_TIMEOUT_MS = 10_000;
+
+// Same normalization src/net.js's normalizeAddress does client-side
+// (duplicated for the same cross-bundle reason as PARTNERSHIP_WEEKLY_USD
+// above) — addresses arrive from three different sources here (the
+// reserving client, the RPC node's own user-friendly-formatted from/to
+// fields, and wrangler.jsonc's configured recipient) that must compare
+// equal regardless of which one happens to have the usual space-separated
+// grouping and which doesn't.
+function normalizeAddress(address) { return typeof address === 'string' ? address.replace(/\s+/g, '').toUpperCase() : address; }
 
 // How long a `payment_pending` reservation holds its week(s) before they're
 // released back to available. Long enough to actually complete a wallet
@@ -71,6 +114,48 @@ function upcomingWeeks(count) {
   return weeks;
 }
 
+// Throws on any failure (network, timeout, missing price) — reserve() below
+// treats "couldn't get a trustworthy price" as "fail the reservation", never
+// as "fall back to some other number".
+// Workers' fetch() sends no User-Agent by default — verified live that
+// CoinGecko's public API 403s a request with no/empty User-Agent (basic
+// bot defense), so this has to be set explicitly; any non-empty value works.
+const FETCH_USER_AGENT = 'NimiCurl-Partnership-Worker/1.0';
+
+async function fetchNimUsdRate() {
+  const res = await fetch(COINGECKO_NIM_USD_URL, { headers: { 'User-Agent': FETCH_USER_AGENT }, signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`CoinGecko rate fetch failed: ${res.status}`);
+  const json = await res.json();
+  const rate = json?.['nimiq-2']?.usd;
+  if (!rate) throw new Error('NIM/USD rate unavailable');
+  return rate;
+}
+
+// Returns the RPC node's transaction record, or null if the node reports it
+// simply doesn't exist (not yet broadcast/mined, or never will be) — every
+// OTHER failure (network error, timeout, malformed response, any other RPC
+// error) throws instead of returning null, so confirmPayment() below can't
+// mistake "the node is unreachable right now" for "this transaction was
+// never sent". See this file's own header comment for where the shape of
+// the returned object comes from (core-rs-albatross's rpc-interface
+// Transaction/ExecutedTransaction types — verified live against
+// rpc.nimiqwatch.com, see conversation).
+async function fetchNimiqTransaction(rpcUrl, hash) {
+  const res = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': FETCH_USER_AGENT },
+    body: JSON.stringify({ jsonrpc: '2.0', method: 'getTransactionByHash', params: [hash], id: 1 }),
+    signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`Nimiq RPC HTTP ${res.status}`);
+  const body = await res.json();
+  if (body.error) {
+    if (typeof body.error.data === 'string' && body.error.data.startsWith('Transaction not found')) return null;
+    throw new Error(body.error.message || 'Nimiq RPC error');
+  }
+  return body.result?.data || null;
+}
+
 export class Partnership extends Server {
   onStart() {
     this._loaded = (async () => {
@@ -82,6 +167,13 @@ export class Partnership extends Server {
       // (see conversation), this schema just already has the field so that
       // addition won't need a migration of existing rows.
       this.bookings = (await this.ctx.storage.get('bookings')) || {};
+      // paymentTx (normalized to lowercase hex, hashes have no case-sensitive
+      // meaning) -> { weekIds, wallet, confirmedAt } — the reuse guard
+      // confirmPayment() checks/writes inside the same serialized() call
+      // that reads it, which is what makes two confirmPayment calls racing
+      // on the SAME tx hash resolve to exactly one winner (see that
+      // method's own comment).
+      this.usedTxHashes = (await this.ctx.storage.get('usedTxHashes')) || {};
     })();
     // Same single-writer-queue pattern as party/radar.js/leagueSeason.js's
     // onStart — two reserve()/confirmPayment() calls landing close together
@@ -102,6 +194,7 @@ export class Partnership extends Server {
   }
 
   async persist() { await this.ctx.storage.put('bookings', this.bookings); }
+  async persistUsedTxHashes() { await this.ctx.storage.put('usedTxHashes', this.usedTxHashes); }
 
   // Releases any payment_pending booking whose hold has lapsed back to
   // available (simply deleting its entry — "available" is just "no entry
@@ -153,6 +246,13 @@ export class Partnership extends Server {
   // is reserved — a partial reservation would let a client silently end up
   // sponsoring a different week than the one they thought they were paying
   // for.
+  //
+  // Locks a price in Luna, computed from THIS SERVER's own rate lookup
+  // (never a client-supplied amount) — confirmPayment() later verifies the
+  // real on-chain transaction value against exactly this stored number, per
+  // week reserved. A client that only wants to display a price can already
+  // do so via src/partnership.js's own quotePartnership(); this is the
+  // authoritative copy the money actually gets checked against.
   reserve({ weekIds, wallet }) {
     return this.serialized(async () => {
       await this.ready();
@@ -164,16 +264,24 @@ export class Partnership extends Server {
       if (unknown.length) return { ok: false, error: 'unknown weekId', weekIds: unknown };
       const conflicts = uniqueIds.filter((id) => this.bookings[id]);
       if (conflicts.length) return { ok: false, error: 'already booked', weekIds: conflicts };
+      let rateUsdPerNim;
+      try {
+        rateUsdPerNim = await fetchNimUsdRate();
+      } catch (err) {
+        return { ok: false, error: `price lookup failed: ${err.message}` };
+      }
+      const pricePerWeekLuna = Math.round((PARTNERSHIP_WEEKLY_USD / rateUsdPerNim) * LUNA_PER_NIM);
       const now = Date.now();
       const pendingExpiresAt = now + PENDING_TTL_MS;
       for (const weekId of uniqueIds) {
         this.bookings[weekId] = {
           weekId, status: 'payment_pending', wallet, sponsorName: null, banner: null,
-          paymentTx: null, amount: null, createdAt: now, pendingExpiresAt,
+          paymentTx: null, amount: null, expectedAmountLuna: pricePerWeekLuna,
+          createdAt: now, pendingExpiresAt,
         };
       }
       await this.persist();
-      return { ok: true, weekIds: uniqueIds, pendingExpiresAt };
+      return { ok: true, weekIds: uniqueIds, pendingExpiresAt, amountLuna: pricePerWeekLuna * uniqueIds.length };
     });
   }
 
@@ -199,35 +307,79 @@ export class Partnership extends Server {
     });
   }
 
-  // NOT on-chain-verified yet (see this file's header comment) — trusts the
-  // client-reported paymentTx/amountLuna as-is. Still enforces every check
-  // that doesn't require touching the chain: the booking must exist, must
-  // still be this exact wallet's own pending hold, and must not have already
-  // expired out from under it.
-  confirmPayment({ weekIds, wallet, paymentTx, amountLuna, sponsorName }) {
+  // Verifies `paymentTx` against the real Nimiq chain before ever marking a
+  // reservation paid — see this file's header comment for why this class,
+  // unlike every other small Durable Object here, can't just trust whatever
+  // the client reports. Checks, in order (any failure returns without
+  // touching booking state):
+  //   1. the booking(s) still exist, are payment_pending, and belong to
+  //      this exact wallet (same ownership check as before this task)
+  //   2. paymentTx hasn't already been used to confirm some other
+  //      reservation (this file's own usedTxHashes map, race-safe because
+  //      the check AND the write happen inside this same serialized() call)
+  //   3. the transaction actually exists on-chain (fetchNimiqTransaction)
+  //   4. it has at least REQUIRED_CONFIRMATIONS — returns a distinct
+  //      { ok:false, error:'pending', confirmations, required } rather than
+  //      confirming, so a caller can poll/retry instead of being told the
+  //      payment failed
+  //   5. it executed successfully (executionResult)
+  //   6. sender == the reservation's own wallet, recipient == this Worker's
+  //      configured PARTNERSHIP_PAYMENT_ADDRESS (never the client's say-so
+  //      for either)
+  //   7. value == the exact amount reserve() locked in for this batch
+  //      (sum of each week's own expectedAmountLuna — never a client-
+  //      supplied amount at all any more, see reserve()'s own comment)
+  // `sponsorName` is the one field still taken from the client as-is
+  // (sanitized/length-capped) — it's a display label the sponsor picks for
+  // themselves, not something that gates money, same trust level as a
+  // player's own claimed NimConnect handle elsewhere in this codebase.
+  confirmPayment({ weekIds, wallet, paymentTx, sponsorName }) {
     return this.serialized(async () => {
       await this.ready();
       this.sweepExpired();
       if (!wallet || !Array.isArray(weekIds) || weekIds.length === 0) return { ok: false, error: 'invalid request' };
       if (!paymentTx || typeof paymentTx !== 'string') return { ok: false, error: 'paymentTx required' };
-      if (!Number.isFinite(amountLuna) || amountLuna <= 0) return { ok: false, error: 'invalid amountLuna' };
       const invalid = weekIds.filter((id) => {
         const booking = this.bookings[id];
         return !booking || booking.status !== 'payment_pending' || booking.wallet !== wallet;
       });
       if (invalid.length) return { ok: false, error: 'not your pending reservation', weekIds: invalid };
+
+      const normalizedHash = paymentTx.trim().toLowerCase();
+      if (this.usedTxHashes[normalizedHash]) return { ok: false, error: 'transaction already used' };
+
+      let tx;
+      try {
+        tx = await fetchNimiqTransaction(this.env?.NIMIQ_RPC_URL || DEFAULT_NIMIQ_RPC_URL, normalizedHash);
+      } catch (err) {
+        return { ok: false, error: `verification failed: ${err.message}` };
+      }
+      if (!tx) return { ok: false, error: 'transaction not found' };
+      const confirmations = tx.confirmations || 0;
+      if (confirmations < REQUIRED_CONFIRMATIONS) {
+        return { ok: false, error: 'pending', confirmations, required: REQUIRED_CONFIRMATIONS };
+      }
+      if (!tx.executionResult) return { ok: false, error: 'transaction execution failed' };
+      if (normalizeAddress(tx.from) !== normalizeAddress(wallet)) return { ok: false, error: 'sender mismatch' };
+      const expectedRecipient = this.env?.PARTNERSHIP_PAYMENT_ADDRESS;
+      if (!expectedRecipient) return { ok: false, error: 'server misconfigured: no payment address' };
+      if (normalizeAddress(tx.to) !== normalizeAddress(expectedRecipient)) return { ok: false, error: 'recipient mismatch' };
+      const expectedTotal = weekIds.reduce((sum, id) => sum + (this.bookings[id].expectedAmountLuna || 0), 0);
+      if (tx.value !== expectedTotal) return { ok: false, error: 'amount mismatch', expected: expectedTotal, actual: tx.value };
+
       const cleanSponsorName = typeof sponsorName === 'string' ? sponsorName.trim().slice(0, MAX_SPONSOR_NAME_LEN) : null;
       for (const weekId of weekIds) {
         this.bookings[weekId] = {
           ...this.bookings[weekId],
           status: 'paid',
-          paymentTx,
-          amount: amountLuna,
+          paymentTx: normalizedHash,
+          amount: tx.value,
           sponsorName: cleanSponsorName || null,
           pendingExpiresAt: null,
         };
       }
-      await this.persist();
+      this.usedTxHashes[normalizedHash] = { weekIds, wallet, confirmedAt: Date.now() };
+      await Promise.all([this.persist(), this.persistUsedTxHashes()]);
       return { ok: true, weekIds };
     });
   }
@@ -238,7 +390,7 @@ export class Partnership extends Server {
   //   GET  ?wallet=<address>                              -> { weeks: [...] }
   //   POST ?action=reserve  {weekIds, wallet}              -> reserve()
   //   POST ?action=release  {weekIds, wallet}              -> release()
-  //   POST ?action=confirm  {weekIds, wallet, paymentTx, amountLuna, sponsorName} -> confirmPayment()
+  //   POST ?action=confirm  {weekIds, wallet, paymentTx, sponsorName}        -> confirmPayment()
   async onRequest(request) {
     await this.ready();
     const cors = { 'Access-Control-Allow-Origin': '*' };

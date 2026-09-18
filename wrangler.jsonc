@@ -53,4 +53,17 @@
   "triggers": {
     "crons": ["*/15 * * * *"],
   },
+  // Plain (non-secret) Worker env vars — party/partnership.js's confirmPayment
+  // reads these via this.env. Neither value is sensitive (a public RPC
+  // endpoint, a public wallet address), so `vars` here rather than
+  // `wrangler secret put` — same reasoning src/partnership.js's own
+  // VITE_PARTNERSHIP_PAYMENT_ADDRESS comment gives for the frontend's copy
+  // of this same address. PARTNERSHIP_PAYMENT_ADDRESS below is currently the
+  // address used for the supervised real-wallet test (see conversation), NOT
+  // the production recipient — replace before this goes live, same caveat
+  // as the frontend's .env.example.
+  "vars": {
+    "NIMIQ_RPC_URL": "https://rpc.nimiqwatch.com",
+    "PARTNERSHIP_PAYMENT_ADDRESS": "NQ55 YBJ1 QDMF KHT2 25PJ KVAT YTVD 2JHE RHX7",
+  },
 }
