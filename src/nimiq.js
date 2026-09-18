@@ -196,6 +196,7 @@ function isCancellationMessage(message) {
 // partnership.js's quotePartnership) — this function never computes or
 // re-quotes an amount itself.
 export async function sendNimPayment({ recipient, valueLuna }) {
+  if (!recipient) throw new Error('Missing recipient address.');
   if (!Number.isInteger(valueLuna) || valueLuna <= 0) {
     throw new Error(`Invalid payment amount: ${valueLuna}`);
   }
