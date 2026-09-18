@@ -24,6 +24,10 @@
       // class, same reasoning again: alongside every binding above, never
       // folded into them.
       { "name": "TelegramLink", "class_name": "TelegramLink" },
+      // Partnership sponsor-week booking (party/partnership.js) — a seventh
+      // class, same reasoning again: alongside every binding above, never
+      // folded into them.
+      { "name": "Partnership", "class_name": "Partnership" },
     ],
   },
   // new_sqlite_classes (not new_classes) — required for Durable Objects on
@@ -40,6 +44,7 @@
     { "tag": "v3", "new_sqlite_classes": ["RadarCollector"] },
     { "tag": "v4", "new_sqlite_classes": ["LeagueSeason"] },
     { "tag": "v5", "new_sqlite_classes": ["TelegramLink"] },
+    { "tag": "v6", "new_sqlite_classes": ["Partnership"] },
   ],
   // Drives RadarCollector#maybeSendDailyReport (party/radar.js) — a coarse
   // 15-minute tick is enough since that method itself re-checks the current

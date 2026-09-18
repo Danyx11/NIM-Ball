@@ -367,6 +367,46 @@ export async function fetchLeagueWeeklyLeaderboard(limit = 20) {
   }
 }
 
+// Partnership booking (party/partnership.js) — single fixed room, same
+// weekHttpHost() plain-fetch shape as League above. Booking state, not
+// payment verification (see that file's own header comment) — these are
+// thin wrappers, every actual rule (availability, ownership, expiry) lives
+// server-side.
+const PARTNERSHIP_ROOM_NAME = 'v1'; // must match party/partnership.js's own PARTNERSHIP_ROOM_NAME
+
+// Best-effort like fetchLeagueLeaderboard — returns an empty list on any
+// failure so a future week-picker panel can render a "couldn't load" state
+// instead of throwing.
+export async function fetchPartnershipWeeks(wallet) {
+  try {
+    const q = wallet ? `?wallet=${encodeURIComponent(wallet)}` : '';
+    const res = await fetch(`${weekHttpHost()}/parties/partnership/${PARTNERSHIP_ROOM_NAME}${q}`);
+    if (!res.ok) return { weeks: [] };
+    return await res.json();
+  } catch {
+    return { weeks: [] };
+  }
+}
+
+async function postPartnership(action, body) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/partnership/${PARTNERSHIP_ROOM_NAME}?action=${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return await res.json();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+export function reservePartnershipWeeks(weekIds, wallet) { return postPartnership('reserve', { weekIds, wallet }); }
+export function releasePartnershipWeeks(weekIds, wallet) { return postPartnership('release', { weekIds, wallet }); }
+export function confirmPartnershipPayment({ weekIds, wallet, paymentTx, amountLuna, sponsorName }) {
+  return postPartnership('confirm', { weekIds, wallet, paymentTx, amountLuna, sponsorName });
+}
+
 // ---------------------------------------------------------------------
 // WEEK turn-notification linking (party/telegramLink.js, party/playerIndex.js,
 // see CLAUDE.md's WEEK Telegram section) — the Notifications panel behind My
