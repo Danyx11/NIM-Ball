@@ -23,8 +23,15 @@ import {
 const ASSET_BASE = import.meta.env.BASE_URL;
 const POLAROID_SRC = `${ASSET_BASE}ticket/polaroid.webp`;
 const BANNER_SRC = `${ASSET_BASE}ticket/banner-nimiq-space.webp`;
-const GUEST_BLUE_SRC = `${ASSET_BASE}ticket/guest-blue.webp`;
-const GUEST_YELLOW_SRC = `${ASSET_BASE}ticket/guest-yellow.webp`;
+// Rounded-hexagon identicons for identities that aren't a real wallet
+// address — a guest (blue for team A, gold for team B, matching each side's
+// own accent color) or the built-in AI opponent (always team B, so a single
+// gold version covers it — see main.js's aiTeam: 'B'). Same silhouette/bot
+// mark + hex geometry as src/identicons.js's static marks, just baked with
+// the hex background for this specific hex-icon slot on the ticket art.
+const GUEST_BLUE_SRC = `${ASSET_BASE}ticket/guest-hex-blue.webp`;
+const GUEST_YELLOW_SRC = `${ASSET_BASE}ticket/guest-hex-gold.webp`;
+const BOT_YELLOW_SRC = `${ASSET_BASE}ticket/bot-hex-gold.webp`;
 
 const W = TICKET_W, H = TICKET_H;
 
@@ -35,7 +42,7 @@ let assetsPromise = null;
 export function preloadTicketAssets() {
   if (!assetsPromise) {
     assetsPromise = Promise.all([
-      loadImage(POLAROID_SRC), loadImage(BANNER_SRC), loadImage(GUEST_BLUE_SRC), loadImage(GUEST_YELLOW_SRC),
+      loadImage(POLAROID_SRC), loadImage(BANNER_SRC), loadImage(GUEST_BLUE_SRC), loadImage(GUEST_YELLOW_SRC), loadImage(BOT_YELLOW_SRC),
     ]);
   }
   return assetsPromise;
@@ -82,8 +89,11 @@ function formatDuration(ms) {
 // (no override — fall back to the raw address), "@handle" (a claimed
 // NimConnect handle), or "Guest 4821" (this device's guest code). Only ever
 // populated for whichever team this device's own identity controls — the
-// opponent/AI side normally has no label, same as today.
+// opponent/AI side normally has no label, same as today. team.isAI is set
+// explicitly by game.js's showVictory() (team === aiTeam), since vs-AI is
+// entirely local and never carries a label of its own.
 function resolveTeamDisplay(team) {
+  if (team.isAI) return { isAI: true, text: 'AI' };
   if (team.label?.startsWith('Guest')) return { isGuest: true, text: team.label };
   if (team.label) return { isGuest: false, text: team.label };
   return { isGuest: false, text: shortenAddress(team.address) };
@@ -161,7 +171,7 @@ function drawLeagueStamp(ctx, lp) {
 
 export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winner, stats, points = [], leagueLp = null }) {
   await document.fonts.ready;
-  const [[polaroidImg, bannerImg, guestBlueImg, guestYellowImg], identiconA, identiconB] = await Promise.all([
+  const [[polaroidImg, bannerImg, guestBlueImg, guestYellowImg, botYellowImg], identiconA, identiconB] = await Promise.all([
     preloadTicketAssets(),
     getIdenticonCanvas(teamA.address),
     getIdenticonCanvas(teamB.address),
@@ -181,14 +191,16 @@ export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winn
   const dispA = resolveTeamDisplay(teamA), dispB = resolveTeamDisplay(teamB);
   const addrFont = `600 ${Math.round(17 * SCALE)}px ${FONT}`;
   const addrBaseline = (cy) => cy + 6 * SCALE;
-  if (dispA.isGuest) drawContainedImage(ctx, guestBlueImg, ICON_A_CX, ICON_A_CY, ICON_A_R);
+  if (dispA.isAI) drawContainedImage(ctx, botYellowImg, ICON_A_CX, ICON_A_CY, ICON_A_R);
+  else if (dispA.isGuest) drawContainedImage(ctx, guestBlueImg, ICON_A_CX, ICON_A_CY, ICON_A_R);
   else drawCircularImage(ctx, identiconA, ICON_A_CX, ICON_A_CY, ICON_A_R);
   ctx.textAlign = 'right';
   ctx.font = addrFont;
   ctx.fillStyle = INK;
   ctx.fillText(dispA.text, ICON_A_CX - ICON_A_R - ADDR_GAP, addrBaseline(ICON_A_CY));
 
-  if (dispB.isGuest) drawContainedImage(ctx, guestYellowImg, ICON_B_CX, ICON_B_CY, ICON_B_R);
+  if (dispB.isAI) drawContainedImage(ctx, botYellowImg, ICON_B_CX, ICON_B_CY, ICON_B_R);
+  else if (dispB.isGuest) drawContainedImage(ctx, guestYellowImg, ICON_B_CX, ICON_B_CY, ICON_B_R);
   else drawCircularImage(ctx, identiconB, ICON_B_CX, ICON_B_CY, ICON_B_R);
   ctx.textAlign = 'left';
   ctx.fillText(dispB.text, ICON_B_CX + ICON_B_R + ADDR_GAP, addrBaseline(ICON_B_CY));
