@@ -54,6 +54,23 @@ const REQUIRED_CONFIRMATIONS = 20;
 
 const RPC_TIMEOUT_MS = 10_000;
 
+// Recommended 1600x200 (see src/main.js's upload copy) is a suggestion, not
+// enforced here — only what actually matters for safety/storage is: real
+// image bytes, one of two formats, under this size.
+const MAX_BANNER_BYTES = 1 * 1024 * 1024; // 1 MB
+
+// Never trusts the client's declared Content-Type (spec: "do not allow
+// arbitrary HTML/JS content through the banner system") — sniffs the actual
+// file signature instead, so a renamed .html/.svg-with-script can't pass as
+// an image just because the browser said so. Returns the REAL content type
+// to store/serve, or null to reject.
+function sniffImageType(bytes) {
+  const b = new Uint8Array(bytes);
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47 && b[4] === 0x0D && b[5] === 0x0A && b[6] === 0x1A && b[7] === 0x0A) return 'image/png';
+  if (b.length >= 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+  return null;
+}
+
 // Same normalization src/net.js's normalizeAddress does client-side
 // (duplicated for the same cross-bundle reason as PARTNERSHIP_WEEKLY_USD
 // above) — addresses arrive from three different sources here (the
@@ -384,13 +401,57 @@ export class Partnership extends Server {
     });
   }
 
+  // Only for an already-PAID week owned by this exact wallet — never a
+  // pending/available one, so there's nothing to gain by uploading before
+  // paying. `bytes` is the raw request body (ArrayBuffer, see onRequest);
+  // this method never trusts the client's declared content type, only what
+  // sniffImageType() finds in the actual bytes (see this file's header on
+  // why: arbitrary HTML/JS content must never pass as an "image"). Re-
+  // uploading replaces the previous banner (same R2 key, overwritten) —
+  // no separate "delete" needed.
+  uploadBanner({ weekId, wallet, bytes }) {
+    return this.serialized(async () => {
+      await this.ready();
+      this.sweepExpired();
+      const booking = this.bookings[weekId];
+      if (!booking || booking.status !== 'paid' || booking.wallet !== wallet) {
+        return { ok: false, error: 'not your booked week' };
+      }
+      if (!bytes || bytes.byteLength === 0) return { ok: false, error: 'empty file' };
+      if (bytes.byteLength > MAX_BANNER_BYTES) return { ok: false, error: 'file too large (max 1 MB)' };
+      const contentType = sniffImageType(bytes);
+      if (!contentType) return { ok: false, error: 'must be a real PNG or WebP image' };
+      if (!this.env?.PARTNERSHIP_BANNERS) return { ok: false, error: 'server misconfigured: no banner storage' };
+      const key = `partnership/${weekId}.${contentType === 'image/png' ? 'png' : 'webp'}`;
+      await this.env.PARTNERSHIP_BANNERS.put(key, bytes, { httpMetadata: { contentType } });
+      this.bookings[weekId] = { ...booking, banner: { key, contentType, uploadedAt: Date.now() } };
+      await this.persist();
+      return { ok: true, weekId, contentType };
+    });
+  }
+
+  // Read-only, no ownership check — a booked week's banner is meant to be
+  // publicly visible in-game (spec: shown on every scored point and match
+  // ticket during that week), same trust level as sponsorName already has
+  // in publicWeek() above.
+  async getBanner(weekId) {
+    await this.ready();
+    const banner = this.bookings[weekId]?.banner;
+    if (!banner || !this.env?.PARTNERSHIP_BANNERS) return null;
+    const object = await this.env.PARTNERSHIP_BANNERS.get(banner.key);
+    if (!object) return null;
+    return { body: object.body, contentType: banner.contentType };
+  }
+
   // Plain HTTP surface for the browser (src/net.js) — no RPC callers yet
   // (unlike RadarCollector/LeagueSeason, nothing else in this Worker needs
   // to reach into Partnership state).
   //   GET  ?wallet=<address>                              -> { weeks: [...] }
+  //   GET  ?banner=<weekId>                                -> raw image bytes
   //   POST ?action=reserve  {weekIds, wallet}              -> reserve()
   //   POST ?action=release  {weekIds, wallet}              -> release()
   //   POST ?action=confirm  {weekIds, wallet, paymentTx, sponsorName}        -> confirmPayment()
+  //   POST ?action=uploadBanner&weekId=&wallet=  (raw image body)           -> uploadBanner()
   async onRequest(request) {
     await this.ready();
     const cors = { 'Access-Control-Allow-Origin': '*' };
@@ -398,8 +459,23 @@ export class Partnership extends Server {
       return new Response(null, { headers: { ...cors, 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type' } });
     }
     const url = new URL(request.url);
+    if (request.method === 'GET' && url.searchParams.has('banner')) {
+      const banner = await this.getBanner(url.searchParams.get('banner'));
+      if (!banner) return new Response('Not found', { status: 404, headers: cors });
+      // Cached at the edge — a banner is re-uploaded rarely (spec: overwrite
+      // replaces it) and every viewer during a scored point/ticket hits this
+      // same URL, so this is worth caching unlike the JSON routes above.
+      return new Response(banner.body, { headers: { ...cors, 'Content-Type': banner.contentType, 'Cache-Control': 'public, max-age=3600' } });
+    }
     if (request.method === 'GET') {
       return Response.json({ weeks: this.listWeeks(url.searchParams.get('wallet')) }, { headers: cors });
+    }
+    if (request.method === 'POST' && url.searchParams.get('action') === 'uploadBanner') {
+      const weekId = url.searchParams.get('weekId');
+      const wallet = url.searchParams.get('wallet');
+      const bytes = await request.arrayBuffer();
+      const result = await this.uploadBanner({ weekId, wallet, bytes });
+      return Response.json(result, { headers: cors });
     }
     if (request.method === 'POST') {
       let body = {};
