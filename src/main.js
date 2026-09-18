@@ -2119,26 +2119,41 @@ async function refreshNotifStatus() {
 // getHostLanguage) — a reliable way to tell that environment apart from
 // every other context.
 //
-// Inside Nimiq Pay, a plain https://t.me/... link (tried first, see git
-// history) still rendered as Telegram Web INSIDE Nimiq Pay's own WebView
-// instead of handing off to the real Telegram app — the chat appeared, but
-// its "START" button is a Telegram Web-side JS interaction that silently
-// never fired there (reported: visible, unresponsive to taps), same shell
-// that already blocks window.prompt()/confirm()/window.open(). The tg://
-// URI scheme is not something any WebView knows how to render itself, so
-// there's nothing for it to try rendering in-shell — the OS resolves it
-// directly to the installed Telegram app instead, skipping the broken
-// in-WebView Telegram Web render entirely.
+// Inside Nimiq Pay, neither approach tried so far has fully worked on its
+// own (see git history): a plain https://t.me/... link rendered as Telegram
+// Web INSIDE Nimiq Pay's own WebView instead of handing off to the real
+// Telegram app — the chat appeared, but its "START" button is a Telegram
+// Web-side JS interaction that silently never fired there. Switching to the
+// tg:// URI scheme (meant to skip that broken in-WebView render entirely,
+// since a WebView can't render a scheme it doesn't recognize) instead did
+// nothing at all — this specific WebView host apparently doesn't hand
+// unrecognized schemes off to the OS the way a full mobile browser would,
+// so the navigation attempt is just silently dropped.
+//
+// Rather than guess a third single approach blind, this tries both and
+// keeps whichever actually works: attempt tg:// first (a real <a> click,
+// not a location.href assignment — some WebView hosts only intercept
+// genuine link-activation navigations for scheme hand-off, not
+// script-driven ones), then, if the page hasn't been backgrounded shortly
+// after (a successful app switch fires visibilitychange — that's the only
+// signal script has for "did this actually leave the page"), fall back to
+// the https://t.me/... link so there's always at least SOME visible result
+// instead of the reported total silence.
 async function startTelegramConnect() {
   audio.play('button');
   if (!hubAddress) return;
   const token = await startTelegramLink(hubAddress);
   if (!token) return;
-  if (window.nimiqPay) {
-    window.location.href = `tg://resolve?domain=${TELEGRAM_NOTIFY_BOT_USERNAME}&start=${token}`;
-  } else {
-    window.open(`https://t.me/${TELEGRAM_NOTIFY_BOT_USERNAME}?start=${token}`, '_blank');
-  }
+  const webUrl = `https://t.me/${TELEGRAM_NOTIFY_BOT_USERNAME}?start=${token}`;
+  if (!window.nimiqPay) { window.open(webUrl, '_blank'); return; }
+  let handedOff = false;
+  document.addEventListener('visibilitychange', () => { handedOff = true; }, { once: true });
+  const a = document.createElement('a');
+  a.href = `tg://resolve?domain=${TELEGRAM_NOTIFY_BOT_USERNAME}&start=${token}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => { if (!handedOff) window.location.href = webUrl; }, 1200);
 }
 
 notifBellBtn.addEventListener('click', () => {
