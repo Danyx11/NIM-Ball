@@ -1270,12 +1270,51 @@
         <p>Nimicurl is one of the ways we want to make that experience even more accessible: by letting people discover Nimiq simply by playing a game with their friends.</p>
       </div>
     </div>
-    <!-- Shared placeholder panel for Partnership (index.html's
-         #navPartnership, wired in main.js) — same config-panel/mode-connect
-         shell + toggle-on-reclick principle as #aboutOverlay. League itself
-         moved to its own dedicated panel (#leagueOverlay), and its "Rules"
-         pill has its own dedicated panel too now (#leagueRulesOverlay,
-         further below) — neither reuses this shared placeholder any more. -->
+    <!-- Partnership (index.html's #navPartnership sidebar link, wired in
+         main.js) — same config-panel/mode-connect shell + config-lobby-
+         content convention as #aboutOverlay/#nimiqOverlay above. Its own
+         two-panel flow now (intro here, "Book a week" test flow in
+         #partnershipBookOverlay below) instead of the shared
+         #constructionOverlay placeholder every other unbuilt nav item
+         still uses — see that panel's own comment. Payment-architecture
+         test slice only (see conversation): real wallet, fixed test week
+         and fixed test amount, no week grid, no banner upload, no booking
+         backend yet. -->
+    <div id="partnershipOverlay" class="config-panel mode-connect hidden">
+      <button class="config-back" id="partnershipBackBtn" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="config-header">
+        <span class="config-mode-title">Partnership</span>
+      </div>
+      <div class="config-lobby-content">
+        <h2>Put your brand on the ice.</h2>
+        <p>Your banner appears on every scored point and match ticket during your selected week.</p>
+        <p class="about-tagline">$10 / WEEK</p>
+        <button class="bigbtn" id="partnershipBookBtn">Book a week</button>
+      </div>
+    </div>
+    <!-- Partnership week test (index.html's #partnershipOverlay "Book a
+         week" button, wired in main.js) — content filled dynamically by
+         main.js's showPartnershipTestStep(), same swap-innerHTML-per-step
+         convention as #claimHandleContent. -->
+    <div id="partnershipBookOverlay" class="config-panel mode-connect hidden">
+      <button class="config-back" id="partnershipBookBackBtn" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
+      <div class="config-header">
+        <span class="config-mode-title">Book a week</span>
+      </div>
+      <div class="config-lobby-content" id="partnershipBookContent"></div>
+    </div>
+    <!-- Shared placeholder panel for every other unbuilt nav item (index.html's
+         #navPartnership used to be one of these — see that panel's own
+         comment, it now has its own dedicated flow above) — same
+         config-panel/mode-connect shell + toggle-on-reclick principle as
+         #aboutOverlay. League itself moved to its own dedicated panel
+         (#leagueOverlay), and its "Rules" pill has its own dedicated panel
+         too now (#leagueRulesOverlay, further below) — neither reuses this
+         shared placeholder any more. -->
     <div id="constructionOverlay" class="config-panel mode-connect hidden">
       <button class="config-back" id="constructionBackBtn" type="button" aria-label="Back">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>

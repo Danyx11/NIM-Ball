@@ -170,3 +170,64 @@ export async function sendClaimTransaction({ recipient, extraData, extraDataByte
   });
   return { hash: signed?.hash };
 }
+
+// ---- Real-value NIM transfer (Partnership, see src/partnership.js) ----
+// sendClaimTransaction above is deliberately value:0 (a handle claim pays
+// only network fees). Partnership needs an actual transfer, so this is a
+// sibling function rather than a parameter added to that one — same
+// Pay-first-then-Hub-popup order (see sendClaimTransaction's own comment for
+// why), but a plain sendBasicTransaction/checkout with a non-zero `value`
+// and no extraData.
+//
+// Cancellation vs. a genuine wallet/provider error: neither @nimiq/mini-app-
+// sdk's provider.d.ts nor @nimiq/hub-api's shipped types document a stable
+// machine-readable "user cancelled" signal (the mini-app-sdk provider
+// resolves cancellation as an ErrorResponse with a free-text message; the
+// Hub checkout popup lives on hub.nimiq.com, outside this package, so its
+// rejection shape can't be verified from the installed SDK alone). This is
+// a best-effort heuristic on the error text — confirmed against real wallet
+// behavior before shipping to production, not a documented contract.
+function isCancellationMessage(message) {
+  return typeof message === 'string' && /cancel|reject|denied|closed/i.test(message);
+}
+
+// value in Luna (the mini-app-sdk/hub-api convention — 1 NIM = 1e5 Luna, see
+// provider.d.ts). Callers pass an already-frozen amount (see
+// partnership.js's quotePartnership) — this function never computes or
+// re-quotes an amount itself.
+export async function sendNimPayment({ recipient, valueLuna }) {
+  if (!Number.isInteger(valueLuna) || valueLuna <= 0) {
+    throw new Error(`Invalid payment amount: ${valueLuna}`);
+  }
+  let provider = null;
+  try {
+    provider = await connectNimiq();
+    await provider.connect();
+  } catch {
+    provider = null;
+  }
+  if (provider) {
+    const result = await provider.sendBasicTransaction({ recipient, value: valueLuna });
+    if (result && typeof result === 'object' && result.error) {
+      const message = result.error.message || result.error.type;
+      const err = new Error(message || 'Transaction failed.');
+      err.cancelled = isCancellationMessage(message);
+      throw err;
+    }
+    return { hash: result };
+  }
+  try {
+    const signed = await getHubApi().checkout({
+      appName: 'NimiCurl',
+      sender: getStoredAddress(),
+      forceSender: true,
+      recipient,
+      value: valueLuna,
+    });
+    return { hash: signed?.hash };
+  } catch (err) {
+    const wrapped = new Error(err?.message || 'Transaction failed.');
+    wrapped.cancelled = isCancellationMessage(err?.message);
+    throw wrapped;
+  }
+}
