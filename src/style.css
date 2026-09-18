@@ -1993,7 +1993,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    navy passplay/solo tints, dark --bg-deep ink on the gold/green remote/
    replay tints) — same colors #modeOverlay's own mode-select tiles use for
    their labels, not the teamA/teamB accent colors. */
-.goal-address { font-size: 12px; word-break: break-all; max-width: 320px; }
+.goal-address { font-size: 12px; word-break: break-all; max-width: 320px; text-align: center; margin: 0 auto; }
 .goal-score { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
 .goal-score-sep { padding: 0 8px; }
 /* Sponsor banner at the bottom of the +1 goal panel (game.js's
