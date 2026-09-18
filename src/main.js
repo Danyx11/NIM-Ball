@@ -2106,12 +2106,29 @@ async function refreshNotifStatus() {
 // party/telegramLink.js) — a new tab/app switch, not something this page can
 // detect the outcome of, so the panel just re-checks status next time it's
 // opened rather than trying to await the link completing here.
+//
+// window.open() works fine in a plain browser tab (desktop or mobile, per
+// explicit confirmation) so it stays the default — but Nimiq Pay's Mini App
+// WebView has no popup/new-tab capability at all (same class of gap as
+// window.prompt()/confirm() silently not working there, see CLAUDE.md's
+// "Testing inside Nimiq Pay" and My Matches' own custom-dialog fix), so
+// window.open() there either no-ops or opens a window that can't actually
+// hand off to the Telegram app. window.nimiqPay is synchronously injected by
+// the host before this page's own script ever runs, whenever it's genuinely
+// running inside Nimiq Pay (see @nimiq/mini-app-sdk's own doc comment on
+// getHostLanguage) — a reliable way to tell that environment apart from
+// every other context, where a top-level navigation (location.href) is used
+// instead: the one mechanism every mobile OS/WebView already knows how to
+// intercept and route to the installed Telegram app (a universal/app link),
+// popup support or not.
 async function startTelegramConnect() {
   audio.play('button');
   if (!hubAddress) return;
   const token = await startTelegramLink(hubAddress);
   if (!token) return;
-  window.open(`https://t.me/${TELEGRAM_NOTIFY_BOT_USERNAME}?start=${token}`, '_blank');
+  const url = `https://t.me/${TELEGRAM_NOTIFY_BOT_USERNAME}?start=${token}`;
+  if (window.nimiqPay) window.location.href = url;
+  else window.open(url, '_blank');
 }
 
 notifBellBtn.addEventListener('click', () => {
