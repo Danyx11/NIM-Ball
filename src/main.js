@@ -2071,8 +2071,12 @@ let notifStatus = { connected: false, notifyTurnEnabled: false };
 
 function renderNotifPanel() {
   notifSwitch.setAttribute('aria-checked', String(notifStatus.notifyTurnEnabled));
+  // Both states render as a pill (per explicit request) — "Connected" is
+  // deliberately shorter than "Connect Telegram" below: it's a status badge
+  // next to its own disconnect icon, not a call to action, so it doesn't
+  // need to repeat "Telegram" (the panel is already Telegram-specific).
   notifTelegramRow.innerHTML = notifStatus.connected
-    ? `<span class="notif-telegram-connected">Connected to Telegram</span>
+    ? `<span class="notif-telegram-connected">Connected</span>
        <button class="notif-telegram-disconnect" id="notifDisconnectBtn" type="button" aria-label="Disconnect Telegram">
          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
        </button>`
@@ -2235,12 +2239,23 @@ const leagueRulesBackBtn = document.getElementById('leagueRulesBackBtn');
 // row: { rank, address, lp, matches, wins, losses, streak } from
 // party/leagueSeason.js's onRequest — no handle/name field, just the raw
 // wallet address, so display name resolution reuses this file's existing
-// handleCache/refreshHandleCache/shortenAddressCompact helpers (same as the
-// identity pill above) rather than a new resolution path. "me" highlighting
-// compares against hubAddress, normalized the same way src/net.js already
-// normalizes every address before it's ever stored server-side (Nimiq's
-// user-friendly address format is space-separated; row.address here never
-// is, since it came from that same normalization).
+// handleCache/refreshHandleCache helpers (same as the identity pill above)
+// rather than a new resolution path. "me" highlighting compares against
+// hubAddress, normalized the same way src/net.js already normalizes every
+// address before it's ever stored server-side (Nimiq's user-friendly
+// address format is space-separated; row.address here never is, since it
+// came from that same normalization).
+// Same visual convention as ticket.js's shortenAddress ("NQ16...1LJG" — the
+// format used everywhere else an unhandled address is shown to a player,
+// see conversation), NOT that function itself: it splits on whitespace and
+// falls back to the address unshortened when there's no space to split on,
+// which is exactly what row.address always is here — reusing it verbatim
+// would silently show the full address instead of a shortened one. This
+// takes the first/last 4 characters directly instead of the first/last
+// space-separated group.
+function shortenLeagueAddress(address) {
+  return address.length <= 9 ? address : `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
 function renderLeagueRankPill(el, rows, emptyText) {
   if (!rows || !rows.length) {
     el.innerHTML = `<div class="league-rank-empty">${emptyText}</div>`;
@@ -2249,7 +2264,7 @@ function renderLeagueRankPill(el, rows, emptyText) {
   const myAddress = hubAddress ? normalizeAddress(hubAddress) : null;
   el.innerHTML = rows.map((row) => {
     const cached = handleCache.get(row.address);
-    const label = cached?.handle ? `@${cached.handle}` : shortenAddressCompact(row.address);
+    const label = cached?.handle ? `@${cached.handle}` : shortenLeagueAddress(row.address);
     const isAddr = !cached?.handle;
     const isMe = !!myAddress && row.address === myAddress;
     return `<div class="league-rank-row${isMe ? ' me' : ''}">

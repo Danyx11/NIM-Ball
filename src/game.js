@@ -55,6 +55,10 @@ const LED_STATE_SRC = {
 const LED_STATE_KEYS = ['0', '1', '1dim', '2', '3', '4'];
 const LIGHT_LAYER_SRC = `${ASSET_BASE}identicons/stone-light-layer.webp`;
 const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
+// Same sponsor art as the end-of-match ticket (src/ticket.js's BANNER_SRC) —
+// shown again at the bottom of the +1 goal panel below (resultPanelHtml)
+// since that panel is seen far more often, mid-match, than the ticket ever is.
+const GOAL_SPONSOR_BANNER_SRC = `${ASSET_BASE}ticket/banner-nimiq-space.webp`;
 // Mobile-only pre-crop of the above (see scripts/bake_mobile_frame.py and
 // the MOBILE_CROP comment in startGame() below) — same pixels, just the
 // sub-rect mobile ever actually shows, so the phone downloads/decodes ~57%
@@ -4129,6 +4133,7 @@ export function startGame(opts = {}) {
       <div class="goal-score">
         <span class="goal-score-a">${scoreA}</span><span class="goal-score-sep">–</span><span class="goal-score-b">${scoreB}</span>
       </div>
+      <img class="goal-sponsor-banner" src="${GOAL_SPONSOR_BANNER_SRC}" alt="Sponsor">
       ${extraHtml || ''}
     `;
   }
