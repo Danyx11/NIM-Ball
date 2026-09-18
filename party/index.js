@@ -32,6 +32,11 @@
 //                    one thing this file adds for it is the inbound webhook
 //                    for its OWN, separate Telegram bot (below) — deliberately
 //                    not the same bot/webhook as Radar's.
+//   Partnership    — sponsor week booking (see party/partnership.js), a
+//                    single fixed-name instance (PARTNERSHIP_ROOM_NAME) with
+//                    a plain HTTP GET/POST surface only
+//                    (/parties/partnership/<room>) — nothing else in this
+//                    Worker calls into it over RPC.
 import { routePartykitRequest, getServerByName } from 'partyserver';
 import { RADAR_ROOM_NAME } from './radar.js';
 import { TELEGRAM_LINK_ROOM_NAME } from './telegramLink.js';
@@ -41,6 +46,7 @@ export { PlayerIndex } from './playerIndex.js';
 export { RadarCollector } from './radar.js';
 export { LeagueSeason } from './leagueSeason.js';
 export { TelegramLink } from './telegramLink.js';
+export { Partnership } from './partnership.js';
 
 // Telegram calls this once a webhook is registered (see CLAUDE.md's Radar
 // section for the `setWebhook` call that points it here with a

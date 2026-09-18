@@ -1956,6 +1956,24 @@ button:disabled { opacity: 0.35; cursor: default; }
   transition: background .15s ease, border-color .15s ease;
 }
 #claimHandleOverlay .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
+/* Partnership's "Book a week" week picker (#partnershipBookOverlay, see
+   main.js's renderPartnershipWeekList) — same translucent-white treatment
+   as #claimHandleOverlay's .bigbtn above (this panel is .mode-connect too),
+   just as a scrollable list of tiles instead of a single button. Selected
+   uses the gold accent (same one .bigbtn's default state uses elsewhere) so
+   it reads as "this one's chosen" against every other tile's plain white. */
+.partnership-week-list { display: flex; flex-direction: column; gap: 8px; width: 100%; max-height: 260px; overflow-y: auto; }
+.partnership-week-tile {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 18px; border-radius: 14px; width: 100%;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
+  font-family: inherit; font-size: 14px; font-weight: 700; text-align: left; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.partnership-week-tile:hover:not(.disabled):not(.selected) { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
+.partnership-week-tile.selected { background: var(--accent); border-color: var(--accent); color: #3a2900; }
+.partnership-week-tile.disabled { opacity: 0.45; cursor: default; }
+.partnership-week-status { font-size: 12px; font-weight: 600; opacity: 0.85; }
 /* Remote Match's 3 sub-screens (see main.js's showNetPanel) rebuild
    #matchNetworkContent's innerHTML from scratch on every screen change, so a
    fresh entrance for its button(s) needs no JS bookkeeping — new DOM nodes
