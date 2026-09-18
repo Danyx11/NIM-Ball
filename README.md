@@ -1,77 +1,103 @@
-# Nim-Curl
+# NimiCurl
 
-A 2-player physics game for Nimiq, played on a single `<canvas>`. Two teams flick weighted stones across an illustrated ice arena; a deterministic physics pass then resolves the exchange.
+**A free-to-play multiplayer curling game powered by Nimiq.**
 
-Two **vibes** share the same engine:
+NimiCurl is a simple 2D curling game designed to make discovering Nimiq feel natural: **invite someone, play a match, have fun, and come back.**
 
-- **NimiCurl** (hockey) — there's a ball, and you score by pushing it into the opponent's goal.
-- **Pure Curling** — no ball; whoever's stone sits closest to the centre when the point ends takes it.
+It is built around a simple idea:
 
-Either vibe can be played with the **Classic** preset or with **Custom** rules (stones per team, points to win, turn time, summer/winter skin).
+> **Don't explain the ecosystem first. Give people a reason to enter it.**
 
-## Modes
+## 🎮 The Game
 
-| Mode | Players | Networked |
-| --- | --- | --- |
-| vs AI | 1 | no |
-| Pass & Play | 2, one device | no |
-| LIVE | 2, remote, synchronous | yes |
-| WEEK | 2, remote, asynchronous (a match can span days) | yes |
-| Replay | — | no |
-| Duel LAN | 2, same Wi-Fi | dev only |
+NimiCurl is designed for quick multiplayer matches between friends or other players.
 
-LIVE and WEEK run against a Cloudflare Worker (`party/`). Neither ever simulates physics server-side: the arbiter only relays each side's chosen shot vectors, and both clients run the identical deterministic simulation locally.
+You can:
 
-## Running locally
+* Play remotely with another player using a simple match code.
+* Play asynchronous **Week** matches when you don't have time to play simultaneously.
+* Play locally or against AI.
+* Connect your Nimiq wallet and build a persistent player identity.
+* Track your matches and progress through the League.
 
-Requires Node.js 22+.
+The game is deliberately free to play. There is no entry fee and no requirement to own NIM to enjoy the core gameplay.
 
-```bash
-npm install
-npm run dev -- --host
-```
+## 🪙 NIM as Part of the Experience
 
-Open the printed `localhost` URL to play. The Nimiq connection step in `main.js` fails silently outside Nimiq Pay (logged to the console) — the game itself doesn't require it, and you can play as a guest.
+NIM is not just displayed in NimiCurl — it has an actual purpose within the game.
 
-## Testing inside Nimiq Pay
+### 🏆 Win NIM by playing
 
-1. Run `npm run dev -- --host` and note the **Network** URL (e.g. `http://192.168.1.42:5173`).
-2. Make sure your phone and dev machine share the same Wi-Fi.
-3. In Nimiq Pay: **Mini Apps** → enter that URL in the Custom URL field.
+Players with a connected Nimiq wallet can earn **10 NIM for eligible match victories**.
 
-See the [Nimiq Mini Apps docs](https://nimiq.dev/mini-apps/overview) for the full provider API exposed via `src/nimiq.js`.
+To keep the game accessible and avoid turning matches into wagers:
 
-## Two players on the same Wi-Fi (dev)
+* Playing is completely free.
+* There is no betting or staking between players.
+* Only Remote and Week matches between two connected wallets are eligible.
+* Match results are validated server-side before a reward is issued.
+* Daily and per-wallet limits help prevent abuse.
+* If the daily reward budget is exhausted, the match still plays normally.
 
-```bash
-npm run duel
-```
+This creates a simple loop:
 
-Prints a single link like `http://192.168.1.28:5173/?duel`. Open it yourself and send it to the other player — the `?duel` magic link skips mode-select entirely and connects both sides to the arbiter. This exists for local testing; the real remote modes are LIVE and WEEK.
+**Connect → Play → Win → Earn NIM**
 
-## Building
+The wallet therefore has a tangible role in the player's experience, while remaining completely optional for players who simply want to play.
 
-```bash
-npm run build     # outputs to dist/
-npm run preview   # serve that build locally
-```
+### 🤝 NIM-powered partnerships
 
-Note that Vite copies `public/` into `dist/` **verbatim**. `.gitignore` keeps a file out of git, not out of the build — so nothing but shipped assets belongs in `public/`.
+NimiCurl also uses NIM for its partnership system.
 
-## Deploying the multiplayer backend
+Partners can purchase in-game banner placements using NIM, creating a small economy around the game and its community.
 
-```bash
-npm run wrangler:deploy
-```
+This creates a second NIM-powered loop:
 
-Config lives in `wrangler.jsonc`; `npm run wrangler:dev` runs it locally (needs a gitignored `.dev.vars`). See CLAUDE.md for the Durable Object layout and the Telegram secrets the stats collector needs.
+**Partner → Pay in NIM → Support the game**
 
-## Regenerating art
+## 🌐 Why NimiCurl?
 
-`public/arena/frame.webp` and its siblings are generated from source layers in `design/arena/` by the scripts in `scripts/` (needs `pip install pillow`). The current arena is **3312x1896**; every physics bound in `game.js` is hand-measured against it.
+NimiCurl is built around a broader idea for Nimiq:
 
-> `scripts/archive/bake_arena.py` is the superseded V1 bake and must not be run — it would replace the arena with a 1200x905 image. It is hard-guarded to refuse, but don't reach for it. See the "Coordinate system tied to the artwork" section of CLAUDE.md for the pipeline that is current.
+**Fun can be an entry point into an ecosystem.**
 
-## Project layout
+Instead of starting with wallets, blockchain concepts or financial products, NimiCurl starts with something familiar: a game that people can invite their friends to play.
 
-See [CLAUDE.md](./CLAUDE.md) for the full architecture notes, the turn/phase state machine, the LIVE/WEEK backend design, and the annotated directory tree.
+A player can discover NimiCurl through an invitation, play without needing to understand Nimiq, and gradually encounter Nimiq identity, wallets and NIM rewards as part of the experience.
+
+The intended journey is:
+
+**DISCOVER → PLAY → RETURN → BELONG**
+
+## ⚡ Built for Nimiq
+
+NimiCurl is built as a Nimiq Pay Mini App and uses Nimiq for:
+
+* Wallet connection and player identity.
+* Nimiq wallet addresses and official identicons.
+* NIM rewards for eligible victories.
+* NIM payments for partnerships.
+
+The game is designed to work across devices while keeping the gameplay itself lightweight and accessible.
+
+## 🛠️ Technology
+
+NimiCurl is built with:
+
+* **Vite**
+* **Canvas 2D** for the game engine
+* **Cloudflare Workers**
+* **Cloudflare Durable Objects** for multiplayer state and server-side validation
+* **Nimiq Mini App SDK**
+
+The project is open source and released under the **MIT License**.
+
+## 🚀 The Bigger Picture
+
+NimiCurl is intentionally small in scope, but the concept can grow beyond a single game.
+
+The same infrastructure can support persistent leagues, tournaments, sponsorships, player identity and other NIM-powered mechanics over time.
+
+The objective is simple:
+
+**Make Nimiq something people use because they are having fun — not something they have to study first.**
