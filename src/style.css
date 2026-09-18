@@ -1996,6 +1996,12 @@ button:disabled { opacity: 0.35; cursor: default; }
 .goal-address { font-size: 12px; word-break: break-all; max-width: 320px; }
 .goal-score { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
 .goal-score-sep { padding: 0 8px; }
+/* Sponsor banner at the bottom of the +1 goal panel (game.js's
+   resultPanelHtml) — same art as the end-of-match ticket's own banner (see
+   ticket.js's BANNER_SRC). width is a % of #overlay's own content box (i.e.
+   the goal-box-70 panel itself, not the viewport), so it scales with that
+   panel; 68% keeps it just above the requested 2/3 floor. */
+.goal-sponsor-banner { width: 68%; max-width: 380px; border-radius: 10px; display: block; }
 /* Column by default — sits beside the ticket now (see .ticket-row below),
    not in a row underneath it — back to a row on mobile, stacked below the
    ticket, where there's no width to spare beside a portrait image. */
@@ -2649,6 +2655,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 .config-panel.mode-joincode .notif-bell-btn,
 .config-panel.mode-joincode .notif-panel,
 .config-panel.mode-joincode .notif-panel-close,
+.config-panel.mode-joincode .notif-telegram-connected,
 .config-panel.mode-joincode .notif-telegram-disconnect { color: var(--bg-deep); }
 .config-panel.mode-joincode .notif-panel-desc { color: rgba(11,31,42,0.7); }
 .config-panel.mode-joincode .notif-switch-knob { background: var(--bg-deep); }
@@ -2772,7 +2779,16 @@ button:disabled { opacity: 0.35; cursor: default; }
 .notif-switch[aria-checked="true"] .notif-switch-label-on { opacity: 1; color: #3a2900; }
 .notif-switch[aria-checked="true"] .notif-switch-label-off { opacity: 0; }
 .notif-telegram-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.notif-telegram-connected { flex: 1; color: rgba(255,255,255,0.85); }
+/* Neutral status pill — same translucent-white chip language as
+   .notif-bell-btn/.week-match-card elsewhere on this exact panel, not the
+   gold accent (that's reserved for .notif-telegram-connect's own call to
+   action just below, per the "gold = one CTA state" convention already
+   used elsewhere in this file). */
+.notif-telegram-connected {
+  display: inline-flex; align-items: center;
+  background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 999px; padding: 8px 16px; color: #fff; font-weight: 700; font-size: 13px;
+}
 .notif-telegram-connect {
   background: var(--accent); color: #3a2900; font-weight: 700; font-size: 13px;
   border-radius: 999px; padding: 8px 18px;
