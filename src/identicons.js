@@ -13,6 +13,8 @@ import { normalizeAddress } from './net.js';
 
 window.NIMIQ_IDENTICONS_SVG_PATH = identiconsSvgUrl;
 
+const ASSET_BASE = import.meta.env.BASE_URL;
+
 // The lib hashes the literal characters it's given, and the real Nimiq
 // Wallet/Hub feed it the address in its canonical "user-friendly" IBAN
 // format — space-separated in groups of 4, e.g. "NQ07 0000 0000 0000 0000
@@ -40,6 +42,37 @@ export function getIdenticonCanvas(address, size = 512) {
 
 export async function getIdenticonPngDataUrl(address, size = 512) {
   const canvas = await getIdenticonCanvas(address, size);
+  return canvas.toDataURL('image/png');
+}
+
+// Static "identicon" marks for identities that aren't a real wallet address
+// — a guest, or the built-in AI opponent (always team B, see main.js's
+// aiTeam: 'B'). Same Nimiq-gold/team-blue silhouette convention as a real
+// identicon's colored background + character, just hand-drawn once instead
+// of hashed per-address. Transparent (icon only, no background) so every
+// consumer can composite its own shape/background: bakeBubble's hex-window
+// floor color in game.js, or a plain colored square via
+// getStaticMarkPngDataUrl below for the goal panel / chat avatar, which
+// otherwise expect a "raw" identicon (background baked in, see
+// getIdenticonPngDataUrl) to crop with their own CSS.
+const STATIC_MARK_SRC = {
+  guest: `${ASSET_BASE}avatars/guest-mark.webp`,
+  bot: `${ASSET_BASE}avatars/bot-mark.webp`,
+};
+const staticMarkCache = new Map();
+export function getStaticMarkImage(kind) {
+  if (!staticMarkCache.has(kind)) staticMarkCache.set(kind, loadImage(STATIC_MARK_SRC[kind]));
+  return staticMarkCache.get(kind);
+}
+
+export async function getStaticMarkPngDataUrl(kind, bgColor, size = 512) {
+  const img = await getStaticMarkImage(kind);
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, size, size);
+  ctx.drawImage(img, 0, 0, size, size);
   return canvas.toDataURL('image/png');
 }
 

@@ -6,7 +6,8 @@
 // still resolve when the app is served from a subpath, e.g. GitHub Pages at
 // https://danyx11.github.io/NIM-Ball/.
 import { audio } from './audio.js';
-import { getIdenticonCanvasStoneBust, getIdenticonPngDataUrl, getIdenticonBgColor } from './identicons.js';
+import { getIdenticonCanvasStoneBust, getIdenticonPngDataUrl, getIdenticonBgColor, getStaticMarkImage, getStaticMarkPngDataUrl } from './identicons.js';
+import { COLORS } from './colors.js';
 import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
 import { isBasicLaser } from './settings.js';
 import { preloadTicketAssets, renderTicket } from './ticket.js';
@@ -293,6 +294,23 @@ export function startGame(opts = {}) {
   const IDENTICON_LABEL = { ...identiconLabel };
   function formatAddressShort(address) {
     return address.length <= 8 ? address : `${address.slice(0, 3)}…${address.slice(-3)}`;
+  }
+  // Guest/Bot detection for the static-mark identicon swap (see
+  // identicons.js's getStaticMarkImage/getStaticMarkPngDataUrl) — isBot is
+  // just `team === aiTeam` (aiTeam is always 'B', see main.js), isGuest
+  // reuses the exact "Guest " prefix convention ticket.js's own
+  // resolveTeamDisplay already relies on (IDENTICON_LABEL is only ever
+  // populated for this device's own team, never the opponent's — see that
+  // field's comment above — so isGuest only ever fires for the local
+  // player's own side, same scope as the label it reads).
+  function isBotTeam(team) { return team === aiTeam; }
+  function isGuestTeam(team) { return !isBotTeam(team) && (IDENTICON_LABEL[team] || '').startsWith('Guest'); }
+  function staticMarkKind(team) { return isBotTeam(team) ? 'bot' : isGuestTeam(team) ? 'guest' : null; }
+  function teamAccentColor(team) { return team === 'A' ? COLORS.teamA : COLORS.teamB; }
+  function identityLabelFor(team) {
+    if (IDENTICON_LABEL[team]) return IDENTICON_LABEL[team];
+    if (isBotTeam(team)) return 'AI';
+    return formatAddressShort(IDENTICON_ADDRESS[team]);
   }
   const canvas = document.getElementById('stage');
   // Guards against startGame() ever running twice on the same canvas (e.g. a
@@ -586,27 +604,37 @@ export function startGame(opts = {}) {
     // not have it already over underneath it.
     if (team === 'A' && onMatchReady && !matchReadyFired) { matchReadyFired = true; onMatchReady(); }
   }
+  // team B starts on the right side of the pitch, so mirror its identicon to
+  // face the ball at kickoff instead of away from it — shared by both the
+  // real per-address path and the static Guest/Bot mark path below.
+  function mirrorForTeamB(team, source) {
+    if (team !== 'B') return source;
+    const flipped = document.createElement('canvas');
+    flipped.width = source.width; flipped.height = source.height;
+    const fctx = flipped.getContext('2d');
+    fctx.translate(flipped.width, 0);
+    fctx.scale(-1, 1);
+    fctx.drawImage(source, 0, 0);
+    return flipped;
+  }
   for (const team of ['A', 'B']) {
-    Promise.all([
-      getIdenticonCanvasStoneBust(IDENTICON_ADDRESS[team]),
-      getIdenticonBgColor(IDENTICON_ADDRESS[team]),
-    ]).then(([canvas, bgColor]) => {
-      let source = canvas;
-      // team B starts on the right side of the pitch, so mirror it to face the
-      // ball at kickoff instead of away from it
-      if (team === 'B') {
-        const flipped = document.createElement('canvas');
-        flipped.width = source.width; flipped.height = source.height;
-        const fctx = flipped.getContext('2d');
-        fctx.translate(flipped.width, 0);
-        fctx.scale(-1, 1);
-        fctx.drawImage(source, 0, 0);
-        source = flipped;
-      }
-      identiconBgColors[team] = bgColor;
-      identiconSources[team] = source;
-      tryBakeBubble(team);
-    });
+    const markKind = staticMarkKind(team);
+    if (markKind) {
+      getStaticMarkImage(markKind).then((img) => {
+        identiconBgColors[team] = teamAccentColor(team);
+        identiconSources[team] = mirrorForTeamB(team, img);
+        tryBakeBubble(team);
+      });
+    } else {
+      Promise.all([
+        getIdenticonCanvasStoneBust(IDENTICON_ADDRESS[team]),
+        getIdenticonBgColor(IDENTICON_ADDRESS[team]),
+      ]).then(([canvas, bgColor]) => {
+        identiconBgColors[team] = bgColor;
+        identiconSources[team] = mirrorForTeamB(team, canvas);
+        tryBakeBubble(team);
+      });
+    }
 
     moduleImages[team] = {};
     for (const key of LED_STATE_KEYS) {
@@ -2487,16 +2515,20 @@ export function startGame(opts = {}) {
   // the goal-panel avatar) rather than a generic icon — reuses IDENTICON_ADDRESS,
   // already resolved (real wallet for this device's own team, the shared
   // default placeholder for the opponent's — see identiconOverride in
-  // main.js) by the time startGame() got here. Kicked off once, up front:
-  // by the time a chat send is even possible (mask opened, message typed),
-  // this has long since resolved — chatAvatarUrl stays null only in the
-  // sliver of time before that first .then() lands, in which case the card
-  // just shows its plain background-color fallback (see .chat-card-avatar).
+  // main.js) by the time startGame() got here, or the same static Guest/Bot
+  // mark the stone bubble and goal panel already fall back to (see
+  // staticMarkKind). Kicked off once, up front: by the time a chat send is
+  // even possible (mask opened, message typed), this has long since
+  // resolved — chatAvatarUrl stays null only in the sliver of time before
+  // that first .then() lands, in which case the card just shows its plain
+  // background-color fallback (see .chat-card-avatar).
   const chatAvatarUrl = { A: null, B: null };
-  Promise.all([
-    getIdenticonPngDataUrl(IDENTICON_ADDRESS.A, 128),
-    getIdenticonPngDataUrl(IDENTICON_ADDRESS.B, 128),
-  ]).then(([a, b]) => { chatAvatarUrl.A = a; chatAvatarUrl.B = b; });
+  Promise.all(['A', 'B'].map((team) => {
+    const markKind = staticMarkKind(team);
+    return markKind
+      ? getStaticMarkPngDataUrl(markKind, teamAccentColor(team), 128)
+      : getIdenticonPngDataUrl(IDENTICON_ADDRESS[team], 128);
+  })).then(([a, b]) => { chatAvatarUrl.A = a; chatAvatarUrl.B = b; });
   // Two independent native scrollbars (chatFeedB starts +32px lower than
   // chatFeedA — see .chat-col-b .chat-feed's own quinconce comment in
   // style.css — so they don't necessarily share a scroll range) driven
@@ -4129,7 +4161,7 @@ export function startGame(opts = {}) {
         <img class="goal-identicon" id="goalIdenticonImg" alt="">
         <span class="goal-badge ${badgeCls}">${badgeLabel}</span>
       </div>
-      <div class="goal-address">${IDENTICON_LABEL[team] || formatAddressShort(IDENTICON_ADDRESS[team])}</div>
+      <div class="goal-address">${identityLabelFor(team)}</div>
       <div class="goal-score">
         <span class="goal-score-a">${scoreA}</span><span class="goal-score-sep">–</span><span class="goal-score-b">${scoreB}</span>
       </div>
@@ -4138,7 +4170,11 @@ export function startGame(opts = {}) {
     `;
   }
   function fillResultIdenticon(team) {
-    getIdenticonPngDataUrl(IDENTICON_ADDRESS[team], RESULT_IDENTICON_SIZE).then((url) => {
+    const markKind = staticMarkKind(team);
+    const urlPromise = markKind
+      ? getStaticMarkPngDataUrl(markKind, teamAccentColor(team), RESULT_IDENTICON_SIZE)
+      : getIdenticonPngDataUrl(IDENTICON_ADDRESS[team], RESULT_IDENTICON_SIZE);
+    urlPromise.then((url) => {
       const img = document.getElementById('goalIdenticonImg');
       if (img) img.src = url; // guard: overlay may already have moved on by the time this resolves
     });
@@ -4241,8 +4277,8 @@ export function startGame(opts = {}) {
     }
     const ticketCanvas = await renderTicket({
       scoreA, scoreB,
-      teamA: { address: ticketAddresses.A, label: ticketLabels.A },
-      teamB: { address: ticketAddresses.B, label: ticketLabels.B },
+      teamA: { address: ticketAddresses.A, label: ticketLabels.A, isAI: isBotTeam('A') },
+      teamB: { address: ticketAddresses.B, label: ticketLabels.B, isAI: isBotTeam('B') },
       winner: winningTeam,
       stats,
       points: ticketPoints,
