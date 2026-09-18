@@ -14,14 +14,15 @@ import { preloadTicketAssets, renderTicket } from './ticket.js';
 import { playSingleShot, playReveal } from './weekController.js';
 import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendClaimTransaction, sendNimPayment, getGuestCode } from './nimiq.js';
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
-// Payment-architecture test slice only (see conversation) — the real $/week
-// -> NIM quote flow (quotePartnership/payPartnership) isn't wired into any
-// UI yet, only sendNimPayment is used here directly, with a fixed test
-// amount (see PARTNERSHIP_TEST_VALUE_LUNA below).
+// Real recipient address (src/partnership.js) — the actual $/week -> NIM
+// quote/price locking now happens server-side (party/partnership.js's
+// reserve(), see conversation), not via that file's own quotePartnership,
+// which stays unused by this UI for now (client-side estimate only, not
+// what confirmPayment verifies against).
 import { PARTNERSHIP_PAYMENT_ADDRESS } from './partnership.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets, setModeSelectVibeBackground } from './background.js';
-import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, checkWeekMatchExists, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress, fetchTelegramStatus, startTelegramLink, setTelegramNotifyEnabled, disconnectTelegram, TELEGRAM_NOTIFY_BOT_USERNAME } from './net.js';
+import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, checkWeekMatchExists, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress, fetchTelegramStatus, startTelegramLink, setTelegramNotifyEnabled, disconnectTelegram, TELEGRAM_NOTIFY_BOT_USERNAME, fetchPartnershipWeeks, reservePartnershipWeeks, releasePartnershipWeeks, confirmPartnershipPayment } from './net.js';
 import { isBasicLaser, setBasicLaser } from './settings.js';
 import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchConfig.js';
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
@@ -2207,10 +2208,13 @@ function wireConstructionNav(id, label) {
   });
 }
 // Partnership (index.html's #navPartnership/#partnershipOverlay +
-// #partnershipBookOverlay) — its own two-panel flow now, same show/hide
-// shape as About/Nimiq/League above. Payment-architecture test slice only
-// (see conversation): "Book a week" leads straight to one fixed test week
-// and a fixed test amount, real wallet, no quote/backend wired in yet.
+// #partnershipBookOverlay) — its own two-panel flow, same show/hide shape as
+// About/Nimiq/League above. "Book a week" now shows the real week list from
+// party/partnership.js (fetchPartnershipWeeks) instead of a fixed test week,
+// and reserve/pay/confirm all go through that same backend — see
+// renderPartnershipBook() below for the full step machine. Booking needs a
+// real wallet (it's money, same "no guest" rule WEEK already has for its own
+// different reason — see showWeekWalletPanel above), gated the same way.
 const partnershipOverlay = document.getElementById('partnershipOverlay');
 const partnershipBackBtn = document.getElementById('partnershipBackBtn');
 const partnershipBookBtn = document.getElementById('partnershipBookBtn');
@@ -2232,6 +2236,7 @@ function showPartnershipScreen() {
 }
 function hidePartnershipScreen() {
   audio.play('button');
+  releasePartnershipReservationIfAny();
   partnershipOverlay.classList.add('hidden');
   partnershipBookOverlay.classList.add('hidden');
   returnToModeSelect();
@@ -2248,65 +2253,205 @@ partnershipBookBtn.addEventListener('click', () => {
   audio.play('button');
   partnershipOverlay.classList.add('hidden');
   partnershipBookOverlay.classList.remove('hidden');
-  showPartnershipTestStep('ready');
+  if (!hubAddress) {
+    renderPartnershipBook('walletGate');
+  } else {
+    loadPartnershipWeeks();
+  }
 });
 partnershipBookBackBtn.addEventListener('click', () => {
   audio.play('button');
+  releasePartnershipReservationIfAny();
   partnershipBookOverlay.classList.add('hidden');
   partnershipOverlay.classList.remove('hidden');
 });
-// Fixed test amount standing in for quotePartnership()'s real $/week -> NIM
-// conversion (src/partnership.js), which isn't wired to any UI yet — this
-// slice only exercises sendNimPayment() itself, end to end, with a real
-// wallet and a deliberately small real transfer.
-const PARTNERSHIP_TEST_VALUE_LUNA = 100 * 1e5; // 100 NIM
-function showPartnershipTestStep(step, ctx = {}) {
-  if (step === 'ready') {
-    partnershipBookContent.innerHTML = `
-      <p class="about-tagline">TEST WEEK</p>
-      <p>Fixed test payment — real wallet, no booking yet.</p>
-      <button class="bigbtn" id="partnershipPayBtn">Pay 100 NIM (test)</button>
-    `;
-    document.getElementById('partnershipPayBtn').addEventListener('click', () => {
+
+// weekId -> {weekStart, weekEnd} of whatever was last fetched, so tile
+// clicks/formatting don't need to re-derive dates; {weekIds, amountLuna,
+// pendingExpiresAt} of the currently held server-side hold, or null —
+// mirrored so a back-out (above) or a cancel (see 'confirmPay' step below)
+// can release it instead of leaving it to expire on its own 15-minute timer.
+let partnershipWeeksById = {};
+let partnershipSelectedWeeks = new Set();
+let partnershipActiveReservation = null;
+
+// Returns a promise so the 'confirmPay' Cancel button (below) can wait for
+// the release to actually land before reloading the week list — otherwise
+// that reload's GET can race the release's own POST and still show the week
+// "On hold" for one refresh. Every other caller (back button,
+// hidePartnershipScreen) doesn't need to wait: the panel's closing anyway,
+// so it's fire-and-forget there, same as WEEK's dismissWeekMatch.
+function releasePartnershipReservationIfAny() {
+  if (!partnershipActiveReservation || !hubAddress) { partnershipActiveReservation = null; return Promise.resolve(); }
+  const promise = releasePartnershipWeeks(partnershipActiveReservation.weekIds, hubAddress);
+  partnershipActiveReservation = null;
+  return promise;
+}
+
+// "SEP 21 – SEP 27" — weekEnd is the exclusive start of the FOLLOWING week
+// (party/partnership.js's own convention), so the displayed last day is one
+// day before it.
+function formatWeekRange(weekStart, weekEnd) {
+  const fmt = (ts) => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }).toUpperCase();
+  return `${fmt(weekStart)} – ${fmt(weekEnd - 24 * 60 * 60 * 1000)}`;
+}
+
+function loadPartnershipWeeks() {
+  renderPartnershipBook('loading');
+  partnershipSelectedWeeks = new Set();
+  fetchPartnershipWeeks(hubAddress).then(({ weeks }) => {
+    partnershipWeeksById = {};
+    (weeks || []).forEach((w) => { partnershipWeeksById[w.weekId] = w; });
+    renderPartnershipBook('list', { weeks: weeks || [] });
+  });
+}
+
+function renderPartnershipWeekList(weeks) {
+  const tiles = weeks.map((w) => {
+    const selected = partnershipSelectedWeeks.has(w.weekId);
+    const disabled = w.status !== 'available';
+    const cls = ['partnership-week-tile'];
+    if (selected) cls.push('selected');
+    if (disabled) cls.push('disabled');
+    const label = w.status === 'booked' ? (w.sponsorName ? `Booked · ${escapeHtml(w.sponsorName)}` : 'Booked') : w.status === 'pending' ? 'On hold' : (selected ? '✓ Selected' : '');
+    return `<button type="button" class="${cls.join(' ')}" data-week-id="${w.weekId}" ${disabled ? 'disabled' : ''}>
+      <span class="partnership-week-range">${formatWeekRange(w.weekStart, w.weekEnd)}</span>
+      <span class="partnership-week-status">${label}</span>
+    </button>`;
+  }).join('');
+  const count = partnershipSelectedWeeks.size;
+  partnershipBookContent.innerHTML = `
+    <div class="partnership-week-list">${tiles}</div>
+    <button class="bigbtn" id="partnershipPayBtn" ${count === 0 ? 'disabled' : ''}>${count === 0 ? 'Select a week' : `Pay $${count * 10}`}</button>
+  `;
+  partnershipBookContent.querySelectorAll('.partnership-week-tile:not(.disabled)').forEach((el) => {
+    el.addEventListener('click', () => {
       audio.play('button');
-      showPartnershipTestStep('pending');
-      sendNimPayment({ recipient: PARTNERSHIP_PAYMENT_ADDRESS, valueLuna: PARTNERSHIP_TEST_VALUE_LUNA })
-        .then((tx) => showPartnershipTestStep('submitted', { hash: tx.hash }))
-        .catch((err) => showPartnershipTestStep(err.cancelled ? 'cancelled' : 'error', { message: err.message }));
+      const id = el.dataset.weekId;
+      if (partnershipSelectedWeeks.has(id)) partnershipSelectedWeeks.delete(id); else partnershipSelectedWeeks.add(id);
+      renderPartnershipWeekList(weeks);
+    });
+  });
+  document.getElementById('partnershipPayBtn').addEventListener('click', () => {
+    if (count === 0) return;
+    audio.play('button');
+    renderPartnershipBook('reserving');
+    reservePartnershipWeeks([...partnershipSelectedWeeks], hubAddress).then((res) => {
+      if (!res.ok) { renderPartnershipBook('reserveFailed', { error: res.error }); return; }
+      partnershipActiveReservation = { weekIds: res.weekIds, amountLuna: res.amountLuna, pendingExpiresAt: res.pendingExpiresAt };
+      renderPartnershipBook('confirmPay', partnershipActiveReservation);
+    });
+  });
+}
+
+function renderPartnershipBook(step, ctx = {}) {
+  if (step === 'walletGate') {
+    partnershipBookContent.innerHTML = `
+      <h2>Partnership requires a Nimiq wallet</h2>
+      <p>Connect to book a sponsor week.</p>
+      <button class="bigbtn" id="partnershipConnectBtn">Connect wallet</button>
+    `;
+    document.getElementById('partnershipConnectBtn').addEventListener('click', () => {
+      audio.play('button');
+      connectIdentity()
+        .then((address) => { hubAddress = address; syncIdentityPill(); loadPartnershipWeeks(); })
+        .catch(() => {}); // cancelled/failed — stay on this panel
     });
     return;
   }
-  if (step === 'pending') {
-    partnershipBookContent.innerHTML = `<h2>Confirm in your wallet</h2><p>A 100 NIM transfer opens in your wallet.</p>`;
+  if (step === 'loading') {
+    partnershipBookContent.innerHTML = '<p>Loading weeks…</p>';
     return;
   }
-  if (step === 'submitted') {
+  if (step === 'list') {
+    renderPartnershipWeekList(ctx.weeks);
+    return;
+  }
+  if (step === 'reserving') {
+    partnershipBookContent.innerHTML = '<p>Reserving…</p>';
+    return;
+  }
+  if (step === 'reserveFailed') {
     partnershipBookContent.innerHTML = `
-      <h2>Transaction submitted ✓</h2>
-      <p>${ctx.hash ? `Hash: ${escapeHtml(ctx.hash)}` : 'No hash returned.'}</p>
-      <button class="bigbtn" id="partnershipRetryBtn">Back</button>
+      <h2>Couldn't reserve</h2>
+      <p>${escapeHtml(partnershipErrorMessage(ctx.error))}</p>
+      <button class="bigbtn" id="partnershipRetryBtn">Back to weeks</button>
     `;
-    document.getElementById('partnershipRetryBtn').addEventListener('click', () => showPartnershipTestStep('ready'));
+    document.getElementById('partnershipRetryBtn').addEventListener('click', loadPartnershipWeeks);
     return;
   }
-  if (step === 'cancelled') {
+  if (step === 'confirmPay') {
+    const amountNim = (ctx.amountLuna / 1e5).toFixed(2);
     partnershipBookContent.innerHTML = `
-      <h2>Cancelled</h2>
-      <p>No transaction was sent.</p>
-      <button class="bigbtn" id="partnershipRetryBtn">Try again</button>
+      <h2>${ctx.weekIds.length === 1 ? 'Your week' : `${ctx.weekIds.length} weeks`}</h2>
+      <p>${ctx.weekIds.map((id) => formatWeekRange(partnershipWeeksById[id].weekStart, partnershipWeeksById[id].weekEnd)).join(' · ')}</p>
+      <p class="about-tagline">${amountNim} NIM</p>
+      <button class="bigbtn" id="partnershipPayNowBtn">Pay in wallet</button>
+      <button class="bigbtn" id="partnershipCancelBtn">Cancel</button>
     `;
-    document.getElementById('partnershipRetryBtn').addEventListener('click', () => showPartnershipTestStep('ready'));
+    document.getElementById('partnershipCancelBtn').addEventListener('click', () => {
+      audio.play('button');
+      renderPartnershipBook('loading');
+      releasePartnershipReservationIfAny().then(loadPartnershipWeeks);
+    });
+    document.getElementById('partnershipPayNowBtn').addEventListener('click', () => {
+      audio.play('button');
+      renderPartnershipBook('paying');
+      sendNimPayment({ recipient: PARTNERSHIP_PAYMENT_ADDRESS, valueLuna: ctx.amountLuna })
+        .then((tx) => {
+          renderPartnershipBook('confirming', { weekIds: ctx.weekIds });
+          return confirmPartnershipPayment({ weekIds: ctx.weekIds, wallet: hubAddress, paymentTx: tx.hash });
+        })
+        .then((res) => {
+          if (res.ok) { partnershipActiveReservation = null; renderPartnershipBook('booked', { weekIds: ctx.weekIds }); return; }
+          renderPartnershipBook('confirmFailed', { ...ctx, error: res.error, confirmations: res.confirmations, required: res.required });
+        })
+        .catch((err) => {
+          renderPartnershipBook(err.cancelled ? 'confirmPay' : 'payError', { ...ctx, message: err.message });
+        });
+    });
     return;
   }
-  if (step === 'error') {
+  if (step === 'paying') {
+    partnershipBookContent.innerHTML = '<h2>Confirm in your wallet</h2><p>A payment request opens in your wallet.</p>';
+    return;
+  }
+  if (step === 'confirming') {
+    partnershipBookContent.innerHTML = '<p>Confirming with the server…</p>';
+    return;
+  }
+  if (step === 'confirmFailed') {
+    const waitingOnChain = ctx.error === 'pending';
     partnershipBookContent.innerHTML = `
-      <h2>Error</h2>
+      <h2>${waitingOnChain ? 'Waiting for confirmations' : "Couldn't confirm"}</h2>
+      <p>${waitingOnChain ? `${ctx.confirmations}/${ctx.required} confirmations so far — try again in a bit.` : escapeHtml(partnershipErrorMessage(ctx.error))}</p>
+      <button class="bigbtn" id="partnershipRetryConfirmBtn">Check again</button>
+    `;
+    document.getElementById('partnershipRetryConfirmBtn').addEventListener('click', () => renderPartnershipBook('confirmPay', ctx));
+    return;
+  }
+  if (step === 'payError') {
+    partnershipBookContent.innerHTML = `
+      <h2>Payment error</h2>
       <p>${escapeHtml(ctx.message || 'Unknown error.')}</p>
       <button class="bigbtn" id="partnershipRetryBtn">Try again</button>
     `;
-    document.getElementById('partnershipRetryBtn').addEventListener('click', () => showPartnershipTestStep('ready'));
+    document.getElementById('partnershipRetryBtn').addEventListener('click', () => renderPartnershipBook('confirmPay', ctx));
+    return;
+  }
+  if (step === 'booked') {
+    partnershipBookContent.innerHTML = `
+      <h2>${ctx.weekIds.length === 1 ? 'Your week is booked' : 'Your weeks are booked'}</h2>
+      <p>${ctx.weekIds.map((id) => formatWeekRange(partnershipWeeksById[id].weekStart, partnershipWeeksById[id].weekEnd)).join(' · ')}</p>
+      <button class="bigbtn" id="partnershipDoneBtn">Done</button>
+    `;
+    document.getElementById('partnershipDoneBtn').addEventListener('click', hidePartnershipScreen);
   }
 }
+// Server errors are short machine-readable strings (party/partnership.js's
+// own confirmPayment/reserve) — fine to show as-is, this is the one spot
+// that'd need updating if that vocabulary ever grows a dedicated label set.
+function partnershipErrorMessage(error) { return typeof error === 'string' ? error : 'Unknown error.'; }
 // Nimiq (index.html's #navNimiq/#nimiqOverlay) — dedicated panel, same
 // toggle-on-reclick principle as #aboutOverlay above.
 const nimiqOverlay = document.getElementById('nimiqOverlay');
