@@ -12,8 +12,13 @@ import '@fontsource/fira-mono/500.css';
 import { startGame, preloadCoreAssets, DEFAULT_IDENTICON_ADDRESS } from './game.js';
 import { preloadTicketAssets, renderTicket } from './ticket.js';
 import { playSingleShot, playReveal } from './weekController.js';
-import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendClaimTransaction, getGuestCode } from './nimiq.js';
+import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendClaimTransaction, sendNimPayment, getGuestCode } from './nimiq.js';
 import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
+// Payment-architecture test slice only (see conversation) — the real $/week
+// -> NIM quote flow (quotePartnership/payPartnership) isn't wired into any
+// UI yet, only sendNimPayment is used here directly, with a fixed test
+// amount (see PARTNERSHIP_TEST_VALUE_LUNA below).
+import { PARTNERSHIP_PAYMENT_ADDRESS } from './partnership.js';
 import { getIdenticonPngDataUrl } from './identicons.js';
 import { initBackground, preloadBackgroundAssets, setModeSelectVibeBackground } from './background.js';
 import { connectLan, connectMatch, createWeekMatch, joinWeekMatch, checkWeekMatchExists, fetchMyWeekMatches, dismissWeekMatch, fetchLeagueStats, fetchLeagueLeaderboard, fetchLeagueWeeklyLeaderboard, normalizeAddress, fetchTelegramStatus, startTelegramLink, setTelegramNotifyEnabled, disconnectTelegram, TELEGRAM_NOTIFY_BOT_USERNAME } from './net.js';
@@ -194,7 +199,7 @@ if (IS_MOBILE) document.body.classList.add('mobile-layout');
   // running) stays with #game-card above, same as #overlay/#syncToast — it's
   // gameplay chrome, not a menu screen, so this change doesn't touch it.
   const menuHost = document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'weekMatchDialogOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'weekMatchDialogOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'partnershipOverlay', 'partnershipBookOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -2136,6 +2141,8 @@ function showAboutScreen() {
   nimiqOverlay.classList.add('hidden');
   leagueOverlay.classList.add('hidden');
   leagueRulesOverlay.classList.add('hidden');
+  partnershipOverlay.classList.add('hidden');
+  partnershipBookOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2173,6 +2180,8 @@ function showConstructionScreen(label) {
   nimiqOverlay.classList.add('hidden');
   leagueOverlay.classList.add('hidden');
   leagueRulesOverlay.classList.add('hidden');
+  partnershipOverlay.classList.add('hidden');
+  partnershipBookOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2197,7 +2206,107 @@ function wireConstructionNav(id, label) {
     }
   });
 }
-wireConstructionNav('navPartnership', 'Partnership');
+// Partnership (index.html's #navPartnership/#partnershipOverlay +
+// #partnershipBookOverlay) — its own two-panel flow now, same show/hide
+// shape as About/Nimiq/League above. Payment-architecture test slice only
+// (see conversation): "Book a week" leads straight to one fixed test week
+// and a fixed test amount, real wallet, no quote/backend wired in yet.
+const partnershipOverlay = document.getElementById('partnershipOverlay');
+const partnershipBackBtn = document.getElementById('partnershipBackBtn');
+const partnershipBookBtn = document.getElementById('partnershipBookBtn');
+const partnershipBookOverlay = document.getElementById('partnershipBookOverlay');
+const partnershipBookBackBtn = document.getElementById('partnershipBookBackBtn');
+const partnershipBookContent = document.getElementById('partnershipBookContent');
+function showPartnershipScreen() {
+  audio.play('button');
+  aboutOverlay.classList.add('hidden');
+  constructionOverlay.classList.add('hidden');
+  nimiqOverlay.classList.add('hidden');
+  leagueOverlay.classList.add('hidden');
+  leagueRulesOverlay.classList.add('hidden');
+  partnershipBookOverlay.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+  modeDrawer.classList.add('hidden');
+  hideRemoteMatchStack(); // see that function's own comment
+  partnershipOverlay.classList.remove('hidden');
+}
+function hidePartnershipScreen() {
+  audio.play('button');
+  partnershipOverlay.classList.add('hidden');
+  partnershipBookOverlay.classList.add('hidden');
+  returnToModeSelect();
+}
+const navPartnership = document.getElementById('navPartnership');
+navPartnership.addEventListener('click', () => {
+  if (activeStopGame) return;
+  const isOpen = !partnershipOverlay.classList.contains('hidden') || !partnershipBookOverlay.classList.contains('hidden');
+  if (!isOpen) showPartnershipScreen();
+  else hidePartnershipScreen();
+});
+partnershipBackBtn.addEventListener('click', hidePartnershipScreen);
+partnershipBookBtn.addEventListener('click', () => {
+  audio.play('button');
+  partnershipOverlay.classList.add('hidden');
+  partnershipBookOverlay.classList.remove('hidden');
+  showPartnershipTestStep('ready');
+});
+partnershipBookBackBtn.addEventListener('click', () => {
+  audio.play('button');
+  partnershipBookOverlay.classList.add('hidden');
+  partnershipOverlay.classList.remove('hidden');
+});
+// Fixed test amount standing in for quotePartnership()'s real $/week -> NIM
+// conversion (src/partnership.js), which isn't wired to any UI yet — this
+// slice only exercises sendNimPayment() itself, end to end, with a real
+// wallet and a deliberately small real transfer.
+const PARTNERSHIP_TEST_VALUE_LUNA = 100 * 1e5; // 100 NIM
+function showPartnershipTestStep(step, ctx = {}) {
+  if (step === 'ready') {
+    partnershipBookContent.innerHTML = `
+      <p class="about-tagline">TEST WEEK</p>
+      <p>Fixed test payment — real wallet, no booking yet.</p>
+      <button class="bigbtn" id="partnershipPayBtn">Pay 100 NIM (test)</button>
+    `;
+    document.getElementById('partnershipPayBtn').addEventListener('click', () => {
+      audio.play('button');
+      showPartnershipTestStep('pending');
+      sendNimPayment({ recipient: PARTNERSHIP_PAYMENT_ADDRESS, valueLuna: PARTNERSHIP_TEST_VALUE_LUNA })
+        .then((tx) => showPartnershipTestStep('submitted', { hash: tx.hash }))
+        .catch((err) => showPartnershipTestStep(err.cancelled ? 'cancelled' : 'error', { message: err.message }));
+    });
+    return;
+  }
+  if (step === 'pending') {
+    partnershipBookContent.innerHTML = `<h2>Confirm in your wallet</h2><p>A 100 NIM transfer opens in your wallet.</p>`;
+    return;
+  }
+  if (step === 'submitted') {
+    partnershipBookContent.innerHTML = `
+      <h2>Transaction submitted ✓</h2>
+      <p>${ctx.hash ? `Hash: ${escapeHtml(ctx.hash)}` : 'No hash returned.'}</p>
+      <button class="bigbtn" id="partnershipRetryBtn">Back</button>
+    `;
+    document.getElementById('partnershipRetryBtn').addEventListener('click', () => showPartnershipTestStep('ready'));
+    return;
+  }
+  if (step === 'cancelled') {
+    partnershipBookContent.innerHTML = `
+      <h2>Cancelled</h2>
+      <p>No transaction was sent.</p>
+      <button class="bigbtn" id="partnershipRetryBtn">Try again</button>
+    `;
+    document.getElementById('partnershipRetryBtn').addEventListener('click', () => showPartnershipTestStep('ready'));
+    return;
+  }
+  if (step === 'error') {
+    partnershipBookContent.innerHTML = `
+      <h2>Error</h2>
+      <p>${escapeHtml(ctx.message || 'Unknown error.')}</p>
+      <button class="bigbtn" id="partnershipRetryBtn">Try again</button>
+    `;
+    document.getElementById('partnershipRetryBtn').addEventListener('click', () => showPartnershipTestStep('ready'));
+  }
+}
 // Nimiq (index.html's #navNimiq/#nimiqOverlay) — dedicated panel, same
 // toggle-on-reclick principle as #aboutOverlay above.
 const nimiqOverlay = document.getElementById('nimiqOverlay');
@@ -2208,6 +2317,8 @@ function showNimiqScreen() {
   constructionOverlay.classList.add('hidden');
   leagueOverlay.classList.add('hidden');
   leagueRulesOverlay.classList.add('hidden');
+  partnershipOverlay.classList.add('hidden');
+  partnershipBookOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2345,6 +2456,8 @@ function showLeagueScreen() {
   constructionOverlay.classList.add('hidden');
   nimiqOverlay.classList.add('hidden');
   leagueRulesOverlay.classList.add('hidden');
+  partnershipOverlay.classList.add('hidden');
+  partnershipBookOverlay.classList.add('hidden');
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
