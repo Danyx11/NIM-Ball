@@ -2000,9 +2000,9 @@ button:disabled { opacity: 0.35; cursor: default; }
    resultPanelHtml) — same art as the end-of-match ticket's own banner (see
    ticket.js's BANNER_SRC). width is a % of #overlay's own content box (i.e.
    the goal-box-70 panel itself, not the viewport), so it scales with that
-   panel; 100%/570px are the original 68%/380px x1.5 (+50%). margin: 0 auto
-   keeps it centered even though its flex parent already would. */
-.goal-sponsor-banner { width: 100%; max-width: 570px; border-radius: 10px; display: block; margin: 0 auto; }
+   panel; 70%/399px is that +50% pass x0.7 (-30%). margin: 0 auto keeps it
+   centered even though its flex parent already would. */
+.goal-sponsor-banner { width: 70%; max-width: 399px; border-radius: 10px; display: block; margin: 0 auto; }
 /* Column by default — sits beside the ticket now (see .ticket-row below),
    not in a row underneath it — back to a row on mobile, stacked below the
    ticket, where there's no width to spare beside a portrait image. */
