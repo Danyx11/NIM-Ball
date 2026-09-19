@@ -1492,19 +1492,24 @@
        untouched). -->
   <div id="menuStage"></div>
 
-  <!-- "Here's the link" pill (main.js's copyNimicurlTelegramLink) — shown
-       instead of window.open() inside Nimiq Pay, where that's confirmed
-       broken (see main.js's own comment on openNimicurlTelegram), and
-       instead of the earlier label-swap-on-the-nav-item attempt (also
-       dropped — navigator.clipboard itself is unreliable there too, and a
-       stuck "Copy failed" replacing the nav's own label was worse than the
-       original problem). A small floating white pill, same look as
-       League's own .league-beta-pill/.league-rules-btn, showing the link
-       as plain readable/selectable text rather than depending on a copy
-       that might silently fail. Shared by all three entry points (Find a
-       player/Telegram/Find a match), so it lives at the top level,
-       position:fixed, not nested under any one of them. -->
-  <div id="tgLinkPill" class="tg-link-pill hidden"></div>
+  <!-- "Here's the link" card (main.js's showTgLinkPill) — shown instead of
+       window.open() inside Nimiq Pay, where that's confirmed broken (see
+       main.js's own comment on openNimicurlTelegram), and instead of the
+       earlier label-swap-on-the-nav-item attempt (also dropped —
+       navigator.clipboard itself is unreliable there too, and a stuck
+       "Copy failed" replacing the nav's own label was worse than the
+       original problem). Same dark-glass-card + gold-accent language as
+       every other menu surface here (.notif-panel, .config-panel), not
+       League's own white pill (tried first — read as visually disconnected
+       floating over the sidebar/menu's own dark background). Shared by all
+       three entry points (Find a player/Telegram/Find a match), so it
+       lives at the top level, position:fixed centered, not nested under
+       any one of them. -->
+  <div id="tgLinkPill" class="tg-link-pill hidden">
+    <p class="tg-link-pill-title">Telegram</p>
+    <p class="tg-link-pill-url" id="tgLinkPillUrl"></p>
+    <p class="tg-link-pill-hint">Tap to dismiss</p>
+  </div>
 
 <script type="module" src="./src/main.js"></script>
 </body>

@@ -2774,6 +2774,33 @@ button:disabled { opacity: 0.35; cursor: default; }
   border-radius: 14px; padding: 18px 20px; color: #fff;
 }
 .notif-panel.hidden { display: none; }
+/* "Here's the link" card (index.html/main.js's showTgLinkPill) — the
+   Nimiq-Pay-only fallback for Find a player/Telegram/Find a match (see
+   main.js's openNimicurlTelegram), unrelated to Notifications above beyond
+   sharing this same dark-glass-card language. A solid-ish dark background
+   (not .notif-panel's translucent-white-on-a-known-backdrop trick) because
+   this can appear over genuinely different surfaces depending on which of
+   the three buttons triggered it — the dark sidebar, or League's own
+   light panel — and needs to read clearly on both. Centered/fixed so its
+   position never depends on which one that was. Tried a flat white
+   League-style pill first (see git history) — read as visually
+   disconnected floating over a dark menu background, dropped for this. */
+.tg-link-pill {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 500; width: min(86vw, 340px);
+  background: rgba(11,31,42,0.95); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  padding: 24px 26px; text-align: center; cursor: pointer;
+}
+.tg-link-pill.hidden { display: none; }
+.tg-link-pill-title {
+  margin: 0 0 10px; font-size: 12px; font-weight: 800; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--accent);
+}
+.tg-link-pill-url {
+  margin: 0 0 10px; font-size: 15px; font-weight: 700; color: #fff; word-break: break-all;
+}
+.tg-link-pill-hint { margin: 0; font-size: 12px; color: rgba(255,255,255,0.55); }
 /* Same round chip as .config-back elsewhere (background explicitly set, not
    left to button's own bare browser default — that gap was the "white
    thing" this replaces) — smaller since it sits inside a small popover, not
@@ -3004,24 +3031,6 @@ button:disabled { opacity: 0.35; cursor: default; }
   display: inline-flex; align-items: center; gap: 6px;
 }
 .league-rules-btn svg { width: 14px; height: 14px; opacity: 0.55; }
-/* "Here's the link" pill (index.html/main.js's copyNimicurlTelegramLink) —
-   same white-pill look as .league-beta-pill/.league-rules-btn just above,
-   reused here even though this element isn't League-specific (it's the
-   Nimiq-Pay-only fallback for Find a player/Telegram/Find a match, all
-   outside League's own panel most of the time) — just borrowing the same
-   established "pill" visual language, not actually part of that panel.
-   Fixed/centered so it works identically regardless of which of the three
-   buttons triggered it. */
-.tg-link-pill {
-  position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%);
-  z-index: 500; max-width: 86vw;
-  background: #fff; color: var(--nb-100);
-  border-radius: 999px; box-shadow: 0 6px 20px rgba(0,0,0,0.3), 0 0 0 1px rgba(31,35,72,0.08);
-  padding: 12px 22px; font-family: 'Fira Mono', monospace; font-size: 13px; font-weight: 600;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  cursor: pointer;
-}
-.tg-link-pill.hidden { display: none; }
 /* This device's own row (main.js's renderLeagueMeStats — same LEAGUE_MOCK_MAIN
    "me" row the ranking list already flags, points still placeholder pending
    the real backend). A pill like the rank rows themselves; win/loss/streak
