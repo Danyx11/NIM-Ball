@@ -3738,6 +3738,7 @@ async function showWeekMatchTicket(week) {
     <div class="ticket-row">
       <div class="ticket-wrap"><img class="ticket-img" id="weekTicketImg" alt="Nim-Curl WEEK match ticket"></div>
       <div class="goal-actions">
+        ${week.prizeNim != null ? `<p class="prize-banner">🏆 +${week.prizeNim} NIM prize</p>` : ''}
         ${week.rematch?.opponent ? '<p id="weekTicketRematchNote">Your opponent wants a rematch!</p>' : ''}
         <button class="bigbtn" id="weekTicketPlayAgainBtn">▶ Play Again</button>
         <button class="bigbtn" id="weekTicketShareBtn">📤 Share</button>

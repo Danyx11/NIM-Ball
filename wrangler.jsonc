@@ -28,6 +28,9 @@
       // class, same reasoning again: alongside every binding above, never
       // folded into them.
       { "name": "Partnership", "class_name": "Partnership" },
+      // NIM win prizes (party/prize.js) — an eighth class, same reasoning
+      // again: alongside every binding above, never folded into them.
+      { "name": "PrizeVault", "class_name": "PrizeVault" },
     ],
   },
   // new_sqlite_classes (not new_classes) — required for Durable Objects on
@@ -45,6 +48,7 @@
     { "tag": "v4", "new_sqlite_classes": ["LeagueSeason"] },
     { "tag": "v5", "new_sqlite_classes": ["TelegramLink"] },
     { "tag": "v6", "new_sqlite_classes": ["Partnership"] },
+    { "tag": "v7", "new_sqlite_classes": ["PrizeVault"] },
   ],
   // Drives RadarCollector#maybeSendDailyReport (party/radar.js) — a coarse
   // 15-minute tick is enough since that method itself re-checks the current
@@ -65,6 +69,16 @@
   "vars": {
     "NIMIQ_RPC_URL": "https://rpc.nimiqwatch.com",
     "PARTNERSHIP_PAYMENT_ADDRESS": "NQ55 YBJ1 QDMF KHT2 25PJ KVAT YTVD 2JHE RHX7",
+    // NIM win prizes (party/prize.js) — the hot wallet's own address, public
+    // and non-sensitive like PARTNERSHIP_PAYMENT_ADDRESS above. Used only as
+    // a startup sanity check (does the configured PRIZE_WALLET_PRIVATE_KEY
+    // secret actually derive to this address?) — fill it in once that
+    // wallet exists, and set the matching secret:
+    //   npx wrangler secret put PRIZE_WALLET_PRIVATE_KEY
+    // (the wallet's raw 32-byte private key as 64 hex chars — NEVER commit
+    // that value here, `vars` is plain-text in this file). Leaving this
+    // blank just skips the sanity check, it doesn't disable payouts.
+    "PRIZE_WALLET_ADDRESS": "NQ48 TSS4 U1JQ S4AH 3N71 DX7G AHPF 0258 YCK6",
   },
   // Sponsor banner storage (party/partnership.js's uploadBanner/getBanner) —
   // the bucket itself must exist in Cloudflare before this binding resolves

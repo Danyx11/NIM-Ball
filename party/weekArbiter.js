@@ -34,6 +34,7 @@
 import { Server, getServerByName } from 'partyserver';
 import { RADAR_ROOM_NAME } from './radar.js';
 import { CURRENT_SEASON_ID, isClassicMatchConfig } from './leagueRating.js';
+import { PRIZE_ROOM_NAME } from './prize.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const JOIN_WINDOW_MS = DAY_MS;        // A's code stays open for B to join
@@ -117,6 +118,11 @@ export class WeekArbiter extends Server {
       // this match actually qualified and the RPC resolved; once set it's
       // persisted, so it keeps showing up here on any later reconnect too.
       leagueLp: m.leagueResult ? m.leagueResult[team] : null,
+      // NIM prizes (party/prize.js) — same "null until/unless this match
+      // actually qualified and the RPC resolved to a paid result" shape as
+      // leagueLp just above, persisted the same way so a later reconnect
+      // still shows it.
+      prizeNim: m.prizeResult ? m.prizeResult[team] : null,
       // "Play Again" (see onMessage's own 'rematch' comment) — only
       // meaningful once status is 'completed'; mine/opponent both false the
       // rest of the time.
@@ -241,6 +247,18 @@ export class WeekArbiter extends Server {
     getServerByName(this.env.LeagueSeason, CURRENT_SEASON_ID)
       .then((league) => league[method](payload))
       .catch((err) => console.error(`[league] ${method} failed:`, err));
+  }
+
+  // NIM prizes (party/prize.js) — same RPC shape as leagueNotify above.
+  // Awaited at its one call site below (not fire-and-forget), same reason
+  // leagueNotify already is here: WEEK has no live push, so the ticket's
+  // prize banner has no channel to learn the result except this same
+  // completeRound response, via snapshotFor's prizeNim above.
+  prizeNotify(method, payload) {
+    if (!this.env?.PrizeVault) return Promise.resolve(undefined);
+    return getServerByName(this.env.PrizeVault, PRIZE_ROOM_NAME)
+      .then((prize) => prize[method](payload))
+      .catch((err) => { console.error(`[prize] ${method} failed:`, err); return undefined; });
   }
 
   // Telegram turn notifications (party/playerIndex.js) — same RPC shape as
@@ -623,6 +641,23 @@ export class WeekArbiter extends Server {
             this.match.leagueResult = { A: result.lpAwardedA, B: result.lpAwardedB };
           }
         }
+        // NIM prizes (party/prize.js) — same eligibility bar as League's
+        // block just above (exact Classic ruleset), kept as a SEPARATE
+        // condition rather than nested inside League's own `if` purely so a
+        // change to one can never accidentally affect the other. The
+        // connected-wallet-on-both-sides part of League's own check is
+        // redundant here (WEEK already guarantees that unconditionally — no
+        // guest mode at all, see this file's own header comment), so this
+        // condition only re-checks Classic.
+        if (this.match.playerA && this.match.playerB && isClassicMatchConfig(this.match.config)) {
+          const prizeResult = await this.prizeNotify('evaluate', {
+            matchId: `week:${this.name}`, mode: 'week', timestampMs: Date.now(),
+            playerA: { address: this.match.playerA }, playerB: { address: this.match.playerB }, winner,
+          });
+          if (prizeResult?.status === 'paid') {
+            this.match.prizeResult = { A: winner === 'A' ? prizeResult.amountNim : null, B: winner === 'B' ? prizeResult.amountNim : null };
+          }
+        }
       }
       await this.persist();
       // Fired only now, after the resolved manche (pendingShots reset,
@@ -682,7 +717,7 @@ export class WeekArbiter extends Server {
           status: 'active', round: 0, scoreA: 0, scoreB: 0,
           pendingShots: { A: null, B: null }, stats: { collisions: 0, stonesDestroyed: 0 },
           lastManche: null, pointManches: [], inbox: { A: null, B: null },
-          rematch: { A: false, B: false }, completedAt: null, leagueResult: null,
+          rematch: { A: false, B: false }, completedAt: null, leagueResult: null, prizeResult: null,
           expiresAt: now + MATCH_LIFETIME_MS,
         });
         await this.ctx.storage.setAlarm(this.match.expiresAt);

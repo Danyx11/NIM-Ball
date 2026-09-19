@@ -1308,6 +1308,7 @@ export function startGame(opts = {}) {
   // for it (waitForLeagueLp) before baking the ticket's league stamp (see
   // src/ticket.js), then gives up and renders without one.
   let leagueLpAwarded = null;
+  let matchIndex = 0; // +1 per Play Again, sent with matchOver — see party/arbiter.js
   let leagueLpWaiters = [];
   function resolveLeagueLp(lp) {
     leagueLpAwarded = lp;
@@ -1318,6 +1319,28 @@ export function startGame(opts = {}) {
     if (leagueLpAwarded !== null) return Promise.resolve(leagueLpAwarded);
     return new Promise((resolve) => {
       leagueLpWaiters.push(resolve);
+      trackedTimeout(() => resolve(null), timeoutMs);
+    });
+  }
+  // NIM prizes (party/arbiter.js's 'prizeResult' push, relayed by
+  // src/net.js) — same wait-briefly-then-give-up shape as leagueLpAwarded
+  // just above, but a longer default timeout (see showVictory's own call):
+  // unlike League's LP award (one in-Worker Durable Object RPC), the server
+  // side of this involves two real calls to the public Nimiq RPC node
+  // (fetching the current block height, then broadcasting the signed
+  // transaction) before it can respond, which routinely takes longer than
+  // 2s.
+  let prizeNimAwarded = null;
+  let prizeNimWaiters = [];
+  function resolvePrizeNim(amountNim) {
+    prizeNimAwarded = amountNim;
+    prizeNimWaiters.forEach((resolve) => resolve(amountNim));
+    prizeNimWaiters = [];
+  }
+  function waitForPrizeNim(timeoutMs) {
+    if (prizeNimAwarded !== null) return Promise.resolve(prizeNimAwarded);
+    return new Promise((resolve) => {
+      prizeNimWaiters.push(resolve);
       trackedTimeout(() => resolve(null), timeoutMs);
     });
   }
@@ -3039,6 +3062,7 @@ export function startGame(opts = {}) {
       });
     }
     net.onLeagueResult(({ lpAwarded }) => resolveLeagueLp(lpAwarded));
+    net.onPrizeResult(({ amountNim }) => resolvePrizeNim(amountNim));
     net.onLaunch(({ shotsA, shotsB, sweepA, sweepB, mancheIndex }) => {
       clearLanWaitWatchdog();
       hideOverlay();
@@ -4160,7 +4184,7 @@ export function startGame(opts = {}) {
         // reaches this branch at all, see the externalManche comment above).
         // No-op on Duel LAN's arbiter (server/arbiter.js has no 'matchOver'
         // handler, LAN is intentionally out of Radar's scope — see CLAUDE.md).
-        net?.sendMatchOver?.(scoreA, scoreB);
+        net?.sendMatchOver?.(scoreA, scoreB, matchIndex);
         showVictory();
       } else {
         if (!isMatchWin) round++;
@@ -4318,6 +4342,22 @@ export function startGame(opts = {}) {
       && matchConfig.pointsToWin === DEFAULT_MATCH_CONFIG.pointsToWin && matchConfig.turnTime === DEFAULT_MATCH_CONFIG.turnTime
       && matchConfig.curlingCycles === DEFAULT_MATCH_CONFIG.curlingCycles;
     const leagueLp = (net && looksClassic) ? await waitForLeagueLp(2000) : null;
+    // NIM prizes — same Classic-ruleset requirement as League above (see
+    // party/prize.js's own eligibility comment); the server still has the
+    // real say (both sides a real wallet, distinct wallets, anti-farming,
+    // daily budget — see that file). looksPrizeEligible reuses looksClassic
+    // plus the same kind of cheap client-side pre-filter it is for League
+    // just above ("skip the wait entirely for the common ineligible case
+    // rather than always paying a timeout for nothing") — here additionally:
+    // both sides actually have a connected wallet, same signal the ticket's
+    // own opponent-identicon logic below already relies on. Worth a longer
+    // wait than League's when it IS worth waiting at all: this round-trips
+    // through the public Nimiq RPC node twice server-side (fetch height,
+    // broadcast), not just one in-Worker DO call. Only ever resolves
+    // non-null for the WINNING side (see party/arbiter.js's 'matchOver'
+    // handler — prizeResult is sent to the winner's connection only).
+    const looksPrizeEligible = net && looksClassic && net.opponentAddress && IDENTICON_ADDRESS[myTeam] !== DEFAULT_IDENTICON_ADDRESS[myTeam];
+    const prizeNim = looksPrizeEligible ? await waitForPrizeNim(8000) : null;
     // Opponent's real identicon/address/handle for a net match (see
     // conversation) — IDENTICON_ADDRESS/LABEL only ever carry a real value
     // for myTeam (see DEFAULT_IDENTICON_ADDRESS's own comment: the opponent
@@ -4357,6 +4397,7 @@ export function startGame(opts = {}) {
           <img class="ticket-img" id="ticketImg" alt="Nim-Curl match ticket">
         </div>
         <div class="goal-actions">
+          ${prizeNim != null ? `<p class="prize-banner">🏆 +${prizeNim} NIM prize</p>` : ''}
           <button class="bigbtn" id="goalPlayAgainBtn">▶ Play Again</button>
           <button class="bigbtn" id="goalShareBtn">📤 Share</button>
         </div>
@@ -4396,6 +4437,13 @@ export function startGame(opts = {}) {
     // clients simulate independently" model.
     document.getElementById('goalPlayAgainBtn').onclick = () => {
       audio.play('button');
+      // Fresh match in the same room: without clearing these, the next
+      // showVictory() would instantly reuse the previous match's LP.
+      matchIndex++;
+      leagueLpAwarded = null;
+      leagueLpWaiters = [];
+      prizeNimAwarded = null;
+      prizeNimWaiters = [];
       scoreA = 0; scoreB = 0; round = 1;
       sweep.A.used = false; sweep.B.used = false; sweep.A.rockClicked = false; sweep.B.rockClicked = false;
       matchStartTime = performance.now();
