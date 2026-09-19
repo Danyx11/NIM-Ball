@@ -4188,6 +4188,11 @@ export function startGame(opts = {}) {
   // updated score below that. Address/score text color isn't set here at
   // all — see the CSS comment on .goal-address for why (inherits the mode
   // tint's own ambient ink color instead of a team color).
+  const RESULT_HEX_SRC = {
+    bot: `${ASSET_BASE}ticket/bot-hex-gold.webp`, // the AI is always team B
+    guestA: `${ASSET_BASE}ticket/guest-hex-blue.webp`,
+    guestB: `${ASSET_BASE}ticket/guest-hex-gold.webp`,
+  };
   const RESULT_IDENTICON_SIZE = 512; // its own cache entry, distinct from the stone bake's no-background variant (see getIdenticonCanvasStoneBust)
   function resultPlayerHtml(team, badgeCls, badgeLabel, hasBadge) {
     return `
@@ -4217,10 +4222,17 @@ export function startGame(opts = {}) {
   }
   function fillResultIdenticon(team) {
     const markKind = staticMarkKind(team);
-    const urlPromise = markKind
-      ? getStaticMarkPngDataUrl(markKind, teamAccentColor(team), staticMarkIconColor(team), RESULT_IDENTICON_SIZE)
-      : getIdenticonPngDataUrl(panelAddressFor(team), RESULT_IDENTICON_SIZE);
-    urlPromise.then((url) => {
+    if (markKind) {
+      // Guest/AI: the same rounded-hexagon art the end-of-match ticket uses
+      // (src/ticket.js), not a square+circle crop — see .goal-identicon.is-hex.
+      const img = document.getElementById(`goalIdenticonImg${team}`);
+      if (img) {
+        img.src = markKind === 'bot' ? RESULT_HEX_SRC.bot : RESULT_HEX_SRC[`guest${team}`];
+        img.classList.add('is-hex');
+      }
+      return;
+    }
+    getIdenticonPngDataUrl(panelAddressFor(team), RESULT_IDENTICON_SIZE).then((url) => {
       const img = document.getElementById(`goalIdenticonImg${team}`);
       if (img) img.src = url; // guard: overlay may already have moved on by the time this resolves
     });

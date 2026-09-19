@@ -2025,6 +2025,9 @@ button:disabled { opacity: 0.35; cursor: default; }
 .goal-duo .goal-address { max-width: 150px; }
 .goal-identicon-wrap { position: relative; display: inline-block; }
 .goal-identicon { display: block; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.06); }
+/* Guest/AI use pre-baked rounded-hexagon art (transparent corners, its own
+   background) — no circle crop or backing tint. */
+.goal-identicon.is-hex { border-radius: 0; background: none; }
 /* letter-spacing here (and on .goal-score below) matches #modeOverlay's own
    .half .tag — the mode-select tile label typography — so this panel's box
    text reads as the same family as the tint now applied to it. */
