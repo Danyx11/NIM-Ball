@@ -672,9 +672,9 @@ function connectSocket(url) {
       } else if (msg.type === 'mancheInvalid') {
         if (mancheInvalidCb) mancheInvalidCb({ mancheIndex: msg.mancheIndex, resultA: msg.resultA, resultB: msg.resultB });
       } else if (msg.type === 'leagueResult') {
-        if (leagueResultCb) leagueResultCb({ lpAwarded: msg.lpAwarded });
+        if (leagueResultCb) leagueResultCb({ lpAwarded: msg.lpAwarded, reason: msg.reason });
       } else if (msg.type === 'prizeResult') {
-        if (prizeResultCb) prizeResultCb({ amountNim: msg.amountNim });
+        if (prizeResultCb) prizeResultCb({ amountNim: msg.amountNim, reason: msg.reason });
       }
     });
   });
