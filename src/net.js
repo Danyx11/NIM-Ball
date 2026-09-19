@@ -519,6 +519,7 @@ function connectSocket(url) {
     let mancheValidCb = null;
     let mancheInvalidCb = null;
     let leagueResultCb = null;
+    let prizeResultCb = null;
 
     const net = {
       myTeam: null,
@@ -598,8 +599,10 @@ function connectSocket(url) {
       // (server/arbiter.js has no 'matchOver' case, so it's just ignored
       // there — LAN is dev-only and intentionally not wired into Radar, see
       // CLAUDE.md).
-      sendMatchOver(scoreA, scoreB) {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matchOver', scoreA, scoreB }));
+      // matchIndex: 0 for the room's first match, +1 per "Play Again" (see
+      // party/arbiter.js's own matchIndex comment).
+      sendMatchOver(scoreA, scoreB, matchIndex = 0) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matchOver', scoreA, scoreB, matchIndex }));
       },
       onLaunch(cb) { launchCb = cb; },
       onOpponentJoined(cb) { opponentJoinedCb = cb; },
@@ -617,6 +620,12 @@ function connectSocket(url) {
       // rules, a guest on either side, etc.) — callers must not assume it
       // always arrives.
       onLeagueResult(cb) { leagueResultCb = cb; },
+      // NIM prizes (party/arbiter.js's own 'matchOver' handler) — fires once,
+      // shortly after sendMatchOver, ONLY for the winning side and ONLY once
+      // the server has actually broadcast the payout (see prize.js's own
+      // 'paid' status) — callers must not assume it always arrives, same as
+      // onLeagueResult above.
+      onPrizeResult(cb) { prizeResultCb = cb; },
       close() { ws.close(); },
     };
 
@@ -664,6 +673,8 @@ function connectSocket(url) {
         if (mancheInvalidCb) mancheInvalidCb({ mancheIndex: msg.mancheIndex, resultA: msg.resultA, resultB: msg.resultB });
       } else if (msg.type === 'leagueResult') {
         if (leagueResultCb) leagueResultCb({ lpAwarded: msg.lpAwarded });
+      } else if (msg.type === 'prizeResult') {
+        if (prizeResultCb) prizeResultCb({ amountNim: msg.amountNim });
       }
     });
   });

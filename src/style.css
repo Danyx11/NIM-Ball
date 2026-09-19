@@ -2053,20 +2053,18 @@ button:disabled { opacity: 0.35; cursor: default; }
    panel; 70%/399px is that +50% pass x0.7 (-30%). margin: 0 auto keeps it
    centered even though its flex parent already would. */
 .goal-sponsor-banner { width: 70%; max-width: 399px; border-radius: 10px; display: block; margin: 0 auto; }
-/* Column by default — sits beside the ticket now (see .ticket-row below),
-   not in a row underneath it — back to a row on mobile, stacked below the
-   ticket, where there's no width to spare beside a portrait image. */
+/* Column — sits beside the ticket (see .ticket-row below), on mobile too:
+   the game is landscape-gated there (short, wide viewport), so stacking the
+   actions under the ticket would just eat the scarce vertical space. */
 .goal-actions { display: flex; flex-direction: column; gap: 12px; justify-content: center; }
-.mobile-layout .goal-actions { flex-direction: row; flex-wrap: wrap; }
+.goal-actions .bigbtn { white-space: nowrap; }
 
 /* Ticket + its actions side by side (see conversation: "le but du jeu c'est
    d'avoir de la place pour le ticket" — freeing the row underneath it, not
    just shrinking the actions, is what actually buys the ticket more room).
-   Back to a column on mobile: no width to spare beside a portrait ticket
-   there, same reasoning as .goal-actions above. Used by both game.js's own
+   Same on mobile (landscape-gated, see .goal-actions above). Used by both game.js's own
    #overlay (LIVE/local) and #weekTicketOverlay (WEEK) below. */
 .ticket-row { display: flex; flex-direction: row; align-items: center; gap: 24px; }
-.mobile-layout .ticket-row { flex-direction: column; gap: 18px; }
 
 /* Match-win ticket (see src/ticket.js/showVictory) — a single portrait PNG
    (drawn on an offscreen canvas, dropped in here as a data-URL <img>) doubling
@@ -2097,6 +2095,10 @@ button:disabled { opacity: 0.35; cursor: default; }
 #weekTicketOverlay.mode-curling .config-back { color: var(--bg-deep); }
 /* "Your opponent wants a rematch!" — see main.js's showWeekMatchTicket. */
 #weekTicketRematchNote { margin: 0 0 4px; font-size: 13px; font-weight: 600; opacity: 0.9; }
+/* NIM win prize banner — game.js's showVictory (LIVE) and main.js's
+   showWeekMatchTicket (WEEK), shown only once the server has actually
+   confirmed the payout (see party/prize.js). */
+.prize-banner { margin: 0 0 4px; font-size: 15px; font-weight: 800; color: #ffe066; }
 
 /* Inset to the physics/ice rect only (FX0/FY0/FX1/FY1 in game.js — as % of the
    V2 3312x1896 canvas: 32.79%/33.02%/31.70%/32.81%, left/top/right/bottom),

@@ -18,6 +18,7 @@
 import { Server, getServerByName } from 'partyserver';
 import { RADAR_ROOM_NAME } from './radar.js';
 import { CURRENT_SEASON_ID, isClassicMatchConfig } from './leagueRating.js';
+import { PRIZE_ROOM_NAME } from './prize.js';
 
 const CHAT_COOLDOWN_MS = 30000;
 
@@ -112,6 +113,18 @@ export class Arbiter extends Server {
     // (both clients independently detect the win locally and each send
     // their own 'matchOver', see that branch below).
     this.leagueCompletedNotified = false;
+    // NIM prizes (party/prize.js) — same one-shot-per-instance guard as
+    // radarCompletedNotified/leagueCompletedNotified above and for the exact
+    // same reason (both clients independently detect the win and each send
+    // their own 'matchOver').
+    this.prizeCompletedNotified = false;
+    // "Play Again" reuses this same room for another match (src/game.js's
+    // goalPlayAgainBtn — a purely local reset, this arbiter never hears about
+    // it), so the one-shot flags above would otherwise block every rematch
+    // from League/prizes, and `live:<code>` would collide with the first
+    // match's id (LeagueSeason/prize dedupe on it). The client numbers each
+    // match in the room and sends it on 'matchOver' — see that branch.
+    this.matchIndex = 0;
   }
 
   radarNotify(method, payload) {
@@ -137,6 +150,17 @@ export class Arbiter extends Server {
     getServerByName(this.env.LeagueSeason, CURRENT_SEASON_ID)
       .then((league) => league[method](payload))
       .catch((err) => console.error(`[league] ${method} failed:`, err));
+  }
+
+  // NIM prizes (party/prize.js) — same RPC shape as leagueNotify above, and
+  // same reason it isn't fire-and-forget: the result (paid or not, and how
+  // much) is what the winner's own client needs to show "+10 NIM prize" —
+  // see this file's 'matchOver' branch below.
+  prizeNotify(method, payload) {
+    if (!this.env?.PrizeVault) return Promise.resolve(undefined); // e.g. local dev without the binding configured
+    return getServerByName(this.env.PrizeVault, PRIZE_ROOM_NAME)
+      .then((prize) => prize[method](payload))
+      .catch((err) => { console.error(`[prize] ${method} failed:`, err); return undefined; });
   }
 
   send(connection, msg) {
@@ -298,6 +322,17 @@ export class Arbiter extends Server {
       // itself) is what makes this one-shot, same pattern as
       // radarStartedNotified above. Nothing to relay to the other player —
       // Radar-only, no gameplay effect.
+      const matchIndex = Number(msg.matchIndex) || 0;
+      if (matchIndex < this.matchIndex) return; // late message from an earlier match in this room
+      if (matchIndex > this.matchIndex) {
+        // A rematch just finished. Radar's own flag/id stay as they were (it
+        // never saw a second "started", so a second "completed" would
+        // unbalance its active gauge) — only League/prizes count rematches.
+        this.matchIndex = matchIndex;
+        this.leagueCompletedNotified = false;
+        this.prizeCompletedNotified = false;
+      }
+      const roomMatchId = matchIndex > 0 ? `live:${this.name}:${matchIndex}` : `live:${this.name}`;
       if (!this.radarCompletedNotified) {
         this.radarCompletedNotified = true;
         this.radarNotify('recordMatchCompleted', { matchId: this.name, mode: 'live', timestampMs: Date.now() });
@@ -346,12 +381,39 @@ export class Arbiter extends Server {
             // 'week:'-prefixed ids (see party/weekArbiter.js) even though
             // match codes are drawn from the same 4-character space —
             // LeagueSeason's idempotency check keys off this exact string.
-            leagueMatchId: `live:${this.name}`, mode: 'live', timestampMs: Date.now(),
+            leagueMatchId: roomMatchId, mode: 'live', timestampMs: Date.now(),
             playerA: { address: this.addresses.A }, playerB: { address: this.addresses.B }, winner,
           }).then((result) => {
             if (!result?.ok || result.duplicate) return; // no fresh lpAwarded to report — see leagueSeason.js
             this.send(this.players.A, { type: 'leagueResult', lpAwarded: result.lpAwardedA });
             this.send(this.players.B, { type: 'leagueResult', lpAwarded: result.lpAwardedB });
+          });
+        }
+      }
+      // NIM prizes (party/prize.js) — same eligibility bar as League's block
+      // just above (both players actually connected, both a real wallet,
+      // exact Classic ruleset — this.matchConfig is the creator's own
+      // choice, relayed verbatim, same trust model as every other
+      // client-sent field this arbiter already relays as-is), kept as a
+      // SEPARATE condition rather than nested inside League's own `if`
+      // purely so a change to one can never accidentally affect the other.
+      // Anti-farming/budget/same-wallet checks are still enforced
+      // server-side in prize.js itself, never trusted from here — see
+      // prizeCompletedNotified's own comment for why this fires at most
+      // once per instance.
+      if (!this.prizeCompletedNotified && this.radarStartedNotified && this.addresses.A && this.addresses.B && isClassicMatchConfig(this.matchConfig)) {
+        const scoreA = Number(msg.scoreA) || 0;
+        const scoreB = Number(msg.scoreB) || 0;
+        const winner = scoreA > scoreB ? 'A' : scoreB > scoreA ? 'B' : null;
+        if (winner) {
+          this.prizeCompletedNotified = true;
+          this.prizeNotify('evaluate', {
+            matchId: roomMatchId, mode: 'live', timestampMs: Date.now(),
+            playerA: { address: this.addresses.A }, playerB: { address: this.addresses.B }, winner,
+          }).then((result) => {
+            if (result?.status !== 'paid') return; // not_eligible/budget_exhausted/an unpaid 'eligible' — nothing to show
+            const winnerConnection = winner === 'A' ? this.players.A : this.players.B;
+            this.send(winnerConnection, { type: 'prizeResult', amountNim: result.amountNim });
           });
         }
       }

@@ -37,6 +37,11 @@
 //                    a plain HTTP GET/POST surface only
 //                    (/parties/partnership/<room>) — nothing else in this
 //                    Worker calls into it over RPC.
+//   PrizeVault     — NIM win prizes (see party/prize.js), a single
+//                    fixed-name instance (PRIZE_ROOM_NAME) that Arbiter/
+//                    WeekArbiter call into over DO RPC exactly like
+//                    RadarCollector/LeagueSeason — no HTTP surface at all,
+//                    same "the RPC boundary IS the auth" reasoning.
 import { routePartykitRequest, getServerByName } from 'partyserver';
 import { RADAR_ROOM_NAME } from './radar.js';
 import { TELEGRAM_LINK_ROOM_NAME } from './telegramLink.js';
@@ -47,6 +52,7 @@ export { RadarCollector } from './radar.js';
 export { LeagueSeason } from './leagueSeason.js';
 export { TelegramLink } from './telegramLink.js';
 export { Partnership } from './partnership.js';
+export { PrizeVault } from './prize.js';
 
 // Telegram calls this once a webhook is registered (see CLAUDE.md's Radar
 // section for the `setWebhook` call that points it here with a
