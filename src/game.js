@@ -253,7 +253,7 @@ export function startGame(opts = {}) {
     onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onTurnChange = null,
     matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null,
     singleShotTeam = null, onShotCommitted = null, externalManche: externalMancheOpt = null, onMancheSettled = null, resumeManches = null, weekPointStart = false,
-    weekEntryReady = null, weekStartScoreA = 0, weekStartScoreB = 0,
+    weekEntryReady = null, weekStartScoreA = 0, weekStartScoreB = 0, opponentAddress: weekOpponentAddress = null,
   } = opts;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
   // default preset; Custom is the same shape with different values. Every
@@ -317,6 +317,34 @@ export function startGame(opts = {}) {
     if (IDENTICON_LABEL[team]) return IDENTICON_LABEL[team];
     if (isBotTeam(team)) return 'AI';
     return formatAddressShort(IDENTICON_ADDRESS[team]);
+  }
+  // +1 panel only: IDENTICON_ADDRESS/LABEL only ever carry a real value for
+  // this device's own team (the opponent side is a placeholder — see
+  // DEFAULT_IDENTICON_ADDRESS), which is fine on the board but wrong now that
+  // the panel shows both players. The opponent's real address is known in
+  // LIVE (net.opponentAddress) and WEEK (opts.opponentAddress); the board's
+  // own stone identicons are deliberately left on the placeholder.
+  const panelLocalTeam = myTeam || singleShotTeam;
+  function panelOpponentAddress(team) {
+    return panelLocalTeam && team !== panelLocalTeam ? (net?.opponentAddress || weekOpponentAddress || null) : null;
+  }
+  function panelAddressFor(team) { return panelOpponentAddress(team) || IDENTICON_ADDRESS[team]; }
+  const panelHandleCache = {}; // address -> "@handle" (only once resolved)
+  function panelLabelFor(team) {
+    const real = panelOpponentAddress(team);
+    return real ? (panelHandleCache[real] || formatAddressShort(real)) : identityLabelFor(team);
+  }
+  // Best-effort upgrade of the shortened address to the opponent's @handle
+  // once NimConnect answers (resolveIdentity never rejects to "not found").
+  function upgradePanelHandle(team) {
+    const real = panelOpponentAddress(team);
+    if (!real || panelHandleCache[real]) return;
+    resolveIdentity(real).then((identity) => {
+      if (!identity?.handle) return;
+      panelHandleCache[real] = `@${identity.handle}`;
+      const el = document.querySelector(`#overlay .goal-address[data-team="${team}"]`);
+      if (el) el.textContent = panelHandleCache[real];
+    }).catch(() => { /* keeps the shortened address */ });
   }
   const canvas = document.getElementById('stage');
   // Guards against startGame() ever running twice on the same canvas (e.g. a
@@ -4168,7 +4196,7 @@ export function startGame(opts = {}) {
           <img class="goal-identicon" id="goalIdenticonImg${team}" alt="">
           ${hasBadge ? `<span class="goal-badge ${badgeCls}">${badgeLabel}</span>` : ''}
         </div>
-        <div class="goal-address">${identityLabelFor(team)}</div>
+        <div class="goal-address" data-team="${team}">${panelLabelFor(team)}</div>
       </div>
     `;
   }
@@ -4191,7 +4219,7 @@ export function startGame(opts = {}) {
     const markKind = staticMarkKind(team);
     const urlPromise = markKind
       ? getStaticMarkPngDataUrl(markKind, teamAccentColor(team), staticMarkIconColor(team), RESULT_IDENTICON_SIZE)
-      : getIdenticonPngDataUrl(IDENTICON_ADDRESS[team], RESULT_IDENTICON_SIZE);
+      : getIdenticonPngDataUrl(panelAddressFor(team), RESULT_IDENTICON_SIZE);
     urlPromise.then((url) => {
       const img = document.getElementById(`goalIdenticonImg${team}`);
       if (img) img.src = url; // guard: overlay may already have moved on by the time this resolves
@@ -4225,6 +4253,8 @@ export function startGame(opts = {}) {
     showOverlay(resultPanelHtml(scoringTeam, cls, '+1'));
     fillResultIdenticon('A');
     fillResultIdenticon('B');
+    upgradePanelHandle('A');
+    upgradePanelHandle('B');
     // Click-anywhere dismiss (no buttons here) — closing early doesn't rush
     // beginAimPhase(): maybeAdvanceRound() still waits on the slide animation
     // if that hasn't finished yet.
