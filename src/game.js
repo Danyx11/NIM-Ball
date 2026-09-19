@@ -4161,13 +4161,25 @@ export function startGame(opts = {}) {
   // all — see the CSS comment on .goal-address for why (inherits the mode
   // tint's own ambient ink color instead of a team color).
   const RESULT_IDENTICON_SIZE = 512; // its own cache entry, distinct from the stone bake's no-background variant (see getIdenticonCanvasStoneBust)
+  function resultPlayerHtml(team, badgeCls, badgeLabel, hasBadge) {
+    return `
+      <div class="goal-player">
+        <div class="goal-identicon-wrap">
+          <img class="goal-identicon" id="goalIdenticonImg${team}" alt="">
+          ${hasBadge ? `<span class="goal-badge ${badgeCls}">${badgeLabel}</span>` : ''}
+        </div>
+        <div class="goal-address">${identityLabelFor(team)}</div>
+      </div>
+    `;
+  }
+  // Both teams are shown (A left, B right — same order as the score below),
+  // but only the one who just scored carries the badge.
   function resultPanelHtml(team, badgeCls, badgeLabel, extraHtml) {
     return `
-      <div class="goal-identicon-wrap">
-        <img class="goal-identicon" id="goalIdenticonImg" alt="">
-        <span class="goal-badge ${badgeCls}">${badgeLabel}</span>
+      <div class="goal-duo">
+        ${resultPlayerHtml('A', badgeCls, badgeLabel, team === 'A')}
+        ${resultPlayerHtml('B', badgeCls, badgeLabel, team === 'B')}
       </div>
-      <div class="goal-address">${identityLabelFor(team)}</div>
       <div class="goal-score">
         <span class="goal-score-a">${scoreA}</span><span class="goal-score-sep">–</span><span class="goal-score-b">${scoreB}</span>
       </div>
@@ -4181,7 +4193,7 @@ export function startGame(opts = {}) {
       ? getStaticMarkPngDataUrl(markKind, teamAccentColor(team), staticMarkIconColor(team), RESULT_IDENTICON_SIZE)
       : getIdenticonPngDataUrl(IDENTICON_ADDRESS[team], RESULT_IDENTICON_SIZE);
     urlPromise.then((url) => {
-      const img = document.getElementById('goalIdenticonImg');
+      const img = document.getElementById(`goalIdenticonImg${team}`);
       if (img) img.src = url; // guard: overlay may already have moved on by the time this resolves
     });
   }
@@ -4211,7 +4223,8 @@ export function startGame(opts = {}) {
     const teamTintClass = scoringTeam === 'A' ? 'team-a-scored' : 'team-b-scored';
     overlay.classList.add(teamTintClass, 'goal-box-70');
     showOverlay(resultPanelHtml(scoringTeam, cls, '+1'));
-    fillResultIdenticon(scoringTeam);
+    fillResultIdenticon('A');
+    fillResultIdenticon('B');
     // Click-anywhere dismiss (no buttons here) — closing early doesn't rush
     // beginAimPhase(): maybeAdvanceRound() still waits on the slide animation
     // if that hasn't finished yet.
