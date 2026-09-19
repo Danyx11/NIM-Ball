@@ -2017,6 +2017,12 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* Wrapper is inline-block so #overlay's text-align:center centers the
    identicon itself; the badge rides along as a corner accent instead of
    sitting beside it and pulling the identicon off-center. */
+/* +1 panel shows both players side by side (A left, B right, same order as the
+   score); only the one who just scored gets a .goal-badge (game.js's
+   resultPanelHtml). */
+.goal-duo { display: flex; flex-direction: row; align-items: flex-start; justify-content: center; gap: 36px; }
+.goal-player { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.goal-duo .goal-address { max-width: 150px; }
 .goal-identicon-wrap { position: relative; display: inline-block; }
 .goal-identicon { display: block; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.06); }
 /* letter-spacing here (and on .goal-score below) matches #modeOverlay's own

@@ -194,6 +194,7 @@ export function playSingleShot(week, engineOpts, onSessionStart) {
       // total (see startGame's own comment on why a fresh session would
       // otherwise always start counting from 0).
       weekStartScoreA: week.scoreA, weekStartScoreB: week.scoreB,
+      opponentAddress: week.opponentAddress,
       matchConfig: week.config,
       vibe: week.game,
     });
@@ -253,6 +254,7 @@ export function playReveal(week, engineOpts, onSessionStart) {
       // things — only the former gets the ceremony).
       // revealStartScore, NOT week.scoreA/scoreB — see that function.
       weekStartScoreA: revealStartScore(week).A, weekStartScoreB: revealStartScore(week).B,
+      opponentAddress: week.opponentAddress,
       matchConfig: week.config,
       vibe: week.game,
     });
