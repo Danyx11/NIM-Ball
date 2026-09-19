@@ -57,12 +57,13 @@ function loadImage(src) {
   });
 }
 
-// "NQ16 2SSN 82TL SMQS KXT3 Q01V CMAL NU6F 1LJG" -> "NQ16...1LJG" — never the
-// full address, per the design brief (privacy).
+// "NQ16 2SSN 82TL SMQS KXT3 Q01V CMAL NU6F 1LJG" (or the same unspaced) ->
+// "NQ1…LJG" — first/last 3 chars, same convention as game.js's
+// formatAddressShort and main.js's shortenAddressCompact. Never the full
+// address, per the design brief (privacy).
 function shortenAddress(address) {
-  const groups = address.trim().split(/\s+/);
-  if (groups.length < 2) return address;
-  return `${groups[0]}...${groups[groups.length - 1]}`;
+  const compact = address.replace(/\s+/g, '');
+  return compact.length <= 8 ? compact : `${compact.slice(0, 3)}…${compact.slice(-3)}`;
 }
 
 // M:SS for a real match duration (LIVE/local always under an hour). A WEEK

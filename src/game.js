@@ -1310,13 +1310,17 @@ export function startGame(opts = {}) {
   let leagueLpAwarded = null;
   let matchIndex = 0; // +1 per Play Again, sent with matchOver — see party/arbiter.js
   let leagueLpWaiters = [];
+  // Set once the server has answered at all (a null answer included) — a
+  // null result arriving before showVictory() starts waiting must still end the wait.
+  let leagueLpAnswered = false;
   function resolveLeagueLp(lp) {
     leagueLpAwarded = lp;
+    leagueLpAnswered = true;
     leagueLpWaiters.forEach((resolve) => resolve(lp));
     leagueLpWaiters = [];
   }
   function waitForLeagueLp(timeoutMs) {
-    if (leagueLpAwarded !== null) return Promise.resolve(leagueLpAwarded);
+    if (leagueLpAnswered) return Promise.resolve(leagueLpAwarded);
     return new Promise((resolve) => {
       leagueLpWaiters.push(resolve);
       trackedTimeout(() => resolve(null), timeoutMs);
@@ -1332,13 +1336,15 @@ export function startGame(opts = {}) {
   // 2s.
   let prizeNimAwarded = null;
   let prizeNimWaiters = [];
+  let prizeNimAnswered = false; // same reason as leagueLpAnswered
   function resolvePrizeNim(amountNim) {
     prizeNimAwarded = amountNim;
+    prizeNimAnswered = true;
     prizeNimWaiters.forEach((resolve) => resolve(amountNim));
     prizeNimWaiters = [];
   }
   function waitForPrizeNim(timeoutMs) {
-    if (prizeNimAwarded !== null) return Promise.resolve(prizeNimAwarded);
+    if (prizeNimAnswered) return Promise.resolve(prizeNimAwarded);
     return new Promise((resolve) => {
       prizeNimWaiters.push(resolve);
       trackedTimeout(() => resolve(null), timeoutMs);
@@ -3061,8 +3067,14 @@ export function startGame(opts = {}) {
         showChatMessage(team, muted ? 'Chat OFF' : '');
       });
     }
-    net.onLeagueResult(({ lpAwarded }) => resolveLeagueLp(lpAwarded));
-    net.onPrizeResult(({ amountNim }) => resolvePrizeNim(amountNim));
+    net.onLeagueResult(({ lpAwarded, reason }) => {
+      if (lpAwarded == null) console.info('[rewards] no League points:', reason);
+      resolveLeagueLp(lpAwarded);
+    });
+    net.onPrizeResult(({ amountNim, reason }) => {
+      if (amountNim == null) console.info('[rewards] no NIM prize:', reason);
+      resolvePrizeNim(amountNim);
+    });
     net.onLaunch(({ shotsA, shotsB, sweepA, sweepB, mancheIndex }) => {
       clearLanWaitWatchdog();
       hideOverlay();
@@ -4442,6 +4454,8 @@ export function startGame(opts = {}) {
       matchIndex++;
       leagueLpAwarded = null;
       leagueLpWaiters = [];
+      leagueLpAnswered = false;
+      prizeNimAnswered = false;
       prizeNimAwarded = null;
       prizeNimWaiters = [];
       scoreA = 0; scoreB = 0; round = 1;

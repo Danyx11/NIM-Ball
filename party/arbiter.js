@@ -125,6 +125,21 @@ export class Arbiter extends Server {
     // match's id (LeagueSeason/prize dedupe on it). The client numbers each
     // match in the room and sends it on 'matchOver' — see that branch.
     this.matchIndex = 0;
+    // Which matchIndex already got its "no rewards, and why" answer — see
+    // sendRewardsNone.
+    this.noRewardSentFor = -1;
+  }
+
+  // Tells both clients there's no League/prize result coming, and why. Sent
+  // instead of silence so showVictory() stops waiting (it used to sit out
+  // the full 2s/8s timeouts whenever a match wasn't rewarded — e.g. a prize
+  // refused by prize.js's anti-farming rules) and so the reason is visible in
+  // the browser console (src/game.js logs it).
+  sendRewardsNone(reason) {
+    for (const t of ['A', 'B']) {
+      this.send(this.players[t], { type: 'leagueResult', lpAwarded: null, reason });
+      this.send(this.players[t], { type: 'prizeResult', amountNim: null, reason });
+    }
   }
 
   radarNotify(method, payload) {
@@ -354,6 +369,13 @@ export class Arbiter extends Server {
       //     onMessage's 'matchConfig' branch) — never validated beyond
       //     isClassicMatchConfig's own equality check, same trust model as
       //     every other client-sent field this arbiter already relays as-is.
+      const rewardGateReason = !this.radarStartedNotified ? 'not_both_connected'
+        : !(this.addresses.A && this.addresses.B) ? 'wallet_required'
+        : !isClassicMatchConfig(this.matchConfig) ? 'not_classic' : null;
+      if (rewardGateReason && this.noRewardSentFor !== matchIndex) {
+        this.noRewardSentFor = matchIndex;
+        this.sendRewardsNone(rewardGateReason);
+      }
       if (!this.leagueCompletedNotified && this.radarStartedNotified
         && this.addresses.A && this.addresses.B
         && isClassicMatchConfig(this.matchConfig)) {
@@ -384,7 +406,10 @@ export class Arbiter extends Server {
             leagueMatchId: roomMatchId, mode: 'live', timestampMs: Date.now(),
             playerA: { address: this.addresses.A }, playerB: { address: this.addresses.B }, winner,
           }).then((result) => {
-            if (!result?.ok || result.duplicate) return; // no fresh lpAwarded to report — see leagueSeason.js
+            if (!result?.ok || result.duplicate) { // no fresh lpAwarded to report — see leagueSeason.js
+              for (const t of ['A', 'B']) this.send(this.players[t], { type: 'leagueResult', lpAwarded: null, reason: result?.duplicate ? 'duplicate' : 'league_error' });
+              return;
+            }
             this.send(this.players.A, { type: 'leagueResult', lpAwarded: result.lpAwardedA });
             this.send(this.players.B, { type: 'leagueResult', lpAwarded: result.lpAwardedB });
           });
@@ -411,9 +436,14 @@ export class Arbiter extends Server {
             matchId: roomMatchId, mode: 'live', timestampMs: Date.now(),
             playerA: { address: this.addresses.A }, playerB: { address: this.addresses.B }, winner,
           }).then((result) => {
-            if (result?.status !== 'paid') return; // not_eligible/budget_exhausted/an unpaid 'eligible' — nothing to show
-            const winnerConnection = winner === 'A' ? this.players.A : this.players.B;
-            this.send(winnerConnection, { type: 'prizeResult', amountNim: result.amountNim });
+            // Both sides always get an answer (null = nothing to show:
+            // not_eligible/budget_exhausted/an unpaid 'eligible'), so neither
+            // ticket sits waiting on a prize that isn't coming.
+            const paid = result?.status === 'paid';
+            const reason = paid ? null : (result?.reason || result?.status || 'prize_error');
+            for (const t of ['A', 'B']) {
+              this.send(this.players[t], { type: 'prizeResult', amountNim: paid && t === winner ? result.amountNim : null, reason });
+            }
           });
         }
       }
