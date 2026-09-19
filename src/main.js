@@ -2888,10 +2888,11 @@ navHowTo.addEventListener('click', () => {
 // feature now — the nav item itself is never touched.
 const NIMICURL_TELEGRAM_URL = 'https://t.me/Nimicurl';
 const tgLinkPill = document.getElementById('tgLinkPill');
+const tgLinkPillUrl = document.getElementById('tgLinkPillUrl');
 let tgLinkPillTimer = null;
 function showTgLinkPill() {
   navigator.clipboard.writeText(NIMICURL_TELEGRAM_URL).catch(() => {}); // best-effort, see comment above
-  tgLinkPill.textContent = NIMICURL_TELEGRAM_URL;
+  tgLinkPillUrl.textContent = NIMICURL_TELEGRAM_URL;
   tgLinkPill.classList.remove('hidden');
   clearTimeout(tgLinkPillTimer);
   tgLinkPillTimer = setTimeout(() => tgLinkPill.classList.add('hidden'), 4000);
