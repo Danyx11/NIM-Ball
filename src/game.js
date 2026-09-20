@@ -4353,7 +4353,12 @@ export function startGame(opts = {}) {
     const looksClassic = matchConfig.skin === DEFAULT_MATCH_CONFIG.skin && matchConfig.stonesPerTeam === DEFAULT_MATCH_CONFIG.stonesPerTeam
       && matchConfig.pointsToWin === DEFAULT_MATCH_CONFIG.pointsToWin && matchConfig.turnTime === DEFAULT_MATCH_CONFIG.turnTime
       && matchConfig.curlingCycles === DEFAULT_MATCH_CONFIG.curlingCycles;
-    const leagueLp = (net && looksClassic) ? await waitForLeagueLp(2000) : null;
+    // Waited on alongside the prize below (Promise.all) rather than before it,
+    // and for as long as the prize — the League answer used to get only 2s
+    // and, arriving later, silently cost the ticket its stamp. A null answer
+    // (not rewarded) ends the wait at once, so this only costs time when the
+    // server is genuinely slow.
+    const leagueWait = (net && looksClassic) ? waitForLeagueLp(8000) : Promise.resolve(null);
     // NIM prizes — same Classic-ruleset requirement as League above (see
     // party/prize.js's own eligibility comment); the server still has the
     // real say (both sides a real wallet, distinct wallets, anti-farming,
@@ -4369,7 +4374,8 @@ export function startGame(opts = {}) {
     // non-null for the WINNING side (see party/arbiter.js's 'matchOver'
     // handler — prizeResult is sent to the winner's connection only).
     const looksPrizeEligible = net && looksClassic && net.opponentAddress && IDENTICON_ADDRESS[myTeam] !== DEFAULT_IDENTICON_ADDRESS[myTeam];
-    const prizeNim = looksPrizeEligible ? await waitForPrizeNim(8000) : null;
+    const [leagueLp, prizeNim] = await Promise.all([leagueWait, looksPrizeEligible ? waitForPrizeNim(8000) : Promise.resolve(null)]);
+    if (net && looksClassic && leagueLp == null && !leagueLpAnswered) console.info('[rewards] no League answer from the server within 8s');
     // Opponent's real identicon/address/handle for a net match (see
     // conversation) — IDENTICON_ADDRESS/LABEL only ever carry a real value
     // for myTeam (see DEFAULT_IDENTICON_ADDRESS's own comment: the opponent
