@@ -2342,11 +2342,30 @@ function releasePartnershipReservationIfAny() {
 
 // "SEP 21 – SEP 27" — weekEnd is the exclusive start of the FOLLOWING week
 // (party/partnership.js's own convention), so the displayed last day is one
-// day before it.
+// day before it. Formatted in UTC: weekStart is a UTC Monday midnight, so
+// local-time formatting would show the previous Sunday anywhere west of UTC.
 function formatWeekRange(weekStart, weekEnd) {
-  const fmt = (ts) => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }).toUpperCase();
+  const fmt = (ts) => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }).toUpperCase();
   return `${fmt(weekStart)} – ${fmt(weekEnd - 24 * 60 * 60 * 1000)}`;
 }
+// A week is filed under the month of its Monday (a Sep 28 – Oct 4 week sits
+// in September), so the month picker never shows the same week twice.
+function partnershipMonthKey(weekStart) {
+  const d = new Date(weekStart);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+function partnershipMonthLabel(key) {
+  const [y, m] = key.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }).toUpperCase();
+}
+// ISO 8601 week number (the week's Thursday decides which year it belongs to).
+function isoWeekNumber(weekStart) {
+  const d = new Date(weekStart);
+  d.setUTCDate(d.getUTCDate() + 3);
+  const yearStart = Date.UTC(d.getUTCFullYear(), 0, 1);
+  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+}
+let partnershipMonthShown = null;
 
 function loadPartnershipWeeks() {
   renderPartnershipBook('loading');
@@ -2358,34 +2377,96 @@ function loadPartnershipWeeks() {
   });
 }
 
+// Desktop shows one month at a time as big vertical tiles (month arrows
+// above). Mobile shows the same tiles as ONE continuous horizontal strip of
+// every week — 4 visible, thumb-swipe with scroll-snap — and the month label
+// follows whichever week is snapped to the left edge; the arrows there jump
+// to the first week of the previous/next month instead. All tiles are always
+// rendered (style.css's .mobile-layout rules un-hide the off-month ones).
+// Selection/month changes patch the existing DOM in place (refresh()) rather
+// than re-rendering, so the strip never loses its scroll position.
 function renderPartnershipWeekList(weeks) {
+  const months = [...new Set(weeks.map((w) => partnershipMonthKey(w.weekStart)))];
+  if (IS_MOBILE || !months.includes(partnershipMonthShown)) partnershipMonthShown = months[0];
   const tiles = weeks.map((w) => {
-    const selected = partnershipSelectedWeeks.has(w.weekId);
     const disabled = w.status !== 'available';
-    const cls = ['partnership-week-tile'];
-    if (selected) cls.push('selected');
-    if (disabled) cls.push('disabled');
-    const label = w.status === 'booked' ? (w.sponsorName ? `Booked · ${escapeHtml(w.sponsorName)}` : 'Booked') : w.status === 'pending' ? 'On hold' : (selected ? '✓ Selected' : '');
-    return `<button type="button" class="${cls.join(' ')}" data-week-id="${w.weekId}" ${disabled ? 'disabled' : ''}>
+    return `<button type="button" class="partnership-week-tile${disabled ? ' disabled' : ''}" data-week-id="${w.weekId}" ${disabled ? 'disabled' : ''}>
+      <span class="partnership-week-num">Week ${isoWeekNumber(w.weekStart)}</span>
       <span class="partnership-week-range">${formatWeekRange(w.weekStart, w.weekEnd)}</span>
-      <span class="partnership-week-status">${label}</span>
+      <span class="partnership-week-status"></span>
     </button>`;
   }).join('');
-  const count = partnershipSelectedWeeks.size;
+  const arrow = (dir) => `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${dir === 'prev' ? 'm15 18-6-6 6-6' : 'm9 18 6-6-6-6'}"/></svg>`;
   partnershipBookContent.innerHTML = `
-    <div class="partnership-week-list">${tiles}</div>
-    <button class="bigbtn" id="partnershipPayBtn" ${count === 0 ? 'disabled' : ''}>${count === 0 ? 'Select a week' : `Pay $${count * 10}`}</button>
+    <div class="partnership-picker">
+      <div class="partnership-month-nav">
+        <button type="button" class="partnership-month-arrow" id="partnershipMonthPrev" aria-label="Previous month">${arrow('prev')}</button>
+        <span class="partnership-month-label" id="partnershipMonthLabel"></span>
+        <button type="button" class="partnership-month-arrow" id="partnershipMonthNext" aria-label="Next month">${arrow('next')}</button>
+      </div>
+      <div class="partnership-week-grid" id="partnershipWeekGrid">${tiles}</div>
+      <button class="bigbtn" id="partnershipPayBtn"></button>
+    </div>
   `;
-  partnershipBookContent.querySelectorAll('.partnership-week-tile:not(.disabled)').forEach((el) => {
+  const grid = document.getElementById('partnershipWeekGrid');
+  const tileEls = [...grid.querySelectorAll('.partnership-week-tile')];
+  const prevBtn = document.getElementById('partnershipMonthPrev');
+  const nextBtn = document.getElementById('partnershipMonthNext');
+  const payBtn = document.getElementById('partnershipPayBtn');
+  function refresh() {
+    const monthIdx = months.indexOf(partnershipMonthShown);
+    document.getElementById('partnershipMonthLabel').textContent = partnershipMonthLabel(partnershipMonthShown);
+    prevBtn.disabled = monthIdx <= 0;
+    nextBtn.disabled = monthIdx >= months.length - 1;
+    weeks.forEach((w, i) => {
+      const el = tileEls[i];
+      const selected = partnershipSelectedWeeks.has(w.weekId);
+      el.classList.toggle('selected', selected);
+      el.classList.toggle('off-month', partnershipMonthKey(w.weekStart) !== partnershipMonthShown);
+      el.querySelector('.partnership-week-status').textContent = w.status === 'booked' ? (w.sponsorName ? `Booked · ${w.sponsorName}` : 'Booked') : w.status === 'pending' ? 'On hold' : (selected ? '✓ Selected' : '');
+    });
+    const count = partnershipSelectedWeeks.size;
+    payBtn.disabled = count === 0;
+    payBtn.textContent = count === 0 ? 'Select a week' : `Pay $${count * 10}`;
+  }
+  refresh();
+  tileEls.forEach((el) => {
+    if (el.disabled) return;
     el.addEventListener('click', () => {
       audio.play('button');
       const id = el.dataset.weekId;
       if (partnershipSelectedWeeks.has(id)) partnershipSelectedWeeks.delete(id); else partnershipSelectedWeeks.add(id);
-      renderPartnershipWeekList(weeks);
+      refresh();
     });
   });
-  document.getElementById('partnershipPayBtn').addEventListener('click', () => {
-    if (count === 0) return;
+  const stepMonth = (delta) => {
+    audio.play('button');
+    partnershipMonthShown = months[months.indexOf(partnershipMonthShown) + delta];
+    refresh();
+    if (IS_MOBILE) {
+      const first = tileEls[weeks.findIndex((w) => partnershipMonthKey(w.weekStart) === partnershipMonthShown)];
+      grid.scrollTo({ left: first.offsetLeft, behavior: 'smooth' });
+    }
+  };
+  prevBtn.addEventListener('click', () => stepMonth(-1));
+  nextBtn.addEventListener('click', () => stepMonth(1));
+  if (IS_MOBILE) {
+    let ticking = false;
+    grid.addEventListener('scroll', () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        // First tile whose midpoint is still right of the left edge = the
+        // one currently "leftmost" (partially scrolled tiles count by half).
+        const idx = Math.max(0, tileEls.findIndex((el) => el.offsetLeft + el.offsetWidth / 2 > grid.scrollLeft));
+        const key = partnershipMonthKey(weeks[idx].weekStart);
+        if (key !== partnershipMonthShown) { partnershipMonthShown = key; refresh(); }
+      });
+    }, { passive: true });
+  }
+  payBtn.addEventListener('click', () => {
+    if (partnershipSelectedWeeks.size === 0) return;
     audio.play('button');
     renderPartnershipBook('reserving');
     reservePartnershipWeeks([...partnershipSelectedWeeks], hubAddress).then((res) => {
@@ -2437,7 +2518,7 @@ function renderPartnershipBook(step, ctx = {}) {
     partnershipBookContent.innerHTML = `
       <h2>${ctx.weekIds.length === 1 ? 'Your week' : `${ctx.weekIds.length} weeks`}</h2>
       <p>${ctx.weekIds.map((id) => formatWeekRange(partnershipWeeksById[id].weekStart, partnershipWeeksById[id].weekEnd)).join(' · ')}</p>
-      <p class="about-tagline">${amountNim} NIM</p>
+      <p class="partnership-price">${amountNim} NIM</p>
       <button class="bigbtn" id="partnershipPayNowBtn">Pay in wallet</button>
       <button class="bigbtn" id="partnershipCancelBtn">Cancel</button>
     `;

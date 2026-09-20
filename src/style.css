@@ -1956,47 +1956,97 @@ button:disabled { opacity: 0.35; cursor: default; }
   transition: background .15s ease, border-color .15s ease;
 }
 #claimHandleOverlay .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
-/* Partnership's "Book a week" week picker (#partnershipBookOverlay, see
-   main.js's renderPartnershipWeekList) — same translucent-white treatment
-   as #claimHandleOverlay's .bigbtn above (this panel is .mode-connect too),
-   just as a scrollable list of tiles instead of a single button. Selected
-   uses the gold accent (same one .bigbtn's default state uses elsewhere) so
-   it reads as "this one's chosen" against every other tile's plain white. */
-.partnership-week-list { display: flex; flex-direction: column; gap: 8px; width: 100%; max-height: 260px; overflow-y: auto; }
-.partnership-week-tile {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 12px 18px; border-radius: 14px; width: 100%;
-  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
-  font-family: inherit; font-size: 14px; font-weight: 700; text-align: left; cursor: pointer;
-  transition: background .15s ease, border-color .15s ease;
+/* Partnership panels (#partnershipOverlay/#partnershipBookOverlay) — the
+   same large white .league-panel shell League uses (see that rule for the
+   surface/padding/quit-icon retint), so everything below only adds what
+   League doesn't have: intro copy + usage screenshots, and the week picker
+   (big vertical tiles like the AI/P&P/Remote/Week mode tiles, one month at
+   a time on desktop, a flat scrolling list on mobile). .config-lobby-content's
+   own text colors are written for a dark surface (white h2, --ink-dim p), so
+   they're retinted here to League's navy ink, same idea as .league-panel's
+   own .config-mode-title override. */
+.partnership-panel h2 { color: var(--nb-100); font-size: 26px; font-weight: 800; margin: 0; }
+.partnership-panel p { color: var(--nb-70); }
+.partnership-price { color: var(--nb-100) !important; font-weight: 800; font-size: 15px; letter-spacing: 0.4px; }
+.partnership-intro {
+  flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  margin-top: 18px; text-align: center;
 }
-.partnership-week-tile:hover:not(.disabled):not(.selected) { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
-.partnership-week-tile.selected { background: var(--accent); border-color: var(--accent); color: #3a2900; }
-.partnership-week-tile.disabled { opacity: 0.45; cursor: default; }
-.partnership-week-status { font-size: 12px; font-weight: 600; opacity: 0.85; }
+.partnership-intro p { margin: 0; max-width: 420px; font-size: 14px; line-height: 1.5; }
+.partnership-usage { display: flex; align-items: center; justify-content: center; gap: 24px; margin-top: 10px; flex-wrap: wrap; }
+.partnership-usage img { height: min(34vh, 300px); width: auto; max-width: 100%; border-radius: 14px; box-shadow: 0 2px 10px rgba(31, 35, 72, 0.18); }
+.partnership-book-content { flex: 1; min-height: 0; width: 100%; justify-content: center; margin-top: 14px; }
+.partnership-book-content .bigbtn:disabled, .partnership-banner-upload .bigbtn:disabled { opacity: 0.45; cursor: default; }
+.partnership-picker { flex: 1; min-height: 0; width: 100%; align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.partnership-month-nav { display: flex; align-items: center; justify-content: center; gap: 18px; flex: none; }
+.partnership-month-label { min-width: 220px; text-align: center; font-size: 18px; font-weight: 800; letter-spacing: 0.6px; color: var(--nb-100); }
+.partnership-month-arrow {
+  width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(31, 35, 72, 0.08); color: var(--nb-100);
+}
+.partnership-month-arrow:hover:not(:disabled) { background: rgba(31, 35, 72, 0.14); }
+.partnership-month-arrow:disabled { opacity: 0.3; cursor: default; }
+/* One equal-width column per week of the shown month (4-5), full height —
+   same "tall tile" proportions as #vibeSubOverlay's four mode tiles. */
+.partnership-week-grid {
+  flex: 1; min-height: 0; width: 100%; position: relative;
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 14px;
+}
+.partnership-week-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  padding: 16px; border-radius: 22px; border: none; cursor: pointer; text-align: center;
+  font-family: inherit; color: #fff; background: #0582ca;
+  transition: background .2s ease, transform .2s ease;
+}
+.partnership-week-tile.off-month { display: none; }
+.partnership-week-tile:hover:not(.disabled):not(.selected) { background: #0a92de; transform: translateY(-2px); }
+.partnership-week-tile.selected { background: var(--accent); color: #3a2900; }
+.partnership-week-tile.disabled { background: rgba(31, 35, 72, 0.08); color: var(--nb-50); cursor: default; }
+.partnership-week-num { font-size: 12px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; }
+.partnership-week-range { font-size: 20px; font-weight: 800; line-height: 1.2; }
+.partnership-week-status { font-size: 13px; font-weight: 700; min-height: 18px; opacity: 0.9; }
 /* Banner upload on the 'booked' step (main.js's wirePartnershipBannerUpload)
-   — same translucent-white/dashed-drop-zone idea as the tiles above, sized
-   for the recommended 1600x200 (8:1) banner rather than copied from
-   #replayUploadBox (that one's a whole separate tinted overlay panel; this
-   lives inside the existing .mode-connect blue panel). No generic .hidden
-   utility class exists in this file (see conversation) — every element
-   scopes its own, same convention #helpBtn.hidden/.nq-connect-btn.hidden
-   already use, so these get their own two rules below. */
-.partnership-banner-hint { font-size: 12px; line-height: 1.4; opacity: 0.8; margin: 2px 0 8px; }
+   — dashed drop zone sized for the recommended 1600x200 (8:1) banner. No
+   generic .hidden utility class exists in this file, every element scopes
+   its own (same convention #helpBtn.hidden already uses), hence the two
+   .hidden rules below. */
+.partnership-banner-upload { display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 460px; margin: 6px 0; }
+.partnership-banner-hint { font-size: 12px !important; line-height: 1.4; color: var(--nb-60) !important; margin: 2px 0 8px !important; }
 .partnership-banner-drop {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
   width: 100%; min-height: 70px; padding: 14px; border-radius: 14px; cursor: pointer;
-  background: rgba(255,255,255,0.1); border: 2px dashed rgba(255,255,255,0.35);
+  background: rgba(31, 35, 72, 0.04); border: 2px dashed rgba(31, 35, 72, 0.25); color: var(--nb-100);
   font-size: 13px; font-weight: 600; text-align: center;
   transition: border-color .15s ease, background .15s ease;
 }
-.partnership-banner-drop.dragover { border-color: var(--accent); background: rgba(233,178,19,0.18); }
+.partnership-banner-drop.dragover { border-color: var(--accent); background: rgba(233, 178, 19, 0.15); }
 .partnership-banner-preview { max-width: 100%; max-height: 60px; border-radius: 6px; }
 .partnership-banner-preview.hidden { display: none; }
 #partnershipBannerDropLabel.hidden { display: none; }
-.partnership-banner-upload { display: flex; flex-direction: column; align-items: center; width: 100%; margin: 6px 0; }
 .partnership-banner-upload .bigbtn { margin-top: 10px; }
-.partnership-banner-upload .bigbtn:disabled { opacity: 0.5; cursor: default; }
+/* Mobile: the same tall tiles as one continuous horizontal strip of every
+   week, 4 visible at a time, snapping tile by tile under the thumb — main.js
+   keeps the month label (and its arrows) in sync with the leftmost tile. */
+.mobile-layout .partnership-panel h2 { font-size: 20px; }
+.mobile-layout .partnership-usage { gap: 10px; }
+.mobile-layout .partnership-usage img { height: 120px; }
+.mobile-layout .partnership-picker { gap: 10px; }
+.mobile-layout .partnership-month-label { min-width: 150px; font-size: 15px; }
+.mobile-layout .partnership-week-grid {
+  display: flex; flex-direction: row; gap: 10px;
+  overflow-x: auto; overflow-y: hidden; touch-action: pan-x;
+  scroll-snap-type: x mandatory; scrollbar-width: none;
+}
+.mobile-layout .partnership-week-grid::-webkit-scrollbar { display: none; }
+.mobile-layout .partnership-week-tile, .mobile-layout .partnership-week-tile.off-month {
+  display: flex; flex: 0 0 calc((100% - 30px) / 4); scroll-snap-align: start;
+  padding: 10px 6px; border-radius: 16px; gap: 6px;
+}
+.mobile-layout .partnership-week-num { font-size: 10px; }
+.mobile-layout .partnership-week-range { font-size: 13px; }
+.mobile-layout .partnership-week-status { font-size: 11px; min-height: 0; }
 /* Remote Match's 3 sub-screens (see main.js's showNetPanel) rebuild
    #matchNetworkContent's innerHTML from scratch on every screen change, so a
    fresh entrance for its button(s) needs no JS bookkeeping — new DOM nodes
