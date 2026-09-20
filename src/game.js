@@ -9,6 +9,7 @@ import { audio } from './audio.js';
 import { getIdenticonCanvasStoneBust, getIdenticonPngDataUrl, getIdenticonBgColor, getTintedMarkCanvas, getStaticMarkPngDataUrl } from './identicons.js';
 import { COLORS } from './colors.js';
 import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
+import { computeCurlingAiShots, DEFAULT_CURLING_AI_CONFIG } from './aiCurling.js';
 import { isBasicLaser } from './settings.js';
 import { preloadTicketAssets, renderTicket } from './ticket.js';
 import { loadImages } from './preload.js';
@@ -285,6 +286,9 @@ export function startGame(opts = {}) {
   // deferred that long.
   let replayPointAdvancePending = false;
   const AI_CONFIG = { ...DEFAULT_AI_CONFIG, ...aiConfig };
+  // Pure Curling's own defaults (src/aiCurling.js) — kept apart from the hockey
+  // merge above so hockey's much looser aimNoise can never leak into a curling AI.
+  const CURLING_AI_CONFIG = { ...DEFAULT_CURLING_AI_CONFIG, ...aiConfig };
   const IDENTICON_ADDRESS = { ...DEFAULT_IDENTICON_ADDRESS, ...identiconAddress };
   // Handle/"Guest" override for whichever team maps to this device's own
   // connected identity (see main.js's identityLabelOverride, mirrors
@@ -1998,7 +2002,21 @@ export function startGame(opts = {}) {
     const opponentTeam = aiTeam === 'A' ? 'B' : 'A';
     const stones = entities[aiTeam].filter(g => !g.out && !g.dead);
     const opponentStones = entities[opponentTeam].filter(g => !g.out && !g.dead);
-    const shots = computeAiShots({
+    // Pure Curling: no ball, no goal to defend — a separate planner (see
+    // src/aiCurling.js) that also needs the engine's own friction/collision
+    // constants (passed in, never duplicated there) and how many manches of
+    // this point are left (the last one decides who is closest to the button).
+    const shots = vibe === 'curling' ? computeCurlingAiShots({
+      aiTeam,
+      aiStones: stones.map(g => ({ id: g.id, x: g.x, y: g.y, hits: g.hits })),
+      opponentStones: opponentStones.map(g => ({ id: g.id, x: g.x, y: g.y, hits: g.hits })),
+      bounds: {
+        FX0, FX1, FY0, FY1, CENTER_X, CY, STONE_R, MAX_DRAG, POWER_SCALE,
+        FRICTION, STOP_THRESHOLD, MAX_SPEED, WALL_RESTITUTION, BODY_RESTITUTION, STONE_MAX_HITS, HIT_COOLDOWN_FRAMES,
+      },
+      config: CURLING_AI_CONFIG,
+      manchesLeft: CURLING_CYCLES_PER_POINT - curlingCycle,
+    }) : computeAiShots({
       aiTeam,
       aiStones: stones.map(g => ({ id: g.id, x: g.x, y: g.y })),
       opponentStones: opponentStones.map(g => ({ id: g.id, x: g.x, y: g.y })),
@@ -2009,6 +2027,9 @@ export function startGame(opts = {}) {
     stones.forEach(g => {
       const shot = shots[g.id];
       if (!shot) return;
+      // Curling's planner can decide a stone should simply hold its spot (a
+      // stone already on the button): no shot, so don't flag it "committed".
+      if (vibe === 'curling' && shot.vx === 0 && shot.vy === 0) return;
       g._aiVx = shot.vx; g._aiVy = shot.vy;
       // Marks the stone "committed" for the halo pulse below (haloMode), the
       // same visual language a human's own dragged stone gets — it shows a

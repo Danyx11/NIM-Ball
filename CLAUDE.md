@@ -96,7 +96,7 @@ This is a 2-player physics game rendered on a single `<canvas>`, playable locall
 
 `src/main.js` (~3,400 lines) owns essentially all DOM outside the canvas: the home/splash screen, the mode-select tree, the Classic/Custom settings screens, the LIVE and WEEK lobbies and panels, the identity pill, and the How To hub. It calls `startGame()` once a mode is picked, and separately fires off the optional Nimiq Pay handshake. `src/game.js` is meant to stay canvas-and-rules; the two exceptions that still build DOM inside the closure are the replay playback bar and the goal/victory result panels.
 
-Supporting modules: `src/net.js` (WebSocket/fetch client for Duel LAN, LIVE and WEEK), `src/weekController.js` (WEEK orchestration on top of `startGame()`'s generic hooks), `src/ai.js` (vs-AI shot picking), `src/matchConfig.js` (Classic preset + Custom rules), `src/recorder.js` / `src/replay.js` / `src/ticket.js` (the replay + shareable-ticket chain), `src/howto.js` (tutorial step lists), `src/audio.js` (WebAudio SFX/ambience), `src/identicons.js` (`@nimiq/identicons`), `src/nimiq.js` (`@nimiq/mini-app-sdk` + Nimiq Hub wallet identity), `src/nimconnect.js` (NimConnect @handle read/claim), `src/background.js`, `src/colors.js`, `src/settings.js`, `src/preload.js`.
+Supporting modules: `src/net.js` (WebSocket/fetch client for Duel LAN, LIVE and WEEK), `src/weekController.js` (WEEK orchestration on top of `startGame()`'s generic hooks), `src/ai.js` (vs-AI shot picking, hockey) / `src/aiCurling.js` (vs-AI shot picking, Pure Curling), `src/matchConfig.js` (Classic preset + Custom rules), `src/recorder.js` / `src/replay.js` / `src/ticket.js` (the replay + shareable-ticket chain), `src/howto.js` (tutorial step lists), `src/audio.js` (WebAudio SFX/ambience), `src/identicons.js` (`@nimiq/identicons`), `src/nimiq.js` (`@nimiq/mini-app-sdk` + Nimiq Hub wallet identity), `src/nimconnect.js` (NimConnect @handle read/claim), `src/background.js`, `src/colors.js`, `src/settings.js`, `src/preload.js`.
 
 ### Vibes (hockey / curling)
 
@@ -186,6 +186,7 @@ src/
   net.js          client for all three backends: Duel LAN + LIVE (WebSocket relay)
                   and WEEK (one-shot request/reply sockets + PlayerIndex fetches)
   ai.js           vs-AI shot picking (hockey only)
+  aiCurling.js    vs-AI shot picking for Pure Curling (mini-sim search, see its header)
   matchConfig.js  Classic preset, Custom rules, per-mode localStorage persistence
   howto.js        How To tutorial step lists (separate mobile/desktop orders)
   recorder.js     records manche/point shot data during a live match (see Replay)
