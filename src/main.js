@@ -1253,12 +1253,11 @@ vibeBackBtn.addEventListener('click', (e) => { e.stopPropagation(); audio.play('
 // nimicurl arborescence rework) — now per-vibe and Classic-only (no Custom
 // settings, same as before this move: skips straight to #startOverlay's
 // equivalent, which for solo is nothing at all). Hockey plays exactly like
-// the old tile did; Pure Curling's AI isn't trained yet, so it shows the
-// shared "under construction" panel (showConstructionScreen, see the League/
-// Partnership section further down) instead of launching anything.
+// the old tile did; Pure Curling launches the same way with its own vibe +
+// Classic preset (mirrors launchPassPlayMatch), and game.js picks the
+// curling planner (src/aiCurling.js) for it — src/ai.js stays hockey-only.
 modeAi.addEventListener('click', async () => {
   audio.play('button');
-  if (activeVibe === 'curling') { showConstructionScreen('AI Training'); return; }
   // #modeAi lives inside #vibeSubOverlay — a sibling of #modeOverlay, not
   // nested inside it (see that overlay's own comment) — so hiding
   // #modeOverlay alone leaves this tile's own 4-tile picker sitting on top
@@ -1273,7 +1272,9 @@ modeAi.addEventListener('click', async () => {
   showLoadingOverlay();
   await preloadCoreAssets(IS_MOBILE);
   await new Promise((resolve) => {
-    activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, onMatchReady: resolve });
+    // Hockey (the default vibe) is passed nothing extra, exactly as before.
+    const curlingOpts = activeVibe === 'curling' ? { vibe: 'curling', matchConfig: { ...DEFAULT_MATCH_CONFIG } } : {};
+    activeStopGame = startGame({ ...rockHandlers, aiTeam: 'B', identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, ...curlingOpts, onMatchReady: resolve });
   });
   hideLoadingOverlay();
   setProfilePillTeam('A'); // EXPERIMENT — human is always team A vs AI, fixed for the whole match (see setProfilePillTeam's own comment)
