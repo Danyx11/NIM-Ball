@@ -2652,6 +2652,15 @@ navNimiq.addEventListener('click', () => {
   else hideNimiqScreen();
 });
 nimiqBackBtn.addEventListener('click', hideNimiqScreen);
+// Inside Nimiq Pay, window.open()/target=_blank don't hand off to a browser
+// (see openNimicurlTelegram's comment) — show the URL card instead.
+document.getElementById('nimiqWebsiteBtn').addEventListener('click', (e) => {
+  audio.play('button');
+  if (window.nimiqPay) {
+    e.preventDefault();
+    showTgLinkPill('https://www.nimiq.com', 'Nimiq');
+  }
+});
 // League (index.html's #navLeague/#leagueOverlay) — dedicated panel, backed
 // by the real League Beta backend now (party/leagueSeason.js via
 // src/net.js's fetchLeagueLeaderboard/fetchLeagueWeeklyLeaderboard) — used
@@ -2959,10 +2968,13 @@ navHowTo.addEventListener('click', () => {
 const NIMICURL_TELEGRAM_URL = 'https://t.me/Nimicurl';
 const tgLinkPill = document.getElementById('tgLinkPill');
 const tgLinkPillUrl = document.getElementById('tgLinkPillUrl');
+const tgLinkPillTitle = document.getElementById('tgLinkPillTitle');
 let tgLinkPillTimer = null;
-function showTgLinkPill() {
-  navigator.clipboard.writeText(NIMICURL_TELEGRAM_URL).catch(() => {}); // best-effort, see comment above
-  tgLinkPillUrl.textContent = NIMICURL_TELEGRAM_URL;
+// Also reused by the Nimiq panel's "Official website" pill (url/title args).
+function showTgLinkPill(url = NIMICURL_TELEGRAM_URL, title = 'Telegram') {
+  navigator.clipboard.writeText(url).catch(() => {}); // best-effort, see comment above
+  tgLinkPillTitle.textContent = title;
+  tgLinkPillUrl.textContent = url;
   tgLinkPill.classList.remove('hidden');
   clearTimeout(tgLinkPillTimer);
   tgLinkPillTimer = setTimeout(() => tgLinkPill.classList.add('hidden'), 4000);

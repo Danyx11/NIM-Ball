@@ -1269,6 +1269,13 @@
         <p>Nimiq makes sending, receiving and using digital money feel as easy as using a regular app — without the usual complexity of crypto.</p>
         <p>Nimicurl is one of the ways we want to make that experience even more accessible: by letting people discover Nimiq simply by playing a game with their friends.</p>
       </div>
+      <!-- Plain external link (new tab); main.js's #nimiqWebsiteBtn handler
+           swaps in the #tgLinkPill URL card inside Nimiq Pay, where
+           opening links from the WebView doesn't work. -->
+      <a class="panel-link-pill" id="nimiqWebsiteBtn" href="https://www.nimiq.com" target="_blank" rel="noopener noreferrer">
+        Official website
+        <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>
+      </a>
     </div>
     <!-- Partnership (index.html's #navPartnership sidebar link, wired in
          main.js) — same large white panel as League (#leagueOverlay above:
@@ -1503,7 +1510,7 @@
        lives at the top level, position:fixed centered, not nested under
        any one of them. -->
   <div id="tgLinkPill" class="tg-link-pill hidden">
-    <p class="tg-link-pill-title">Telegram</p>
+    <p class="tg-link-pill-title" id="tgLinkPillTitle">Telegram</p>
     <p class="tg-link-pill-url" id="tgLinkPillUrl"></p>
     <p class="tg-link-pill-hint">Tap to dismiss</p>
   </div>
