@@ -840,10 +840,15 @@
     <!-- Connect gate (see main.js's showConnectGate/revealAfterGates) — shown
          once right after the home screen, before mode-select, whenever
          getIdentity() (src/nimiq.js) says the player hasn't decided yet.
-         Same config-panel/preset-tile charte as Classic/Custom just below,
-         no back arrow since there's no earlier menu step to return to.
-         Reopened later from the corner identity pill's disconnect action. -->
+         Same config-panel/preset-tile charte as Classic/Custom just below.
+         Reopened later from the corner identity pill (identity left
+         untouched until Guest/Connect is actually picked) — that's the only
+         time #cgExitBtn shows (main.js's showConnectGate), since the very
+         first gate has no earlier menu step to return to. -->
     <div id="connectGateOverlay" class="config-panel mode-connect hidden">
+      <button class="config-back hidden" id="cgExitBtn" type="button" aria-label="Exit">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
       <div class="config-header">
         <span class="config-mode-icon">
           <svg viewBox="0 0 54 54" aria-hidden="true"><path fill="currentColor" d="M26.95 0A27.05 27.05 0 0 0 .21 22.32a1.12 1.12 0 0 0 1.13 1.3h18.72c.62 0 1.12-.5 1.12-1.12v-8.1a2.25 2.25 0 0 1 3.66-1.76l15.75 12.6a2.25 2.25 0 0 1 0 3.52l-15.75 12.6a2.25 2.25 0 0 1-3.66-1.76v-8.1c0-.62-.5-1.12-1.12-1.12H1.35a1.14 1.14 0 0 0-1.13 1.3 27 27 0 0 0 53.55-5.78A27.25 27.25 0 0 0 26.95 0z"/></svg>
