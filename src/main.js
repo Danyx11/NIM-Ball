@@ -542,7 +542,7 @@ navHome.addEventListener('click', () => {
     // uses below for the identical reason.
     if (modeDrawer.classList.contains('hidden')) {
       audio.play('button');
-      OTHER_MENU_OVERLAY_IDS.forEach((id) => document.getElementById(id).classList.add('hidden'));
+      hideSidebarPanels();
       showModeDrawer();
     }
     return;
@@ -2190,12 +2190,7 @@ const aboutOverlay = document.getElementById('aboutOverlay');
 const aboutBackBtn = document.getElementById('aboutBackBtn');
 function showAboutScreen() {
   audio.play('button');
-  constructionOverlay.classList.add('hidden');
-  nimiqOverlay.classList.add('hidden');
-  leagueOverlay.classList.add('hidden');
-  leagueRulesOverlay.classList.add('hidden');
-  partnershipOverlay.classList.add('hidden');
-  partnershipBookOverlay.classList.add('hidden');
+  hideSidebarPanels();
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2229,12 +2224,7 @@ const constructionTitle = document.getElementById('constructionTitle');
 let activeConstructionLabel = null;
 function showConstructionScreen(label) {
   audio.play('button');
-  aboutOverlay.classList.add('hidden');
-  nimiqOverlay.classList.add('hidden');
-  leagueOverlay.classList.add('hidden');
-  leagueRulesOverlay.classList.add('hidden');
-  partnershipOverlay.classList.add('hidden');
-  partnershipBookOverlay.classList.add('hidden');
+  hideSidebarPanels();
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2275,12 +2265,7 @@ const partnershipBookBackBtn = document.getElementById('partnershipBookBackBtn')
 const partnershipBookContent = document.getElementById('partnershipBookContent');
 function showPartnershipScreen() {
   audio.play('button');
-  aboutOverlay.classList.add('hidden');
-  constructionOverlay.classList.add('hidden');
-  nimiqOverlay.classList.add('hidden');
-  leagueOverlay.classList.add('hidden');
-  leagueRulesOverlay.classList.add('hidden');
-  partnershipBookOverlay.classList.add('hidden');
+  hideSidebarPanels();
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2649,12 +2634,7 @@ const nimiqOverlay = document.getElementById('nimiqOverlay');
 const nimiqBackBtn = document.getElementById('nimiqBackBtn');
 function showNimiqScreen() {
   audio.play('button');
-  aboutOverlay.classList.add('hidden');
-  constructionOverlay.classList.add('hidden');
-  leagueOverlay.classList.add('hidden');
-  leagueRulesOverlay.classList.add('hidden');
-  partnershipOverlay.classList.add('hidden');
-  partnershipBookOverlay.classList.add('hidden');
+  hideSidebarPanels();
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2788,12 +2768,7 @@ function renderLeagueMeStats() {
 }
 function showLeagueScreen() {
   audio.play('button');
-  aboutOverlay.classList.add('hidden');
-  constructionOverlay.classList.add('hidden');
-  nimiqOverlay.classList.add('hidden');
-  leagueRulesOverlay.classList.add('hidden');
-  partnershipOverlay.classList.add('hidden');
-  partnershipBookOverlay.classList.add('hidden');
+  hideSidebarPanels();
   modeOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
@@ -2881,13 +2856,26 @@ const OTHER_MENU_OVERLAY_IDS = [
   'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay',
   'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay',
   'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay',
+  'partnershipOverlay', 'partnershipBookOverlay', 'howToHubOverlay',
   'nimicurlRulesOverlay', 'pureCurlingRulesOverlay',
 ];
+// One sweep for every sidebar-reachable panel (About, Nimiq, League, Partnership,
+// How to, the rules screens…), shared by Home and each nav's own show*Screen.
+// Those used to hand-roll their own partial hide lists, so opening/leaving one
+// panel from another left a stale one on screen (reported: Partnership and How
+// to stayed put on Home / other navs). Also releases what a panel holds open
+// (a Partnership week reservation, the How To video) since the sweep bypasses
+// each panel's own back button.
+function hideSidebarPanels() {
+  releasePartnershipReservationIfAny();
+  resetHowToVideo();
+  OTHER_MENU_OVERLAY_IDS.forEach((id) => document.getElementById(id).classList.add('hidden'));
+}
 function showHowToScreen() {
   audio.play('button');
   hideLobby();
   hideNetPanel();
-  OTHER_MENU_OVERLAY_IDS.forEach((id) => document.getElementById(id).classList.add('hidden'));
+  hideSidebarPanels();
   updateNcrScrollPill();
   updatePcrScrollPill();
   modeOverlay.classList.remove('hidden');
