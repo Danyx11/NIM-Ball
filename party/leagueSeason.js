@@ -23,7 +23,7 @@
 //   (src/main.js) — this player's own stats, the season leaderboard, or a
 //   weekly leaderboard (see addition below the original implementation).
 import { Server } from 'partyserver';
-import { applyMatchResult, STARTING_RATING, RANKED_MATCH_THRESHOLD, rankingStatus } from './leagueRating.js';
+import { applyMatchResult, STARTING_RATING, rankingStatus } from './leagueRating.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -128,14 +128,18 @@ export class LeagueSeason extends Server {
     };
   }
 
-  // Ranked players only (3+ completed matches, spec section 4), sorted by
-  // League Points — a provisional player simply doesn't have a rank yet,
-  // same as most ladder systems. Fine to recompute from scratch on every
-  // call at this beta's scale (a handful to a few hundred players, not
+  // Every player with at least one completed match, sorted by League
+  // Points — no minimum-matches gate any more (spec section 4's 3-match
+  // "ranked" threshold used to filter this list; dropped by explicit
+  // request so players show up from their very first match). Because
+  // this.players already holds every player's stats regardless of that
+  // threshold, lifting the filter also surfaces everything already played,
+  // no data migration needed. Fine to recompute from scratch on every call
+  // at this beta's scale (a handful to a few hundred players, not
   // thousands) — no separate maintained sort order needed.
   leaderboard(limit) {
     return Object.values(this.players)
-      .filter((p) => p.matches >= RANKED_MATCH_THRESHOLD)
+      .filter((p) => p.matches >= 1)
       .sort((x, y) => y.lp - x.lp)
       .slice(0, limit)
       .map((p, i) => ({ rank: i + 1, address: p.address, lp: p.lp, matches: p.matches, wins: p.wins, losses: p.losses, streak: p.streak }));
@@ -143,10 +147,9 @@ export class LeagueSeason extends Server {
 
   // "This week" leaderboard, ranked by LP EARNED during the current UTC
   // calendar week (Monday 00:00:00 UTC through now), computed from match
-  // history rather than lifetime `lp`. No RANKED_MATCH_THRESHOLD gate here
-  // — this is a "who's hot this week" board, not the official ranking, so
-  // even a provisional player who played (and earned LP) this week should
-  // show up. Sums lpAwardedA/lpAwardedB per address across every match in
+  // history rather than lifetime `lp`. Every player who played this week
+  // shows up, same as the main board now that it has no minimum-matches
+  // gate either. Sums lpAwardedA/lpAwardedB per address across every match in
   // this.matches whose timestamp falls in the window, sorts descending, and
   // returns the same row shape as leaderboard() (rank, address, lp <- weekly
   // sum, matches/wins/losses <- this week's counts, streak <- the player's
@@ -201,14 +204,10 @@ export class LeagueSeason extends Server {
     if (!address) return Response.json({ error: 'address or leaderboard required' }, { status: 400, headers: cors });
     const stored = this.players[address];
     const player = this.publicPlayer(stored || this.emptyPlayer(address));
-    // Rank is only meaningful once ranked (spec section 4) — a provisional
-    // player's rank is simply null rather than e.g. a mostly-meaningless
-    // "position among the 0-2-match crowd" number.
-    let rank = null;
-    if (player.status === 'ranked') {
-      const row = this.leaderboard(1e6).find((r) => r.address === address);
-      rank = row ? row.rank : null;
-    }
+    // Anyone on the leaderboard (1+ completed match) has a rank; a player
+    // with no matches yet isn't on it, so their rank stays null.
+    const row = this.leaderboard(1e6).find((r) => r.address === address);
+    const rank = row ? row.rank : null;
     return Response.json({ seasonId: this.name, player, rank }, { headers: cors });
   }
 }
