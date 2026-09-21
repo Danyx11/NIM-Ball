@@ -4486,6 +4486,7 @@ export function startGame(opts = {}) {
       prizeNimAwarded = null;
       prizeNimWaiters = [];
       scoreA = 0; scoreB = 0; round = 1;
+      curlingCycle = 0; // the winning point ends the match without going through beginRoundReset(), so the counter is still at CURLING_CYCLES_PER_POINT
       sweep.A.used = false; sweep.B.used = false; sweep.A.rockClicked = false; sweep.B.rockClicked = false;
       matchStartTime = performance.now();
       totalCollisions = 0; bestShotSpeed = 0; stonesDestroyed = 0;
