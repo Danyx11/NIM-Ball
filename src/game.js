@@ -1443,6 +1443,27 @@ export function startGame(opts = {}) {
   // itself is treated as the disconnect.
   const LAN_WAIT_TIMEOUT_MS = 120000;
   let lanWaitWatchdogId = null;
+  // Net matches: the opponent's socket has closed (see net.onDisconnect
+  // above). Only decides what an already-decided match's ticket offers
+  // (Play Again) — a mid-match departure still goes to showNetDeadEnd().
+  let opponentGone = false;
+  // The match has ended as far as this client is concerned: either the
+  // ticket phase has begun, or the goal now pending is the deciding one
+  // (scores are only bumped once its pause is over — see resolveGoal — hence
+  // the +1). Replay never routes through here, it has no net.
+  function matchIsDecided() {
+    if (phase === 'gameover') return true;
+    if (!goalPending) return false;
+    const scoringScore = goalPending.scoringTeam === 'A' ? scoreA : scoreB;
+    return scoringScore + 1 >= WIN_SCORE;
+  }
+  // Nobody left to rematch: the ticket stays, its Play Again does not.
+  function syncTicketRematchButton() {
+    const btn = document.getElementById('goalPlayAgainBtn');
+    if (!btn || !opponentGone) return;
+    btn.disabled = true;
+    btn.textContent = 'Opponent left';
+  }
   function clearLanWaitWatchdog() {
     if (lanWaitWatchdogId !== null) { clearTimeout(lanWaitWatchdogId); lanWaitWatchdogId = null; }
   }
@@ -3188,7 +3209,16 @@ export function startGame(opts = {}) {
     // A real close/'opponentLeft' signal actually arrived (see
     // showNetDeadEnd's own comment on why that reads as 'quit' rather than
     // a silent drop, and the 'lanWait' watchdog above for the other case).
-    net.onDisconnect(() => showNetDeadEnd('quit'));
+    net.onDisconnect(() => {
+      opponentGone = true;
+      // The opponent closing THEIR ticket (or leaving during the final goal
+      // pause / this side's own ticket render) reaches us as the very same
+      // close signal as a mid-match quit. Once the match is decided the
+      // ticket is the only thing this side should ever see — "Match over"
+      // used to overwrite it — so just stop offering a rematch to nobody.
+      if (matchIsDecided()) { syncTicketRematchButton(); return; }
+      showNetDeadEnd('quit');
+    });
   } else if (aiTeam) {
     // Solo vs IA: no lobby/ready-tap step needed (only one human) — straight
     // into the human's aim phase, same as LAN skips the local ready screen.
@@ -4204,13 +4234,10 @@ export function startGame(opts = {}) {
       // shareable ticket showVictory() builds assumes one continuous match
       // session recording every point (src/recorder.js) — a WEEK session
       // only ever plays the one manche it was given, so there's no match
-      // history here for a ticket to summarize. Falls through to the exact
-      // same +1-panel path a non-winning goal already takes instead: the
-      // player still sees the goal settle and dismisses a result panel (see
-      // showGoalPanel — round++ skipped since the match is actually over),
-      // which is what lets beginAimPhase()'s own externalManche branch (via
-      // maybeAdvanceRound() below) report the final score back out once
-      // they've dismissed it, same as any other WEEK manche outcome.
+      // history here for a ticket to summarize. It reports the final score
+      // back out through beginAimPhase()'s externalManche branch instead
+      // (see the `else if (isMatchWin)` branch below), and main.js raises the
+      // ticket (showWeekMatchTicket) from there.
       if (isMatchWin && !externalManche) {
         // NIM-Curl Radar (see party/arbiter.js's 'matchOver' branch) — LIVE
         // only (net is null for Pass & Play/AI/replay, and WEEK never
@@ -4219,6 +4246,16 @@ export function startGame(opts = {}) {
         // handler, LAN is intentionally out of Radar's scope — see CLAUDE.md).
         net?.sendMatchOver?.(scoreA, scoreB, matchIndex);
         showVictory();
+      } else if (isMatchWin) {
+        // WEEK's deciding point: no +1 panel — like every other mode's last
+        // point, the only thing to show after it is the match ticket, which
+        // weekController/main.js raise as soon as the server confirms the
+        // match is complete. Straight to the report in beginAimPhase()'s
+        // externalManche branch (which parks on 'mancheHold', the settled
+        // board): no round reset either, there is no next point to set up.
+        roundResetAnimDone = true;
+        goalPanelDismissed = true;
+        maybeAdvanceRound();
       } else {
         if (!isMatchWin) round++;
         // Both fire at once and run independently: beginRoundReset() keeps its
@@ -4341,6 +4378,10 @@ export function startGame(opts = {}) {
   // LAN opponents can look at the exact same ticket without inconsistency.
   async function showVictory() {
     phase = 'gameover';
+    // A "Match over" dead-end shown earlier (showNetDeadEnd, e.g. the opponent
+    // dropped mid-sim just before this final goal) leaves its click-anywhere-
+    // to-exit handler on the overlay — it must not survive onto the ticket.
+    overlay.onclick = null;
     // Same rule as showGoalPanel()'s +1 panel: the winning goal is also a
     // point panel, just the last one — ambience must not keep humming behind
     // the ticket screen (it previously only ever got silenced by clicking
@@ -4411,7 +4452,9 @@ export function startGame(opts = {}) {
       const oppTeam = myTeam === 'A' ? 'B' : 'A';
       ticketAddresses[oppTeam] = net.opponentAddress;
       try {
-        const identity = await resolveIdentity(net.opponentAddress);
+        // Bounded: a stalled NimConnect lookup must never keep the ticket
+        // from appearing (it only supplies a nicer label for the opponent).
+        const identity = await Promise.race([resolveIdentity(net.opponentAddress), new Promise((resolve) => setTimeout(resolve, 3000))]);
         if (identity?.handle) ticketLabels[oppTeam] = `@${identity.handle}`;
       } catch { /* best-effort — ticket falls back to the shortened address */ }
     }
@@ -4442,6 +4485,7 @@ export function startGame(opts = {}) {
         </div>
       </div>
     `);
+    syncTicketRematchButton(); // the opponent may already have left while the ticket was being built
     const ticketImg = document.getElementById('ticketImg');
     ticketImg.src = ticketCanvas.toDataURL('image/png');
     // The league stamp itself is baked straight into the canvas pixels (see
