@@ -3811,7 +3811,9 @@ async function showWeekMatchTicket(week) {
   if (week.opponentAddress) {
     teams[oppTeam] = { address: week.opponentAddress };
     try {
-      const identity = await resolveIdentity(week.opponentAddress);
+      // Bounded (same as game.js's showVictory): a stalled lookup must never
+      // keep the ticket from appearing.
+      const identity = await Promise.race([resolveIdentity(week.opponentAddress), new Promise((resolve) => setTimeout(resolve, 3000))]);
       if (identity?.handle) teams[oppTeam].label = `@${identity.handle}`;
     } catch { /* best-effort — ticket falls back to the shortened address */ }
   }
