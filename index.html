@@ -1146,9 +1146,6 @@
       </div>
       <div class="howto-pyramid">
         <div class="howto-top-row">
-          <button class="config-preset-btn howto-pill-top" id="htPlayBtn" type="button">
-            <div class="config-preset-name">How to Play Your Shot</div>
-          </button>
           <!-- Purely illustrative, no link to htPlayBtn's own interactive
                tutorial. Single <video> element, not a thumbnail + separate
                lightbox player (see conversation — two elements meant two
@@ -1157,8 +1154,17 @@
                autoplay/muted/loop as a silent preview; a click on it
                (main.js) just unmutes it in place and turns on native
                controls, which is also where the scrub bar and fullscreen
-               button come from — no custom player UI needed. -->
+               button come from — no custom player UI needed. Centered
+               horizontally above the pills. -->
           <video class="howto-video-thumb" id="htVideoThumb" src="%BASE_URL%rules/nimicurl-howto.mp4" autoplay muted loop playsinline preload="metadata" aria-label="Watch tutorial video"></video>
+        </div>
+        <!-- Interactive tutorial launcher (main.js's htPlayBtn handler): same
+             pill format as the two rules pills below, but as wide as the
+             pair so its label fits on two lines. -->
+        <div class="howto-tuto-row">
+          <button class="config-preset-btn howto-rules-pill howto-tuto-pill" id="htPlayBtn" type="button">
+            <div class="config-preset-name howto-rules-name">TUTORIAL:<br>HOW TO PLAY YOUR SHOTS</div>
+          </button>
         </div>
         <div class="config-presets">
           <button class="config-preset-btn howto-rules-pill" id="htNimicurlBtn" type="button">
