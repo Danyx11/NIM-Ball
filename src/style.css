@@ -2987,6 +2987,41 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 .league-panel .config-back { background: rgba(31, 35, 72, 0.08); color: var(--nb-100); }
 .league-panel .config-back:hover { background: rgba(31, 35, 72, 0.12); }
+/* .white-panel — colors only: the same Nimiq-white look as .league-panel
+   (translucent Nimiq Gray surface, navy ink, white pills with the same
+   hairline ring) for every other sidebar-nav panel (About, Nimiq, the
+   placeholder, How to play + its two rules pages), which used to be tinted
+   Light Blue/Gold like the vibe tiles. Deliberately does NOT carry
+   .league-panel's geometry (6% inset, padding) — each of these keeps its own
+   size/position, only the palette is shared. Replaces .mode-connect/
+   .mode-hockey/.mode-curling on those overlays (no JS toggles those there),
+   so none of those tints' own overrides apply any more. */
+.config-panel.white-panel {
+  background: rgba(244, 244, 244, 0.85);
+  color: var(--nb-100);
+  --ink-dim: var(--nb-70);
+}
+.white-panel .config-mode-title,
+.white-panel .config-mode-icon svg,
+.white-panel .config-lobby-content h2,
+.white-panel .about-content .about-tagline { color: var(--nb-100); }
+.white-panel .config-lobby-content p { color: var(--nb-70); }
+.white-panel .rules-note { color: var(--nb-60); }
+.white-panel .rules-scroll-pill { background: rgba(31, 35, 72, 0.16); }
+.white-panel .config-back { background: rgba(31, 35, 72, 0.08); color: var(--nb-100); }
+.white-panel .config-back:hover { background: rgba(31, 35, 72, 0.12); }
+/* How to play's 3 pills + the rules pages' header logo (a clone of the vibe
+   tile's .mode-icon, which is white by default). Same white pill as League's
+   .league-rules-btn/.league-rank-pill. */
+.white-panel .mode-icon { color: var(--nb-100); }
+.white-panel .config-preset-btn {
+  background: #fff; border: none; color: var(--nb-100);
+  box-shadow: 0 0 0 1px rgba(31, 35, 72, 0.08);
+}
+.white-panel .config-preset-btn:hover { background: #fff; box-shadow: 0 0 0 1px var(--nb-16), 0 2px 10px rgba(31, 35, 72, 0.12); }
+.white-panel .config-preset-name { color: var(--nb-100); }
+.white-panel .config-preset-sub { color: var(--nb-60); }
+.white-panel .howto-video-thumb { background: rgba(31, 35, 72, 0.08); }
 /* Mirrors .config-back's own position (top:24/right:28) on the opposite
    corner — the one other floating control this panel has, so it gets the
    same "outside the header flow" treatment instead of fighting the centered
