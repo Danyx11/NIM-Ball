@@ -630,7 +630,7 @@ if (isPortraitMobile()) showRotateOverlay();
 // orientation listener can just call it.
 // isFirstConnectGate marks THIS specific reason for opening the gate — no
 // identity existed yet, i.e. a genuine first-ever connection — as opposed to
-// the identity pill's disconnect action reopening the same gate later, which
+// the identity pill reopening the same gate later, which
 // sets it back to false right before doing so. proceedPastConnectGate below
 // reads it once (then resets it) to decide whether the new #introHowToOverlay
 // prompt belongs in the flow this time (see conversation — only ever on that
@@ -727,8 +727,9 @@ function identityLabelOverride(team) {
 }
 // The corner pill is now a pure display of the resolved identity (address,
 // or "Guest") — no longer the connect trigger itself, that's #connectGateOverlay's
-// job. Clicking it reopens the gate to switch (disconnect), same "tap your
-// own identity to change it" pattern as elsewhere, gated to mode-select only
+// job. Clicking it reopens the gate to switch (identity untouched until
+// Guest/Connect is picked), same "tap your own identity to change it"
+// pattern as elsewhere, gated to mode-select only
 // (activeStopGame, set further down) — reopening the gate mid-match would
 // yank the identicon out from under a running game.
 const connectBtn = document.getElementById('connectBtn');
@@ -976,9 +977,9 @@ function setProfilePillTeam(team) {
 connectBtn.addEventListener('click', () => {
   if (activeStopGame) return;
   audio.play('button');
-  clearIdentity();
-  hubAddress = null;
-  syncIdentityPill();
+  // Identity is left untouched here — the wallet stays connected until the
+  // player actually picks Guest (cgGuestBtn), or Connect resolves with a
+  // different account (cgConnectBtn); the gate's exit icon backs out as-is.
   isFirstConnectGate = false; // a manual reconnect, not the true first one — see revealAfterGates
   showConnectGate();
 });
@@ -1838,15 +1839,18 @@ csSaveBtn.addEventListener('click', () => {
 // the player hasn't decided yet (never chose Connect or Guest this device).
 // Reuses #modeOverlay's own arena backdrop, same trick as Classic/Custom
 // above: only #modeDrawer (the tile grid) needs hiding underneath. Also
-// reopened later by the corner identity pill's disconnect action (see
-// connectBtn above).
+// reopened later by the corner identity pill (see connectBtn above).
 const connectGateOverlay = document.getElementById('connectGateOverlay');
 const cgConnectBtn = document.getElementById('cgConnectBtn');
 const cgGuestBtn = document.getElementById('cgGuestBtn');
 const cgError = document.getElementById('cgError');
+const cgExitBtn = document.getElementById('cgExitBtn');
 
 function showConnectGate() {
   cgError.classList.add('hidden');
+  // Exit only when there's an identity (address or guest) to fall back to —
+  // i.e. reopened from the pill, never the very first gate.
+  cgExitBtn.classList.toggle('hidden', !getIdentity());
   cgConnectBtn.disabled = false;
   cgGuestBtn.disabled = false;
   hideLobby();
@@ -1920,6 +1924,12 @@ cgConnectBtn.addEventListener('click', () => {
       cgConnectBtn.disabled = false;
       cgGuestBtn.disabled = false;
     });
+});
+
+// Backs out of a pill-reopened gate without touching the current identity.
+cgExitBtn.addEventListener('click', () => {
+  audio.play('button');
+  proceedPastConnectGate();
 });
 
 cgGuestBtn.addEventListener('click', () => {
