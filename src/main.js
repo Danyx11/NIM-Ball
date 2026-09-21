@@ -2746,7 +2746,7 @@ const leagueTabMain = document.getElementById('leagueTabMain');
 const leagueTabWeek = document.getElementById('leagueTabWeek');
 function renderLeagueMobileRanks() {
   const rows = leagueMobileTab === 'main' ? leagueMainRows : leagueWeekRows;
-  const emptyText = leagueMobileTab === 'main' ? 'No ranked players yet' : 'No matches this week yet';
+  const emptyText = leagueMobileTab === 'main' ? 'No players yet' : 'No matches this week yet';
   renderLeagueRankPill(document.getElementById('leagueMobileRanks'), rows, emptyText);
 }
 function setLeagueMobileTab(tab) {
@@ -2805,7 +2805,7 @@ function showLeagueScreen() {
   document.getElementById('leagueMobileRanks').innerHTML = `<div class="league-rank-empty">Loading…</div>`;
   fetchLeagueLeaderboard().then((data) => {
     leagueMainRows = data?.leaderboard || [];
-    renderLeagueRankPill(mainEl, leagueMainRows, 'No ranked players yet');
+    renderLeagueRankPill(mainEl, leagueMainRows, 'No players yet');
     if (leagueMobileTab === 'main') renderLeagueMobileRanks();
   });
   fetchLeagueWeeklyLeaderboard().then((data) => {
