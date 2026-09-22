@@ -820,7 +820,7 @@ navSections.forEach((section) => {
   const label = section.querySelector('.nav-label');
   const items = section.querySelector('.nav-section-items');
   label.addEventListener('click', () => {
-    audio.play('navToggle'); // one cue per tap, whichever way this section just moved (opened, or closed)
+    audio.play('button'); // same cue every other nav entry uses, not the old dedicated navToggle one
     const wasOpen = section.classList.contains('open');
     navSections.forEach((s) => {
       s.classList.remove('open');
