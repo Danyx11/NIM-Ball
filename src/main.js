@@ -2351,6 +2351,17 @@ partnershipBookBackBtn.addEventListener('click', () => {
 let partnershipWeeksById = {};
 let partnershipSelectedWeeks = new Set();
 let partnershipActiveReservation = null;
+// Bumped on every reserve attempt (below) so a reservePartnershipWeeks()
+// call that finally resolves AFTER its own 15s timeout already put the
+// panel on 'reserveFailed' — the user may have already backed out, or
+// fired a second attempt — can tell it's stale and skip rendering over
+// whatever's on screen now.
+let partnershipReserveSeq = 0;
+// How long the 'reserving' spinner waits on the server's live price lookup
+// (party/partnership.js's reserve(), which itself retries CoinGecko a few
+// times before giving up) before giving up client-side and showing an
+// error instead of spinning forever.
+const PARTNERSHIP_RESERVE_TIMEOUT_MS = 15_000;
 
 // Returns a promise so the 'confirmPay' Cancel button (below) can wait for
 // the release to actually land before reloading the week list — otherwise
@@ -2494,7 +2505,26 @@ function renderPartnershipWeekList(weeks) {
     if (partnershipSelectedWeeks.size === 0) return;
     audio.play('button');
     renderPartnershipBook('reserving');
+    const mySeq = ++partnershipReserveSeq;
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (settled || mySeq !== partnershipReserveSeq) return;
+      settled = true;
+      renderPartnershipBook('reserveFailed', { error: 'Timed out waiting for a live price — try again.' });
+    }, PARTNERSHIP_RESERVE_TIMEOUT_MS);
     reservePartnershipWeeks([...partnershipSelectedWeeks], hubAddress).then((res) => {
+      clearTimeout(timeoutId);
+      if (settled || mySeq !== partnershipReserveSeq) {
+        // Arrived after the 15s timeout already showed an error (or a newer
+        // attempt superseded this one) — the UI moved on, but the server may
+        // have actually gone ahead and locked these weeks. Release them
+        // quietly rather than leaving a hold the user can't see or reach
+        // (they'd otherwise hit "already booked" retrying for up to
+        // PENDING_TTL_MS, with no obvious reason why).
+        if (res.ok) releasePartnershipWeeks(res.weekIds, hubAddress);
+        return;
+      }
+      settled = true;
       if (!res.ok) { renderPartnershipBook('reserveFailed', { error: res.error }); return; }
       partnershipActiveReservation = { weekIds: res.weekIds, amountLuna: res.amountLuna, pendingExpiresAt: res.pendingExpiresAt };
       renderPartnershipBook('confirmPay', partnershipActiveReservation);
@@ -2526,7 +2556,7 @@ function renderPartnershipBook(step, ctx = {}) {
     return;
   }
   if (step === 'reserving') {
-    partnershipBookContent.innerHTML = '<p>Reserving…</p>';
+    partnershipBookContent.innerHTML = '<div class="partnership-wait"><div class="partnership-spinner"></div><p>Fetching the live NIM price…</p></div>';
     return;
   }
   if (step === 'reserveFailed') {
