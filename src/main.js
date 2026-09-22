@@ -977,6 +977,15 @@ function setProfilePillTeam(team) {
 connectBtn.addEventListener('click', () => {
   if (activeStopGame) return;
   audio.play('button');
+  // Re-clicking while the gate it opens is already up closes it back out
+  // instead of just re-showing the same screen — same toggle-on-reclick
+  // shape as every other nav entry (About/Nimiq/League/…). Only reachable
+  // when cgExitBtn itself would be showing (an identity already exists —
+  // see showConnectGate), same guard proceedPastConnectGate's caller relies on.
+  if (!connectGateOverlay.classList.contains('hidden')) {
+    proceedPastConnectGate();
+    return;
+  }
   // Identity is left untouched here — the wallet stays connected until the
   // player actually picks Guest (cgGuestBtn), or Connect resolves with a
   // different account (cgConnectBtn); the gate's exit icon backs out as-is.
