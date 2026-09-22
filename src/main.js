@@ -1855,9 +1855,13 @@ function showConnectGate() {
   cgGuestBtn.disabled = false;
   hideLobby();
   hideNetPanel();
-  classicCustomOverlay.classList.add('hidden');
-  customSettingsOverlay.classList.add('hidden');
-  replayUploadOverlay.classList.add('hidden');
+  // Same sweep Home/every show*Screen use (see hideSidebarPanels' own
+  // comment) — this used to only hide 3 of the ~15 sibling overlays by
+  // hand, so opening the gate from inside About/Partnership/How to play/etc.
+  // (via the corner identity pill) left that panel showing underneath
+  // (reported: same stuck-panel bug as Home's own, just for this entry
+  // point).
+  hideSidebarPanels();
   modeDrawer.classList.add('hidden');
   hideRemoteMatchStack(); // see that function's own comment
   modeOverlay.classList.remove('hidden');
