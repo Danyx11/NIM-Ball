@@ -2427,6 +2427,7 @@ function renderPartnershipWeekList(weeks) {
   const tiles = weeks.map((w) => {
     const disabled = w.status !== 'available';
     return `<button type="button" class="partnership-week-tile${disabled ? ' disabled' : ''}" data-week-id="${w.weekId}" ${disabled ? 'disabled' : ''}>
+      <span class="partnership-week-mine-badge" aria-hidden="true">✓</span>
       <span class="partnership-week-num">Week ${isoWeekNumber(w.weekStart)}</span>
       <span class="partnership-week-range">${formatWeekRange(w.weekStart, w.weekEnd)}</span>
       <span class="partnership-week-status"></span>
@@ -2459,7 +2460,14 @@ function renderPartnershipWeekList(weeks) {
       const selected = partnershipSelectedWeeks.has(w.weekId);
       el.classList.toggle('selected', selected);
       el.classList.toggle('off-month', partnershipMonthKey(w.weekStart) !== partnershipMonthShown);
-      el.querySelector('.partnership-week-status').textContent = w.status === 'booked' ? (w.sponsorName ? `Booked · ${w.sponsorName}` : 'Booked') : w.status === 'pending' ? 'On hold' : (selected ? '✓ Selected' : '');
+      // Never shows sponsorName to a visitor (see conversation) — a booked
+      // week just reads "Booked" for everyone. The one thing that DOES
+      // differ per viewer is the green ✓ badge: party/partnership.js's
+      // publicWeek() already tags each week with `mine` (true only for the
+      // wallet that actually booked it, never leaked to anyone else), so
+      // this is purely a display toggle, nothing new to fetch/trust.
+      el.classList.toggle('mine', w.status === 'booked' && w.mine);
+      el.querySelector('.partnership-week-status').textContent = w.status === 'booked' ? 'Booked' : w.status === 'pending' ? 'On hold' : (selected ? '✓ Selected' : '');
     });
     const count = partnershipSelectedWeeks.size;
     payBtn.disabled = count === 0;
