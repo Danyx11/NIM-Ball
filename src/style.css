@@ -2005,6 +2005,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 14px;
 }
 .partnership-week-tile {
+  position: relative;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
   padding: 16px; border-radius: 22px; border: none; cursor: pointer; text-align: center;
   font-family: inherit; color: #fff; background: #0582ca;
@@ -2017,6 +2018,18 @@ button:disabled { opacity: 0.35; cursor: default; }
 .partnership-week-num { font-size: 12px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; }
 .partnership-week-range { font-size: 20px; font-weight: 800; line-height: 1.2; }
 .partnership-week-status { font-size: 13px; font-weight: 700; min-height: 18px; opacity: 0.9; }
+/* "This is your booked week" badge (main.js's refresh() — .mine only ever
+   toggled on for booked weeks where the server's own `mine` flag came back
+   true, see that toggle's own comment) — a plain green disc so it reads
+   clearly against the tile's own grey .disabled background, not the
+   tile's ambient color like everything else in it. */
+.partnership-week-tile.mine .partnership-week-mine-badge {
+  display: flex; align-items: center; justify-content: center;
+  position: absolute; top: 8px; right: 8px; width: 20px; height: 20px;
+  border-radius: 50%; background: #2fb872; color: #fff;
+  font-size: 12px; font-weight: 800; line-height: 1;
+}
+.partnership-week-mine-badge { display: none; }
 /* 'reserving' step's wait indicator (main.js's renderPartnershipBook) — the
    server locks in a live NIM/USD price at this exact moment (party/
    partnership.js's reserve()), so this is specifically framed as "fetching
