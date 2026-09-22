@@ -2014,7 +2014,15 @@ button:disabled { opacity: 0.35; cursor: default; }
 .partnership-week-tile.off-month { display: none; }
 .partnership-week-tile:hover:not(.disabled):not(.selected) { background: #0a92de; transform: translateY(-2px); }
 .partnership-week-tile.selected { background: var(--accent); color: #3a2900; }
-.partnership-week-tile.disabled { background: rgba(31, 35, 72, 0.08); color: var(--nb-50); cursor: default; }
+/* opacity:1 overrides the base `button:disabled { opacity: 0.35 }` rule
+   (style.css's own generic disabled-button dimming) — this tile already
+   paints its OWN "greyed out" look via the background/color above, so
+   that extra opacity was compounding on top, washing out every child
+   including the green .mine badge instead of the badge sitting crisply
+   above the grey (see conversation). opacity compounds down through
+   children and can't be un-done by a child's own opacity, so it has to be
+   neutralized here, on the element that actually set it. */
+.partnership-week-tile.disabled { background: rgba(31, 35, 72, 0.08); color: var(--nb-50); cursor: default; opacity: 1; }
 .partnership-week-num { font-size: 12px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; }
 .partnership-week-range { font-size: 20px; font-weight: 800; line-height: 1.2; }
 .partnership-week-status { font-size: 13px; font-weight: 700; min-height: 18px; opacity: 0.9; }
