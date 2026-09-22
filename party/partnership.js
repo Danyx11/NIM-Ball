@@ -133,19 +133,63 @@ function upcomingWeeks(count) {
 
 // Throws on any failure (network, timeout, missing price) — reserve() below
 // treats "couldn't get a trustworthy price" as "fail the reservation", never
-// as "fall back to some other number".
+// as "fall back to some other number", EXCEPT for the short-lived cache
+// fetchNimUsdRate() itself may fall back to below (still a real price this
+// same process fetched moments ago, just not this exact call's own).
 // Workers' fetch() sends no User-Agent by default — verified live that
 // CoinGecko's public API 403s a request with no/empty User-Agent (basic
 // bot defense), so this has to be set explicitly; any non-empty value works.
 const FETCH_USER_AGENT = 'NimiCurl-Partnership-Worker/1.0';
 
-async function fetchNimUsdRate() {
-  const res = await fetch(COINGECKO_NIM_USD_URL, { headers: { 'User-Agent': FETCH_USER_AGENT }, signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
+// Its own (shorter) timeout, not RPC_TIMEOUT_MS below — RATE_FETCH_ATTEMPTS
+// retries of that 10s budget could take 30s+ worst case, blowing well past
+// the client's own 15s spinner timeout (src/main.js's
+// PARTNERSHIP_RESERVE_TIMEOUT_MS) even before RATE_FETCH_RETRY_DELAY_MS's
+// backoff is added in. 3 attempts x 4s + backoff tops out around 13s,
+// leaving margin under that 15s budget.
+const RATE_FETCH_TIMEOUT_MS = 4_000;
+
+async function fetchNimUsdRateOnce() {
+  const res = await fetch(COINGECKO_NIM_USD_URL, { headers: { 'User-Agent': FETCH_USER_AGENT }, signal: AbortSignal.timeout(RATE_FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`CoinGecko rate fetch failed: ${res.status}`);
   const json = await res.json();
   const rate = json?.['nimiq-2']?.usd;
   if (!rate) throw new Error('NIM/USD rate unavailable');
   return rate;
+}
+
+// CoinGecko's free tier is prone to brief hiccups (rate-limiting shared
+// Cloudflare Worker IPs, momentary timeouts) that have nothing to do with
+// whether the price itself is available — retrying a couple times clears
+// most of them without the caller ever noticing.
+const RATE_FETCH_ATTEMPTS = 3;
+const RATE_FETCH_RETRY_DELAY_MS = 400; // linear backoff: 400ms, 800ms
+
+// Last good rate this isolate has seen, kept only in memory (module scope,
+// not ctx.storage — doesn't need to survive a restart, this is purely a
+// short-lived fallback, not a source of truth). If every retry above still
+// fails, a recent-enough price is a better outcome than failing the whole
+// reservation: $10/week doesn't need to-the-second accuracy, see
+// RATE_CACHE_TTL_MS.
+let cachedRate = null; // { rate, at }
+const RATE_CACHE_TTL_MS = 10 * 60 * 1000;
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchNimUsdRate() {
+  let lastErr;
+  for (let attempt = 0; attempt < RATE_FETCH_ATTEMPTS; attempt++) {
+    if (attempt > 0) await wait(RATE_FETCH_RETRY_DELAY_MS * attempt);
+    try {
+      const rate = await fetchNimUsdRateOnce();
+      cachedRate = { rate, at: Date.now() };
+      return rate;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  if (cachedRate && Date.now() - cachedRate.at < RATE_CACHE_TTL_MS) return cachedRate.rate;
+  throw lastErr;
 }
 
 // Returns the RPC node's transaction record, or null if the node reports it
