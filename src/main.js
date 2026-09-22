@@ -657,9 +657,9 @@ function revealAfterGates() {
 // scrim thrown over whatever's already on screen, with nothing to continue
 // into once it lifts.
 let awaitingLandscapeToContinue = false;
-window.matchMedia('(orientation: portrait)').addEventListener('change', (e) => {
+function syncRotateGate() {
   if (!IS_MOBILE) return;
-  if (e.matches) {
+  if (isPortraitMobile()) {
     // Rotated to portrait — cover whatever's currently on screen (home,
     // mode-select, mid-match, anything) so nothing mis-laid-out for
     // landscape is visible until the phone is turned back.
@@ -671,7 +671,24 @@ window.matchMedia('(orientation: portrait)').addEventListener('change', (e) => {
       revealAfterGates();
     }
   }
-});
+}
+window.matchMedia('(orientation: portrait)').addEventListener('change', syncRotateGate);
+// Resync when the page resumes from being fully backgrounded — e.g. leaving
+// Nimiq Pay entirely (home button, another app) and coming straight back.
+// The whole page's JS is suspended while backgrounded, so the matchMedia
+// listener above can miss an orientation change that happened during that
+// gap (phone rotated while away), leaving this gate — and the
+// window.innerHeight/logo-position layout above — stale once the page wakes
+// back up, instead of matching the phone's actual current state.
+// `pageshow` additionally covers a bfcache-restore, which some WebViews use
+// instead of a plain resume and doesn't fire `visibilitychange`.
+function onPageResume() {
+  syncRotateGate();
+  setStableVh();
+  positionHelpBtn();
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) onPageResume(); });
+window.addEventListener('pageshow', onPageResume);
 
 // Best-effort: only succeeds when the app is opened inside Nimiq Pay, and
 // deliberately never blocks startGame() either way (see src/nimiq.js). The
