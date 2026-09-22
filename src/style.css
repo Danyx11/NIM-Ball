@@ -3779,11 +3779,11 @@ button:disabled { opacity: 0.35; cursor: default; }
      top clearance hack is needed here either. */
   padding: 26px 30px;
   max-width: 380px; border-radius: 24px;
-  /* Nimiq Green (--nimiq-gold in the official kit is the *other* tinted
-     panel — this is Replay's own tile color, #modeOverlay .half.d), same
-     0.72 wash convention as .config-panel.mode-hockey/.mode-curling (see
-     conversation — pushed up from 0.55, matching the mode-select tiles). */
-  background: rgba(33, 188, 165, 0.72);
+  /* Replay's own tile now lives under More, tinted that tile's Nimiq Blue
+     navy (same value as #moreCustom/#moreReplay and #modeOverlay .half.c),
+     not its old standalone-tile Nimiq Green — same 0.72 wash convention as
+     .config-panel.mode-hockey/.mode-curling. */
+  background: rgba(31, 35, 72, 0.72);
   /* No border by default (was a dashed drop-zone outline — read as a
      scissor-cut edge against the new tinted background, and none of the
      other mode panels have a border at all). Transparent, not removed
@@ -3791,19 +3791,13 @@ button:disabled { opacity: 0.35; cursor: default; }
      own size. */
   border: 2px solid transparent;
   transition: border-color .2s ease, background .2s ease;
-  /* Green is light enough to fail white-text contrast, same issue Gold had
-     on .config-panel.mode-curling (see that rule's own comment) — dark ink
-     instead. --ink-dim redefined locally (not just `color`) so .sub and
-     #replayUploadStatus, which read var(--ink-dim) directly, pick it up too. */
-  color: var(--bg-deep);
-  --ink-dim: rgba(11, 31, 42, 0.7);
+  /* Navy is dark enough for the default white/--ink-dim text every other
+     .config-panel already uses (unlike Green/Gold, which needed the dark-ink
+     override this used to carry — see git history) — #replayUploadBox's
+     .config-back/.config-mode-title/.config-mode-icon svg all already
+     default to #fff with no override needed here. */
+  color: var(--ink);
 }
-/* .config-back/.config-mode-title/.config-mode-icon svg all have their own
-   literal color:#fff (not a var), so each needs the same explicit override
-   .config-panel.mode-curling gives them. */
-#replayUploadBox .config-back,
-#replayUploadBox .config-mode-title,
-#replayUploadBox .config-mode-icon svg { color: var(--bg-deep); }
 #replayUploadBox.dragover { border-color: var(--accent); background: rgba(233,178,19,0.18); }
 /* Matches .config-lobby-content p's own body-text convention (14px/1.5),
    not the smaller ad hoc 13px this had before. */
