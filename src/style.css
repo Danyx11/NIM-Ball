@@ -1982,10 +1982,20 @@ button:disabled { opacity: 0.35; cursor: default; }
 .partnership-month-nav { display: flex; align-items: center; justify-content: center; gap: 18px; flex: none; }
 .partnership-month-label { min-width: 220px; text-align: center; font-size: 18px; font-weight: 800; letter-spacing: 0.6px; color: var(--nb-100); }
 .partnership-month-arrow {
-  width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
+  /* padding:0 (the base `button` rule's own 10px 20px otherwise still
+     applies — this class never redeclared it) — with it left in, the
+     20px/side horizontal padding alone exceeds this 32px width, so flex's
+     default min-width:auto lets the svg push the box out to ~40px wide
+     instead of clipping, turning the circle into an oval and throwing off
+     where the arrow itself ends up (see conversation). flex-shrink:0 on the
+     svg for the same reason: without it a still-too-tight box could shrink
+     the icon instead of just the button being sized correctly with padding
+     gone. */
+  width: 32px; height: 32px; padding: 0; border-radius: 50%; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; flex: none;
   background: rgba(31, 35, 72, 0.08); color: var(--nb-100);
 }
+.partnership-month-arrow svg { flex-shrink: 0; }
 .partnership-month-arrow:hover:not(:disabled) { background: rgba(31, 35, 72, 0.14); }
 .partnership-month-arrow:disabled { opacity: 0.3; cursor: default; }
 /* One equal-width column per week of the shown month (4-5), full height —

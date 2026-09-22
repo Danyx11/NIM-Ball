@@ -149,8 +149,21 @@ const FETCH_USER_AGENT = 'NimiCurl-Partnership-Worker/1.0';
 // leaving margin under that 15s budget.
 const RATE_FETCH_TIMEOUT_MS = 4_000;
 
-async function fetchNimUsdRateOnce() {
-  const res = await fetch(COINGECKO_NIM_USD_URL, { headers: { 'User-Agent': FETCH_USER_AGENT }, signal: AbortSignal.timeout(RATE_FETCH_TIMEOUT_MS) });
+// Without a key, CoinGecko's anonymous tier lumps ALL of Cloudflare's
+// shared egress IPs into one global quota — verified live (see
+// conversation): a bare `fetch()` from this Worker got 429 on every one of
+// RATE_FETCH_ATTEMPTS' retries in the same request, while the exact same
+// URL from a plain residential IP succeeded instantly. A free CoinGecko
+// "Demo" key gives this Worker its own isolated quota instead
+// (`x-cg-demo-api-key` header, per CoinGecko's own docs — also why
+// @nimiq/utils ships a `setCoinGeckoApiExtraHeader` helper for this exact
+// header). `COINGECKO_API_KEY` is a Wrangler secret (`wrangler secret put`),
+// not a `vars` entry — optional: falls back to the same rate-limited
+// anonymous behavior if unset, never throws for a missing key itself.
+async function fetchNimUsdRateOnce(apiKey) {
+  const headers = { 'User-Agent': FETCH_USER_AGENT };
+  if (apiKey) headers['x-cg-demo-api-key'] = apiKey;
+  const res = await fetch(COINGECKO_NIM_USD_URL, { headers, signal: AbortSignal.timeout(RATE_FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`CoinGecko rate fetch failed: ${res.status}`);
   const json = await res.json();
   const rate = json?.['nimiq-2']?.usd;
@@ -158,10 +171,10 @@ async function fetchNimUsdRateOnce() {
   return rate;
 }
 
-// CoinGecko's free tier is prone to brief hiccups (rate-limiting shared
-// Cloudflare Worker IPs, momentary timeouts) that have nothing to do with
-// whether the price itself is available — retrying a couple times clears
-// most of them without the caller ever noticing.
+// A keyed request shouldn't need this any more (see fetchNimUsdRateOnce's
+// own comment), but kept as a second line of defense for genuine transient
+// blips (network hiccup, a momentary CoinGecko outage) — costs nothing when
+// the key alone is already enough to succeed on the first attempt.
 const RATE_FETCH_ATTEMPTS = 3;
 const RATE_FETCH_RETRY_DELAY_MS = 400; // linear backoff: 400ms, 800ms
 
@@ -176,12 +189,12 @@ const RATE_CACHE_TTL_MS = 10 * 60 * 1000;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchNimUsdRate() {
+async function fetchNimUsdRate(apiKey) {
   let lastErr;
   for (let attempt = 0; attempt < RATE_FETCH_ATTEMPTS; attempt++) {
     if (attempt > 0) await wait(RATE_FETCH_RETRY_DELAY_MS * attempt);
     try {
-      const rate = await fetchNimUsdRateOnce();
+      const rate = await fetchNimUsdRateOnce(apiKey);
       cachedRate = { rate, at: Date.now() };
       return rate;
     } catch (err) {
@@ -327,7 +340,7 @@ export class Partnership extends Server {
       if (conflicts.length) return { ok: false, error: 'already booked', weekIds: conflicts };
       let rateUsdPerNim;
       try {
-        rateUsdPerNim = await fetchNimUsdRate();
+        rateUsdPerNim = await fetchNimUsdRate(this.env?.COINGECKO_API_KEY);
       } catch (err) {
         return { ok: false, error: `price lookup failed: ${err.message}` };
       }
