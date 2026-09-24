@@ -3904,6 +3904,7 @@ async function showWeekMatchTicket(week) {
         ${week.rematch?.opponent ? '<p id="weekTicketRematchNote">Your opponent wants a rematch!</p>' : ''}
         <button class="bigbtn" id="weekTicketPlayAgainBtn">▶ Play Again</button>
         <button class="bigbtn" id="weekTicketShareBtn">📤 Share</button>
+        <button class="bigbtn" id="weekTicketMenuBtn">🏠 Menu</button>
       </div>
     </div>
   `;
@@ -3921,15 +3922,18 @@ async function showWeekMatchTicket(week) {
   // now reachable from a completed match too (see party/weekArbiter.js's own
   // widened guard). A plain exit with nobody waiting sends nothing — this
   // match just sits there, rematchable later by either side, same as any
-  // other WEEK match waiting on a turn.
-  document.getElementById('weekTicketExitBtn').addEventListener('click', async () => {
+  // other WEEK match waiting on a turn. Two affordances reach this: the
+  // small corner pill, and a full pill in the actions column right of Share.
+  const exitWeekTicket = async () => {
     audio.play('button');
     if (week.rematch?.opponent) {
       try { await week.abandon(); } catch { /* best-effort */ }
     }
     weekTicketOverlay.classList.add('hidden');
     returnToModeSelect();
-  });
+  };
+  document.getElementById('weekTicketExitBtn').addEventListener('click', exitWeekTicket);
+  document.getElementById('weekTicketMenuBtn').addEventListener('click', exitWeekTicket);
   // PLAY AGAIN: resets THIS SAME room (see party/weekArbiter.js's own
   // 'rematch' handler — same players/config/game, everything else back to a
   // freshly-created match's own shape) once BOTH sides have asked for it.
