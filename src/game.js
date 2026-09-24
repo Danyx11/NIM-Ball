@@ -4482,6 +4482,7 @@ export function startGame(opts = {}) {
           ${prizeNim != null ? `<p class="prize-banner">🏆 +${prizeNim} NIM prize</p>` : ''}
           <button class="bigbtn" id="goalPlayAgainBtn">▶ Play Again</button>
           <button class="bigbtn" id="goalShareBtn">📤 Share</button>
+          <button class="bigbtn" id="goalMenuBtn">🏠 Menu</button>
         </div>
       </div>
     `);
@@ -4549,10 +4550,12 @@ export function startGame(opts = {}) {
       // this fresh match (no matchIntro replay here, so no onEnded to do it).
       audio.playAmbience();
     };
-    // EXIT: small corner pill (same .config-back pattern used everywhere else
-    // in the app — see conversation) replacing the old full-width "Menu"
-    // button — same teardown as before, just a different affordance.
-    document.getElementById('goalExitBtn').onclick = () => { audio.play('button'); stopGame(); onExit?.(); };
+    // EXIT: the small corner pill (same .config-back pattern used elsewhere
+    // in the app) plus a full pill in the actions column, right of Share —
+    // same teardown either way, just two affordances to reach it now.
+    const exitToMenu = () => { audio.play('button'); stopGame(); onExit?.(); };
+    document.getElementById('goalExitBtn').onclick = exitToMenu;
+    document.getElementById('goalMenuBtn').onclick = exitToMenu;
     document.getElementById('goalShareBtn').onclick = async () => {
       audio.play('button');
       const shareBtn = document.getElementById('goalShareBtn');
@@ -4614,6 +4617,7 @@ export function startGame(opts = {}) {
         <div class="ticket-wrap"><img class="ticket-img" id="ticketImg" alt="Replay ticket"></div>
         <div class="goal-actions">
           <button class="bigbtn" id="goalReplayAgainBtn">🔁 Watch Again</button>
+          <button class="bigbtn" id="goalReplayMenuBtn">🏠 Menu</button>
         </div>
       </div>
     `);
@@ -4628,14 +4632,16 @@ export function startGame(opts = {}) {
     };
     // See replayExitBtn's own comment above: no navigation, just strip a
     // still-present ?replay= param so a future real refresh doesn't
-    // relaunch this same replay. Small corner exit pill now, same
-    // simplification as showVictory's own goalExitBtn (see conversation).
-    document.getElementById('replayTicketExitBtn').onclick = () => {
+    // relaunch this same replay. Small corner exit pill, plus a full pill in
+    // the actions column right of Watch Again — same teardown either way.
+    const exitReplayToMenu = () => {
       audio.play('button');
       history.replaceState(null, '', location.pathname);
       stopGame();
       onExit?.();
     };
+    document.getElementById('replayTicketExitBtn').onclick = exitReplayToMenu;
+    document.getElementById('goalReplayMenuBtn').onclick = exitReplayToMenu;
   }
 
   // No more "ready" gate/button between rounds — the board resets itself:
