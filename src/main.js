@@ -1056,6 +1056,12 @@ function closeClaimDialog() {
 }
 function openClaimHandleDialog() {
   if (!hubAddress) return;
+  // "Claim a handle" is reachable from the identity pill's own label from
+  // ANY menu screen (About/Nimiq/League/Partnership/How to play/…), not
+  // just the tile grid — showClaimLobby only ever hid modeDrawer, so
+  // whichever of those was open stayed showing underneath (same stuck-panel
+  // bug class as Home's/the identity pill's own gate, same fix).
+  hideSidebarPanels();
   renderClaimStep('form', { value: '' });
 }
 function renderClaimStep(step, ctx) {
