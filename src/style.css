@@ -2306,9 +2306,10 @@ button:disabled { opacity: 0.35; cursor: default; }
    half-width instead of desktop's hardcoded 10vw. */
 .mobile-layout #modeOverlayBg { left: calc(-1 * var(--controller-reserved-w) / 2); }
 .mode-select-scrim { position: absolute; inset: 0; background: rgba(6,14,18,0.28); }
-/* Live League ranking ticker — same light "Nimiq white" surface as
-   .league-panel (rgba(244,244,244,…) + --nb-100 navy text, see that rule).
-   Same fully-rounded-ends look as .seg-control's pills elsewhere. Sits flush
+/* Live League ranking ticker — dark Nimiq-navy/black surface (testing this
+   against the earlier light "Nimiq white" .league-panel-style version — see
+   conversation), white text instead of navy for contrast. Same fully-
+   rounded-ends look as .seg-control's pills elsewhere. Sits flush
    against the top (tight by explicit request — .mode-drawer itself is back
    to its original, untouched inset:6%/scale(0.9), never pushed down for this
    banner, so the two visually overlap a little at this height and that's
@@ -2328,11 +2329,16 @@ button:disabled { opacity: 0.35; cursor: default; }
      axis). Anchoring off that instead of a flat 6% keeps a fixed 8px gap
      above the tiles regardless of the ticker's own height or the game
      card's own height (a flat "6%" only cleared the tiles by luck at some
-     card sizes and overlapped them at others). */
-  top: calc(10.4% - 36px - 8px); left: 10.4%; right: 10.4%;
-  height: 36px;
+     card sizes and overlapped them at others). The max(6px, …) floor matters
+     on mobile landscape specifically — a short game card (e.g. ~375px tall)
+     makes 10.4% itself small enough that this would otherwise land the
+     ticker within a couple px of the card's very top edge (confirmed: 1px on
+     a 375px-tall card), reading as clipped/"eaten" there even though nothing
+     is actually cut off. */
+  top: max(6px, calc(10.4% - 28px - 8px)); left: 10.4%; right: 10.4%;
+  height: 28px;
   border-radius: 999px;
-  background: rgba(244,244,244,0.8);
+  background: rgba(6,14,18,0.78);
   box-shadow: 0 2px 10px rgba(6,14,18,0.25);
   overflow: hidden;
   z-index: 1;
@@ -2361,20 +2367,20 @@ button:disabled { opacity: 0.35; cursor: default; }
   align-items: center;
   gap: 6px;
   padding: 0 18px;
-  color: var(--nb-100);
+  color: #fff;
   font-weight: 600;
   font-size: 12.5px;
   white-space: nowrap;
   flex-shrink: 0;
 }
-.mode-rank-item-num { color: var(--nb-60); font-weight: 700; min-width: 12px; }
+.mode-rank-item-num { color: rgba(255,255,255,0.55); font-weight: 700; min-width: 12px; }
 .mode-rank-item-avatar {
   width: 18px; height: 18px;
   border-radius: 50%;
-  background: rgba(31,35,72,0.08) center/cover no-repeat;
+  background: rgba(255,255,255,0.16) center/cover no-repeat;
   flex-shrink: 0;
 }
-.mode-rank-item-addr { color: var(--nb-80); font-weight: 500; }
+.mode-rank-item-addr { color: rgba(255,255,255,0.72); font-weight: 500; }
 .mode-rank-item-pts { color: var(--accent); }
 /* "Your ranking" pause overlay — same pill footprint, faded in/out over the
    scrolling track rather than replacing it, so resuming the scroll after the
@@ -2388,8 +2394,8 @@ button:disabled { opacity: 0.35; cursor: default; }
   gap: 10px;
   /* A touch more opaque than .mode-rank-ticker itself so the paused track
      underneath is fully masked, not just tinted. */
-  background: rgba(244,244,244,0.94);
-  color: var(--nb-100);
+  background: rgba(6,14,18,0.92);
+  color: #fff;
   font-weight: 600;
   font-size: 12.5px;
   opacity: 0;
