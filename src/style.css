@@ -2307,22 +2307,39 @@ button:disabled { opacity: 0.35; cursor: default; }
 .mobile-layout #modeOverlayBg { left: calc(-1 * var(--controller-reserved-w) / 2); }
 .mode-select-scrim { position: absolute; inset: 0; background: rgba(6,14,18,0.28); }
 /* Live League ranking ticker — same light "Nimiq white" surface as
-   .league-panel (rgba(244,244,244,…) + --nb-100 navy text, see that rule),
-   just more opaque (0.94 vs .league-panel's 0.85) since this sits directly
-   over the busy arena backdrop rather than its own dark scrim. Same fully-
-   rounded-ends look as .seg-control's pills elsewhere. Sits in the vertical
-   gap .mode-drawer's own top inset is pushed down to make room for, right
-   below (PROTOTYPE — see conversation, easy to retint further). */
+   .league-panel (rgba(244,244,244,…) + --nb-100 navy text, see that rule).
+   Same fully-rounded-ends look as .seg-control's pills elsewhere. Sits flush
+   against the top (tight by explicit request — .mode-drawer itself is back
+   to its original, untouched inset:6%/scale(0.9), never pushed down for this
+   banner, so the two visually overlap a little at this height and that's
+   intentional) rather than reserving its own vertical strip.
+   left/right: .mode-drawer is inset:6% (edges at 6%/94% of #modeOverlay's own
+   width) THEN scale(0.9)'d around its own center — a transform tightens the
+   visible box symmetrically by (1-0.9)/2 = 5% of the drawer's own width on
+   each side, i.e. 5% of 88% = 4.4% of #modeOverlay's width. So the tiles'
+   true rendered edges sit at 6% + 4.4% = 10.4% / 100% - 10.4% = 89.6%, not at
+   the drawer's own unscaled 6%/94% inset — matching the ticker to a plain 6%
+   would NOT line up with the tile edges. Recompute both numbers together if
+   .mode-drawer's inset or scale factor ever changes. */
 .mode-rank-ticker {
   position: absolute;
-  top: 6%; left: 6%; right: 6%;
+  /* Tiles' own visible top edge is at 10.4% too (same scale(0.9)-around-
+     center shrink as the left/right math above, applied to the vertical
+     axis). Anchoring off that instead of a flat 6% keeps a fixed 8px gap
+     above the tiles regardless of the ticker's own height or the game
+     card's own height (a flat "6%" only cleared the tiles by luck at some
+     card sizes and overlapped them at others). */
+  top: calc(10.4% - 36px - 8px); left: 10.4%; right: 10.4%;
   height: 36px;
   border-radius: 999px;
-  background: rgba(244,244,244,0.94);
+  background: rgba(244,244,244,0.8);
   box-shadow: 0 2px 10px rgba(6,14,18,0.25);
   overflow: hidden;
   z-index: 1;
 }
+/* Tile-grid only (see main.js's updateRankTickerVisibility) — same scoped-
+   rule convention as #helpBtn.hidden above, not a generic .hidden. */
+.mode-rank-ticker.hidden { display: none; }
 .mode-rank-ticker-track {
   display: flex;
   align-items: center;
@@ -2371,7 +2388,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   gap: 10px;
   /* A touch more opaque than .mode-rank-ticker itself so the paused track
      underneath is fully masked, not just tinted. */
-  background: rgba(244,244,244,0.99);
+  background: rgba(244,244,244,0.94);
   color: var(--nb-100);
   font-weight: 600;
   font-size: 12.5px;
@@ -2382,7 +2399,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 .mode-rank-ticker-me.visible { opacity: 1; }
 .mode-drawer {
   position: absolute;
-  top: calc(6% + 48px); right: 6%; bottom: 6%; left: 6%;
+  inset: 6%;
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;

@@ -2879,6 +2879,33 @@ const DEV_FAKE_TICKER_ROWS = import.meta.env.DEV ? Array.from({ length: 11 }, (_
   address: `NQ${(1000 + i * 37).toString(36).toUpperCase().padEnd(32, 'X')}`,
   lp: 500 - i * 20,
 })) : [];
+// Paints (and, once per unresolved handle, repaints) the ticker's row list —
+// same handleCache/refreshHandleCache "show @handle once resolved, address
+// until then" convention as renderLeagueRankPill above, so a player who's
+// claimed a handle reads the same way here as on the League screen itself.
+// Doesn't touch track.style.animationDuration or its animationiteration
+// listener (set once by the caller) — only ever replaces the row markup, so a
+// mid-scroll repaint doesn't restart the loop or double up the pause handler.
+function paintRankTicker(track, rows) {
+  const itemsHtml = rows.map((row) => {
+    const cached = handleCache.get(row.address);
+    const label = cached?.handle ? `@${cached.handle}` : shortenLeagueAddress(row.address);
+    return `
+      <span class="mode-rank-item" data-address="${row.address}">
+        <span class="mode-rank-item-num">${row.rank}</span>
+        <span class="mode-rank-item-avatar" data-address="${row.address}"></span>
+        <span class="mode-rank-item-addr">${label}</span>
+        <span class="mode-rank-item-pts">${row.lp} pts</span>
+      </span>`;
+  }).join('');
+  track.innerHTML = itemsHtml + itemsHtml; // doubled back to back for the seamless translateX(-50%) loop
+  track.querySelectorAll('.mode-rank-item-avatar[data-address]').forEach((avatarEl) => {
+    getIdenticonPngDataUrl(avatarEl.dataset.address).then((url) => { avatarEl.style.backgroundImage = `url(${url})`; });
+  });
+  rows.forEach((row) => refreshHandleCache(row.address));
+  const stillPending = rows.some((row) => !handleCache.get(row.address));
+  if (stillPending) setTimeout(() => paintRankTicker(track, rows), 700);
+}
 function initHomeRankingTicker() {
   const ticker = document.getElementById('modeRankTicker');
   const track = document.getElementById('modeRankTickerTrack');
@@ -2888,21 +2915,11 @@ function initHomeRankingTicker() {
     const rows = data?.leaderboard?.length ? data.leaderboard : DEV_FAKE_TICKER_ROWS;
     if (!rows.length) return; // nothing to show yet — leave the ticker empty/invisible
     rankTickerRows = rows;
-    const itemsHtml = rows.map((row) => `
-      <span class="mode-rank-item" data-address="${row.address}">
-        <span class="mode-rank-item-num">${row.rank}</span>
-        <span class="mode-rank-item-avatar" data-address="${row.address}"></span>
-        <span class="mode-rank-item-addr">${shortenLeagueAddress(row.address)}</span>
-        <span class="mode-rank-item-pts">${row.lp} pts</span>
-      </span>`).join('');
-    track.innerHTML = itemsHtml + itemsHtml; // doubled back to back for the seamless translateX(-50%) loop
-    track.querySelectorAll('.mode-rank-item-avatar[data-address]').forEach((avatarEl) => {
-      getIdenticonPngDataUrl(avatarEl.dataset.address).then((url) => { avatarEl.style.backgroundImage = `url(${url})`; });
-    });
-    // Roughly constant scroll speed regardless of row count (~30px/s), floored
+    paintRankTicker(track, rows);
+    // Roughly constant scroll speed regardless of row count (~25px/s), floored
     // so a short list (11 players today) doesn't zip past unreadably fast.
     const halfWidth = track.scrollWidth / 2;
-    track.style.animationDuration = `${Math.max(24, halfWidth / 30)}s`;
+    track.style.animationDuration = `${Math.max(28, halfWidth / 25)}s`;
     track.addEventListener('animationiteration', onRankTickerLap);
   });
 }
@@ -2929,11 +2946,13 @@ async function onRankTickerLap() {
   if ((rank == null || lp === undefined) && import.meta.env.DEV) { rank = 47; lp = 260; }
   if (rank == null || lp === undefined) return; // no completed matches yet
   const avatarUrl = await getIdenticonPngDataUrl(myAddress);
+  refreshHandleCache(myAddress); // fire-and-forget — best-effort for next time, this 5s overlay isn't worth a repaint-retry loop
+  const label = handleCache.get(myAddress)?.handle ? `@${handleCache.get(myAddress).handle}` : shortenLeagueAddress(myAddress);
   meEl.innerHTML = `
     <span>Your ranking:</span>
     <span class="mode-rank-item-num">${rank}</span>
     <span class="mode-rank-item-avatar" style="background-image:url(${avatarUrl})"></span>
-    <span class="mode-rank-item-addr">${shortenLeagueAddress(myAddress)}</span>
+    <span class="mode-rank-item-addr">${label}</span>
     <span class="mode-rank-item-pts">${lp} pts</span>`;
   track.classList.add('paused');
   meEl.classList.add('visible');
@@ -3366,7 +3385,18 @@ function positionHelpBtn() {
   helpBtn.style.top = `${logoRect.top + logoRect.height / 2 - HELP_BTN_SIZE / 2 - verticalNudge}px`;
   helpBtn.classList.remove('hidden');
 }
+// Same "tile-grid only" condition as positionHelpBtn's own #modeDrawer/
+// #modeOverlay check just above (see its comment) — the ticker was showing
+// on every #modeOverlay-hosted screen (vibe pick, How To, League…), not just
+// the home tile grid it was actually designed to sit above.
+function updateRankTickerVisibility() {
+  const ticker = document.getElementById('modeRankTicker');
+  if (!ticker) return;
+  const onTileGrid = !modeOverlay.classList.contains('hidden') && !modeDrawer.classList.contains('hidden');
+  ticker.classList.toggle('hidden', !onTileGrid);
+}
 positionHelpBtn();
+updateRankTickerVisibility();
 // #bg-logo's src is set asynchronously (see background.js) — its rect is
 // still 0-width at the positionHelpBtn() call above if that hasn't
 // resolved yet, so also reposition once it actually has something to
@@ -3377,7 +3407,7 @@ window.addEventListener('orientationchange', () => setTimeout(positionHelpBtn, 1
 // Keeps helpBtn in sync with #modeDrawer's own hidden class the instant any
 // of its dozen+ toggle sites flips it, rather than needing a manual
 // positionHelpBtn() call added at each one individually.
-const helpBtnVisibilityObserver = new MutationObserver(positionHelpBtn);
+const helpBtnVisibilityObserver = new MutationObserver(() => { positionHelpBtn(); updateRankTickerVisibility(); });
 helpBtnVisibilityObserver.observe(modeDrawer, { attributes: true, attributeFilter: ['class'] });
 helpBtnVisibilityObserver.observe(modeOverlay, { attributes: true, attributeFilter: ['class'] });
 replayUploadBackBtn.addEventListener('click', () => {
