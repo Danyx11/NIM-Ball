@@ -2916,10 +2916,10 @@ function initHomeRankingTicker() {
     if (!rows.length) return; // nothing to show yet — leave the ticker empty/invisible
     rankTickerRows = rows;
     paintRankTicker(track, rows);
-    // Roughly constant scroll speed regardless of row count (~25px/s), floored
+    // Roughly constant scroll speed regardless of row count (~20px/s), floored
     // so a short list (11 players today) doesn't zip past unreadably fast.
     const halfWidth = track.scrollWidth / 2;
-    track.style.animationDuration = `${Math.max(28, halfWidth / 25)}s`;
+    track.style.animationDuration = `${Math.max(32, halfWidth / 20)}s`;
     track.addEventListener('animationiteration', onRankTickerLap);
   });
 }
