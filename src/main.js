@@ -226,6 +226,7 @@ const FULLSCREEN_SUPPORTED = IOS_FULLSCREEN_FIX_ENABLED ? FULLSCREEN_API_AVAILAB
 const IS_STANDALONE = IOS_FULLSCREEN_FIX_ENABLED && IS_STANDALONE_MODE;
 
 initBackground();
+initHomeRankingTicker(); // #modeOverlay's live League ticker — see its own definition below
 
 // Guards the loading screen against one slow/broken menu asset hanging it
 // forever — after this, the game just proceeds and lets the normal
@@ -2859,6 +2860,88 @@ function renderLeagueMeStats() {
     streakEl.innerHTML = `<span class="league-me-num">${p.streak}</span> day streak`;
   });
 }
+// Home-screen live ranking ticker (#modeOverlay, above .mode-drawer — see
+// index.html/style.css) — a horizontal auto-scrolling banner of the League
+// "main" leaderboard's top 20, meant to make the mode-select screen feel
+// alive on arrival rather than gated behind ever opening the League panel.
+// Independent fetch from leagueMainRows above: that cache may still be empty
+// if League was never opened this session. PROTOTYPE (see conversation).
+let rankTickerRows = [];
+// Plain `npm run dev` has no Cloudflare backend on localhost:1999 (see
+// CLAUDE.md's "Production remote backend" — that needs `npm run wrangler:dev`
+// separately), so fetchLeagueLeaderboard always comes back empty in the most
+// common local dev setup. DEV-only placeholder rows (stripped from prod
+// builds — see the `?fakeHandles` precedent in nimconnect.js) so the ticker
+// is actually visible/scrollable while iterating on it locally, instead of
+// looking broken/empty every time.
+const DEV_FAKE_TICKER_ROWS = import.meta.env.DEV ? Array.from({ length: 11 }, (_, i) => ({
+  rank: i + 1,
+  address: `NQ${(1000 + i * 37).toString(36).toUpperCase().padEnd(32, 'X')}`,
+  lp: 500 - i * 20,
+})) : [];
+function initHomeRankingTicker() {
+  const ticker = document.getElementById('modeRankTicker');
+  const track = document.getElementById('modeRankTickerTrack');
+  const meEl = document.getElementById('modeRankTickerMe');
+  if (!ticker || !track || !meEl) return;
+  fetchLeagueLeaderboard(20).then((data) => {
+    const rows = data?.leaderboard?.length ? data.leaderboard : DEV_FAKE_TICKER_ROWS;
+    if (!rows.length) return; // nothing to show yet — leave the ticker empty/invisible
+    rankTickerRows = rows;
+    const itemsHtml = rows.map((row) => `
+      <span class="mode-rank-item" data-address="${row.address}">
+        <span class="mode-rank-item-num">${row.rank}</span>
+        <span class="mode-rank-item-avatar" data-address="${row.address}"></span>
+        <span class="mode-rank-item-addr">${shortenLeagueAddress(row.address)}</span>
+        <span class="mode-rank-item-pts">${row.lp} pts</span>
+      </span>`).join('');
+    track.innerHTML = itemsHtml + itemsHtml; // doubled back to back for the seamless translateX(-50%) loop
+    track.querySelectorAll('.mode-rank-item-avatar[data-address]').forEach((avatarEl) => {
+      getIdenticonPngDataUrl(avatarEl.dataset.address).then((url) => { avatarEl.style.backgroundImage = `url(${url})`; });
+    });
+    // Roughly constant scroll speed regardless of row count (~30px/s), floored
+    // so a short list (11 players today) doesn't zip past unreadably fast.
+    const halfWidth = track.scrollWidth / 2;
+    track.style.animationDuration = `${Math.max(24, halfWidth / 30)}s`;
+    track.addEventListener('animationiteration', onRankTickerLap);
+  });
+}
+// Fires once per full loop ("end of one lap", not "end of scrolling" — see
+// the animation's own `infinite`). Pauses the scroll and shows the connected
+// player's own rank/line for 5s before resuming, however far outside the
+// ticker's own top-20 they are: party/leagueSeason.js's per-address lookup
+// (`?address=`, the same endpoint fetchLeagueStats/renderLeagueMeStats above
+// already use) returns a top-level `rank` alongside `player` — null only for
+// a wallet with zero completed matches (leagueSeason.js's own comment: "a
+// player with no matches yet isn't on it"), which is the only case this
+// skips. Guests (no hubAddress) skip the same way, letting the next lap start
+// immediately either way.
+async function onRankTickerLap() {
+  if (!hubAddress) return;
+  const track = document.getElementById('modeRankTickerTrack');
+  const meEl = document.getElementById('modeRankTickerMe');
+  const myAddress = normalizeAddress(hubAddress);
+  const stats = await fetchLeagueStats(hubAddress).catch(() => null);
+  let rank = stats?.rank;
+  let lp = stats?.player?.lp;
+  // Same no-backend situation as DEV_FAKE_TICKER_ROWS above — without it this
+  // pause could never be seen in plain `npm run dev`.
+  if ((rank == null || lp === undefined) && import.meta.env.DEV) { rank = 47; lp = 260; }
+  if (rank == null || lp === undefined) return; // no completed matches yet
+  const avatarUrl = await getIdenticonPngDataUrl(myAddress);
+  meEl.innerHTML = `
+    <span>Your ranking:</span>
+    <span class="mode-rank-item-num">${rank}</span>
+    <span class="mode-rank-item-avatar" style="background-image:url(${avatarUrl})"></span>
+    <span class="mode-rank-item-addr">${shortenLeagueAddress(myAddress)}</span>
+    <span class="mode-rank-item-pts">${lp} pts</span>`;
+  track.classList.add('paused');
+  meEl.classList.add('visible');
+  setTimeout(() => {
+    meEl.classList.remove('visible');
+    track.classList.remove('paused');
+  }, 5000);
+}
 function showLeagueScreen() {
   audio.play('button');
   hideSidebarPanels();
@@ -3240,7 +3323,14 @@ pcrBackBtn.addEventListener('click', () => { pureCurlingRulesOverlay.classList.a
 // offsetHeight) at the moment this same function later computes `top` for
 // the call that's about to remove it.
 const HELP_BTN_SIZE = 36;
+// Parked (see conversation: overlapped the new #modeRankTicker banner, and
+// How To is still reachable via the sidebar's own "How to play" nav entry) —
+// same reversible-flag pattern as IOS_FULLSCREEN_FIX_ENABLED above. Flip back
+// to true to reinstate; nothing else about #helpBtn/positionHelpBtn needs to
+// change, this is the only gate.
+const HELP_BTN_ENABLED = false;
 function positionHelpBtn() {
+  if (!HELP_BTN_ENABLED) { helpBtn.classList.add('hidden'); return; }
   // Tile-grid only (see conversation — "dès qu'on rentre dans les modes on
   // le dégage"), not "any menu screen" like this button's first version:
   // #modeDrawer.hidden is what every submenu (vibe pick, Classic/Custom,
