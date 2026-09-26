@@ -563,6 +563,19 @@
     <div id="modeOverlay" class="team-select hidden">
       <div id="modeOverlayBg"></div>
       <div class="mode-select-scrim"></div>
+      <!-- Live League ranking ticker — a horizontal auto-scrolling banner of
+           the top of the League "main" leaderboard, sibling of .mode-drawer
+           so it sits in the vertical margin .mode-drawer's own inset leaves
+           at the top (see style.css). Wired in main.js's
+           initHomeRankingTicker/onRankTickerLap: track is filled twice back
+           to back so a plain translateX(-50%) CSS loop has no seam, and
+           #modeRankTickerMe overlays the connected player's own line for 5s
+           once per lap. PROTOTYPE (see conversation) — not wired into
+           #vibeSubOverlay/other sibling panels, home screen only for now. -->
+      <div id="modeRankTicker" class="mode-rank-ticker">
+        <div class="mode-rank-ticker-track" id="modeRankTickerTrack"></div>
+        <div class="mode-rank-ticker-me" id="modeRankTickerMe"></div>
+      </div>
       <div class="mode-drawer" id="modeDrawer">
         <div class="half a" id="modeHockey">
           <!-- Official Nimiq mark, hexagon dropped (see conversation) — same
