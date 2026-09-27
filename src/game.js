@@ -250,12 +250,21 @@ export function startGame(opts = {}) {
   // running total. Ignored by every other mode (default 0, same as
   // before).
   const {
-    net = null, myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false,
+    myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false,
     onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onTurnChange = null,
     matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null,
     singleShotTeam = null, onShotCommitted = null, externalManche: externalMancheOpt = null, onMancheSettled = null, resumeManches = null, weekPointStart = false,
     weekEntryReady = null, weekStartScoreA = 0, weekStartScoreB = 0, opponentAddress: weekOpponentAddress = null,
+    // Match Réseau only (see main.js's showWaitingScreen/showMatchHostWaitingScreen
+    // — never set for Duel LAN, which has no code/address pair to retry with):
+    // `(team) => Promise<net>`, re-connecting to this exact match's room under
+    // this exact team. Used only to recover from THIS client's own socket
+    // dropping locally with no server confirmation anyone left (see
+    // net.onDisconnect's 'self' reason below) — never touches the normal
+    // connect/relay protocol itself.
+    reconnectMatch = null,
   } = opts;
+  let net = opts.net || null;
   // Centralized match rules (see src/matchConfig.js) — Classic is just this
   // default preset; Custom is the same shape with different values. Every
   // caller not yet wired to the Classic/Custom flow (vs AI, replay) simply
@@ -3092,10 +3101,18 @@ export function startGame(opts = {}) {
   }
   // Lobby (index.html) already confirms both players are connected before
   // calling startGame — no in-canvas ready-tap step needed for LAN mode.
-  if (net) {
-    startOverlay.classList.add('hidden');
-    controlsEnabled = true;
-    beginMatchIntro();
+  // Registers every net.onXxx(...) callback this match relies on — called
+  // once below at match start, and again after a successful reconnectMatch()
+  // (see the onDisconnect 'self' branch further down) since a fresh net
+  // object starts with none of these attached. `netGeneration` guards
+  // against the OLD, just-superseded net object's own onDisconnect somehow
+  // still firing afterward (a browser WebSocket only closes once, but that
+  // close event can arrive late — after this closure has already moved on
+  // to a newer connection — so a stale registration must no-op, not start
+  // a second, redundant reconnect).
+  let netGeneration = 0;
+  function wireNetCallbacks() {
+    const generation = ++netGeneration;
     if (CHAT_ENABLED) {
       // Mask itself starts hidden (chatMaskOpen=false) — CHAT_ENABLED just
       // means the plumbing is live, opening is always an explicit click on
@@ -3226,6 +3243,12 @@ export function startGame(opts = {}) {
     // confirmation (see net.js's onDisconnect comment for what tells the two
     // apart, and showNetDeadEnd's own comment for the copy each gets).
     net.onDisconnect((reason) => {
+      if (generation !== netGeneration) return; // this net object was already superseded by a later reconnect
+      // 'self': try to quietly reconnect before concluding anything (see
+      // attemptReconnect below) — regardless of match phase, since the
+      // reported bug is specifically the already-ended match's own ticket
+      // (matchIsDecided() below), not just a mid-match drop.
+      if (reason === 'self' && reconnectMatch) { attemptReconnect(); return; }
       opponentGone = true;
       disconnectReason = reason;
       // The opponent closing THEIR ticket (or leaving during the final goal
@@ -3234,8 +3257,36 @@ export function startGame(opts = {}) {
       // ticket is the only thing this side should ever see — "Match over"
       // used to overwrite it — so just stop offering a rematch to nobody.
       if (matchIsDecided()) { syncTicketRematchButton(); return; }
-      showNetDeadEnd(reason === 'self' ? 'selfDisconnected' : 'quit');
+      showNetDeadEnd('quit');
     });
+  }
+  // Best-effort recovery from this client's OWN socket dropping with no
+  // server-side confirmation anyone left (see the onDisconnect 'self' branch
+  // above) — a couple of quick, silent retries against this exact match's
+  // room/team (party/arbiter.js's rejoinTeam, see net.js's connectMatch)
+  // before giving up. Deliberately does nothing about a shot that may have
+  // been mid-flight to the server when the socket dropped — that gap is
+  // still covered by the existing LAN_WAIT_TIMEOUT_MS watchdog, unchanged;
+  // this only restores the connection for whatever comes next.
+  const RECONNECT_ATTEMPTS = 2;
+  const RECONNECT_RETRY_DELAY_MS = 4000;
+  async function attemptReconnect(attempt = 1) {
+    try {
+      net = await reconnectMatch(myTeam);
+      wireNetCallbacks();
+    } catch {
+      if (attempt < RECONNECT_ATTEMPTS) { trackedTimeout(() => attemptReconnect(attempt + 1), RECONNECT_RETRY_DELAY_MS); return; }
+      opponentGone = true;
+      disconnectReason = 'self';
+      if (matchIsDecided()) { syncTicketRematchButton(); return; }
+      showNetDeadEnd('selfDisconnected');
+    }
+  }
+  if (net) {
+    startOverlay.classList.add('hidden');
+    controlsEnabled = true;
+    beginMatchIntro();
+    wireNetCallbacks();
   } else if (aiTeam) {
     // Solo vs IA: no lobby/ready-tap step needed (only one human) — straight
     // into the human's aim phase, same as LAN skips the local ready screen.

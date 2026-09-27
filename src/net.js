@@ -46,8 +46,17 @@ const PARTY_HOST = import.meta.env.DEV ? 'ws://localhost:1999' : 'wss://nim-ball
 // omitted entirely for a guest (see src/main.js's getIdentity()). Never
 // gates matchmaking the way WEEK's own address requirement does — LIVE stays
 // guest-playable either way.
-export function connectMatch(code, address = null) {
-  const suffix = address ? `?address=${encodeURIComponent(normalizeAddress(address))}` : '';
+// `rejoinTeam` ('A'|'B', optional) — only ever sent by game.js's own
+// automatic reconnect attempt after this client's OWN socket dropped with
+// no server-side confirmation anyone left (see game.js's onDisconnect
+// 'self' handling) — tells party/arbiter.js's onConnect to reclaim that
+// exact team's slot instead of the normal first-free-slot assignment (see
+// its own comment for the trust level this carries, same as `address`).
+export function connectMatch(code, address = null, rejoinTeam = null) {
+  const params = new URLSearchParams();
+  if (address) params.set('address', normalizeAddress(address));
+  if (rejoinTeam) params.set('rejoinTeam', rejoinTeam);
+  const suffix = params.toString() ? `?${params.toString()}` : '';
   return connectSocket(`${PARTY_HOST}/parties/arbiter/${code}${suffix}`);
 }
 
