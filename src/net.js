@@ -499,6 +499,22 @@ export async function disconnectTelegram(address) {
   }
 }
 
+// Cloudflare's own edge proxy drops a WebSocket that's carried no traffic
+// for ~100s, closing it silently (no close frame the arbiter's own onClose
+// logic can tell apart from a real quit — it just sees the connection gone
+// and relays 'opponentLeft' to whoever's left, see game.js's net.onDisconnect
+// comment). Every in-match exchange (a shot commit at the latest every
+// turnTime, max 30s — see src/matchConfig.js's TURN_TIME_OPTIONS) is well
+// under that, but the post-match ticket has no such rhythm: nothing is sent
+// over the wire once the match ends, so a player who lingers on their own
+// ticket for over ~100s (reading it, sharing it, just deciding) can trip
+// this on a perfectly healthy connection — reported as the "Play Again"
+// pill wrongly reading "Opponent left" with nobody actually having left.
+// A trivial periodic ping is enough to keep the proxy's idle timer from
+// ever firing; the arbiter doesn't need a case for it (see party/arbiter.js
+// onMessage's own comment: an unrecognized msg.type is silently ignored).
+const KEEPALIVE_INTERVAL_MS = 45000;
+
 function connectSocket(url) {
   return new Promise((resolve, reject) => {
     let ws;
@@ -510,6 +526,7 @@ function connectSocket(url) {
     }
 
     let settled = false;
+    let keepaliveId = null;
     let launchCb = null;
     let opponentJoinedCb = null;
     let disconnectCb = null;
@@ -606,6 +623,17 @@ function connectSocket(url) {
       },
       onLaunch(cb) { launchCb = cb; },
       onOpponentJoined(cb) { opponentJoinedCb = cb; },
+      // `cb(reason)` — 'opponent' when the server explicitly confirmed the
+      // other side's connection is gone (a real 'opponentLeft' message, see
+      // party/arbiter.js's onClose), 'self' when it's this client's OWN
+      // socket that closed with no such message ever having arrived (a
+      // local WebSocket 'close' — reported: an iOS WebView can fire this on
+      // its own, with the server never having seen anything happen at all,
+      // see conversation/CLAUDE.md-worthy investigation). Only 'opponent' is
+      // proof the other player is actually gone; 'self' means this side lost
+      // its own connection, which still ends the match locally (no way to
+      // send/receive anything else either way) but is a different fact and
+      // must not be blamed on the opponent.
       onDisconnect(cb) { disconnectCb = cb; },
       onChat(cb) { chatCb = cb; },
       onChatMute(cb) { chatMuteCb = cb; },
@@ -626,16 +654,25 @@ function connectSocket(url) {
       // 'paid' status) — callers must not assume it always arrives, same as
       // onLeagueResult above.
       onPrizeResult(cb) { prizeResultCb = cb; },
-      close() { ws.close(); },
+      close() { clearInterval(keepaliveId); ws.close(); },
     };
+
+    ws.addEventListener('open', () => {
+      keepaliveId = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
+      }, KEEPALIVE_INTERVAL_MS);
+    });
 
     ws.addEventListener('error', () => {
       if (!settled) { settled = true; reject(new Error('Could not connect to the server.')); }
     });
 
     ws.addEventListener('close', () => {
+      clearInterval(keepaliveId);
       if (!settled) { settled = true; reject(new Error('Could not connect to the server.')); return; }
-      if (disconnectCb) disconnectCb();
+      // This client's OWN socket, not the opponent's (see onDisconnect's own
+      // comment) — the arbiter never had to tell us anything for this to fire.
+      if (disconnectCb) disconnectCb('self');
     });
 
     ws.addEventListener('message', (evt) => {
@@ -658,7 +695,9 @@ function connectSocket(url) {
         net.opponentAddress = msg.address || null;
         if (opponentJoinedCb) opponentJoinedCb();
       } else if (msg.type === 'opponentLeft') {
-        if (disconnectCb) disconnectCb();
+        // The server confirmed it — this one really is the other side (see
+        // onDisconnect's own comment).
+        if (disconnectCb) disconnectCb('opponent');
       } else if (msg.type === 'launch') {
         if (launchCb) launchCb({ shotsA: msg.shotsA, shotsB: msg.shotsB, sweepA: msg.sweepA, sweepB: msg.sweepB, mancheIndex: msg.mancheIndex });
       } else if (msg.type === 'chat') {
