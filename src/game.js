@@ -1443,10 +1443,14 @@ export function startGame(opts = {}) {
   // itself is treated as the disconnect.
   const LAN_WAIT_TIMEOUT_MS = 120000;
   let lanWaitWatchdogId = null;
-  // Net matches: the opponent's socket has closed (see net.onDisconnect
-  // above). Only decides what an already-decided match's ticket offers
-  // (Play Again) — a mid-match departure still goes to showNetDeadEnd().
+  // Net matches: a close signal arrived (see net.onDisconnect above). Only
+  // decides what an already-decided match's ticket offers (Play Again) — a
+  // mid-match departure still goes to showNetDeadEnd().
   let opponentGone = false;
+  // 'opponent' (the arbiter confirmed it) or 'self' (this client's own
+  // socket dropped, see net.js's onDisconnect comment) — which copy
+  // syncTicketRematchButton uses. Only meaningful once opponentGone is true.
+  let disconnectReason = null;
   // The match has ended as far as this client is concerned: either the
   // ticket phase has begun, or the goal now pending is the deciding one
   // (scores are only bumped once its pause is over — see resolveGoal — hence
@@ -1457,12 +1461,14 @@ export function startGame(opts = {}) {
     const scoringScore = goalPending.scoringTeam === 'A' ? scoreA : scoreB;
     return scoringScore + 1 >= WIN_SCORE;
   }
-  // Nobody left to rematch: the ticket stays, its Play Again does not.
+  // Nobody left to rematch: the ticket stays, its Play Again does not —
+  // worded by disconnectReason so a lost connection on THIS side (see
+  // net.js's onDisconnect comment) doesn't wrongly blame the opponent.
   function syncTicketRematchButton() {
     const btn = document.getElementById('goalPlayAgainBtn');
     if (!btn || !opponentGone) return;
     btn.disabled = true;
-    btn.textContent = 'Opponent left';
+    btn.textContent = disconnectReason === 'self' ? 'Connection lost' : 'Opponent left';
   }
   function clearLanWaitWatchdog() {
     if (lanWaitWatchdogId !== null) { clearTimeout(lanWaitWatchdogId); lanWaitWatchdogId = null; }
@@ -2825,10 +2831,18 @@ export function startGame(opts = {}) {
   function showOverlay(html) { overlay.classList.remove('hidden'); ovContent.innerHTML = html; }
   function hideOverlay() { overlay.classList.add('hidden'); }
   // Net match dead-end (see net.onDisconnect / the 'lanWait' watchdog above)
-  // — two distinct messages depending on which signal we actually got:
-  // 'quit' when the arbiter/socket told us the opponent is gone (a real
-  // close event — in practice this is what a deliberate exit or a browser
-  // tab closing normally produces), 'timeout' when nothing ever told us
+  // — three distinct messages depending on which signal we actually got:
+  // 'quit' when the ARBITER explicitly confirmed the opponent's own
+  // connection is gone (net.js's 'opponent' reason — a real close on their
+  // end, in practice a deliberate exit or their tab closing normally),
+  // 'selfDisconnected' when it's this client's OWN socket that closed
+  // without any such confirmation ever arriving (net.js's 'self' reason —
+  // reported: a mobile WebView can drop its own WebSocket on its own, with
+  // the arbiter never having seen anything happen at all, see conversation).
+  // Both end the match locally the same way (nothing more can be sent or
+  // received either way), but only 'quit' is actually the opponent's doing —
+  // 'selfDisconnected' must never say "the opponent left", that blames the
+  // wrong side. 'timeout' is the third, oldest case: nothing ever told us
   // anything and LAN_WAIT_TIMEOUT_MS of silence is our only evidence
   // something's wrong (a genuinely dead connection, no graceful close frame
   // ever sent). Previously a true dead end (no button, no way out) — the
@@ -2836,6 +2850,7 @@ export function startGame(opts = {}) {
   // nothing else useful to do here (no reconnection support, see CLAUDE.md).
   const NET_DEAD_END_COPY = {
     quit: { title: 'Match over', body: 'The opponent left the match.' },
+    selfDisconnected: { title: 'Connection lost', body: 'You lost your connection to the match.' },
     timeout: { title: 'Connection lost', body: 'No response from the opponent for 2 minutes.' },
   };
   function showNetDeadEnd(kind) {
@@ -3206,18 +3221,20 @@ export function startGame(opts = {}) {
     // problem nimball" design note). Once the real match is running, a
     // mid-match 'opponentJoined' carries no useful information, so no-op it.
     net.onOpponentJoined(() => {});
-    // A real close/'opponentLeft' signal actually arrived (see
-    // showNetDeadEnd's own comment on why that reads as 'quit' rather than
-    // a silent drop, and the 'lanWait' watchdog above for the other case).
-    net.onDisconnect(() => {
+    // A close signal arrived — either a real 'opponentLeft' the arbiter
+    // confirmed, or this client's own socket dropping with no such
+    // confirmation (see net.js's onDisconnect comment for what tells the two
+    // apart, and showNetDeadEnd's own comment for the copy each gets).
+    net.onDisconnect((reason) => {
       opponentGone = true;
+      disconnectReason = reason;
       // The opponent closing THEIR ticket (or leaving during the final goal
       // pause / this side's own ticket render) reaches us as the very same
       // close signal as a mid-match quit. Once the match is decided the
       // ticket is the only thing this side should ever see — "Match over"
       // used to overwrite it — so just stop offering a rematch to nobody.
       if (matchIsDecided()) { syncTicketRematchButton(); return; }
-      showNetDeadEnd('quit');
+      showNetDeadEnd(reason === 'self' ? 'selfDisconnected' : 'quit');
     });
   } else if (aiTeam) {
     // Solo vs IA: no lobby/ready-tap step needed (only one human) — straight
