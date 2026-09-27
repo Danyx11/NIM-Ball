@@ -213,11 +213,31 @@ export class Arbiter extends Server {
       connection.close();
       return;
     }
-    const team = !this.players.A ? 'A' : !this.players.B ? 'B' : null;
-    if (!team) {
-      this.send(connection, { type: 'full' });
-      connection.close();
-      return;
+    const url = new URL(ctx.request.url);
+    // Reconnect (src/net.js's connectMatch rejoinTeam, sent only when a
+    // client's own socket closed locally with the server never having said
+    // anything happened — see conversation: a mobile WebView can drop its
+    // own WebSocket on its own, so onClose here never fires and this team's
+    // slot never frees). Trusted the same way ?address= already is (never
+    // proven, just relayed — see CLAUDE.md's Radar trust-model section):
+    // claiming a team just evicts whatever connection is currently sitting
+    // in that exact slot, never the other team's, so a stray/incorrect
+    // request can only ever kick out this same player's own prior
+    // connection. Normal joins (no rejoinTeam) are entirely unaffected.
+    const rejoinTeam = url.searchParams.get('rejoinTeam');
+    let team;
+    if (rejoinTeam === 'A' || rejoinTeam === 'B') {
+      team = rejoinTeam;
+      if (this.players[team] && this.players[team] !== connection) {
+        try { this.players[team].close(); } catch { /* already gone */ }
+      }
+    } else {
+      team = !this.players.A ? 'A' : !this.players.B ? 'B' : null;
+      if (!team) {
+        this.send(connection, { type: 'full' });
+        connection.close();
+        return;
+      }
     }
     this.players[team] = connection;
     // Connection state survives for the life of this connection (see
@@ -227,7 +247,7 @@ export class Arbiter extends Server {
     // Optional, Radar-only (see this.addresses' own comment above) — src/net.js's
     // connectMatch() appends this when the local player has a connected
     // wallet, omits it entirely for a guest.
-    this.addresses[team] = new URL(ctx.request.url).searchParams.get('address') || null;
+    this.addresses[team] = url.searchParams.get('address') || null;
     // Team A (creator) reads back null here (it hasn't sent its config yet
     // at this point — it already knows its own choice locally, see main.js)
     // and team B (joiner) gets whatever A already stored, assuming the
@@ -453,7 +473,13 @@ export class Arbiter extends Server {
   onClose(connection, code, reason, wasClean) {
     const team = connection.state?.team;
     if (team !== 'A' && team !== 'B') return;
-    if (this.players[team] === connection) this.players[team] = null;
+    // A newer connection for this same team may already have taken over the
+    // slot (onConnect's rejoinTeam reconnect path, above, evicts the old one
+    // by calling close() on it) — this is then just that superseded old
+    // connection finishing its own teardown, not a real departure, so it
+    // must not reset the round or tell the other player anyone left.
+    if (this.players[team] !== connection) return;
+    this.players[team] = null;
     this.resetRound();
     this.resetManche();
     this.lastChatAt[team] = 0; // a fresh reconnect shouldn't inherit a stale cooldown

@@ -3511,7 +3511,15 @@ async function joinLan(raw, joinBtn) {
 // differs. `onLost(msg)` decides where "opponent disconnected" sends the
 // player back to — each mode's own entry screen, so an error there offers
 // the right retry (LAN address vs. match code) rather than a generic dead end.
-function showWaitingScreen(net, onLost, matchConfig) {
+// `reconnect` (optional, Match Réseau only — see hostMatch/joinMatch): a
+// `(team) => connectMatch(...)` closure over that match's own code/address,
+// handed all the way through to startGame() so it can retry this exact
+// team's slot if this client's own socket ever drops later with no
+// server-side confirmation anyone left (see game.js's onDisconnect 'self'
+// handling). Duel LAN has no such code/address pair, so its own call below
+// simply never passes one — startGame() then has nothing to retry with,
+// same as before this existed.
+function showWaitingScreen(net, onLost, matchConfig, reconnect = null) {
   const teamLabel = net.myTeam === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
   showLobby(`
@@ -3519,7 +3527,7 @@ function showWaitingScreen(net, onLost, matchConfig) {
     <h2>Waiting for opponent…</h2>
     <p>Share the link with the other player if you haven't already.</p>
   `);
-  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, onLost, matchConfig));
+  net.onOpponentJoined(() => showReadyScreen(net, teamLabel, cls, onLost, matchConfig, reconnect));
   net.onDisconnect(() => onLost('The other player disconnected.'));
 }
 
@@ -3540,7 +3548,7 @@ function showWaitingScreen(net, onLost, matchConfig) {
 // their own match (and start chatting) while the other is still sitting on
 // this screen with no startGame()/onChat() wired up yet to receive it —
 // those messages used to just silently vanish.
-function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
+function showReadyScreen(net, teamLabel, cls, onLost, matchConfig, reconnect = null) {
   showLobby(`
     <span class="team-pill ${cls}">${teamLabel}</span>
     <h2>Opponent connected!</h2>
@@ -3573,6 +3581,7 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig) {
     await new Promise((resolve) => {
       activeStopGame = startGame({
         ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), identiconLabel: identityLabelOverride(net.myTeam), mobile: IS_MOBILE, matchConfig, vibe: activeVibe,
+        reconnectMatch: reconnect,
         onMatchReady: resolve,
       });
     });
@@ -3699,6 +3708,10 @@ async function hostMatch(matchConfig) {
 function showMatchHostWaitingScreen(net, code, matchConfig) {
   const teamLabel = net.myTeam === 'A' ? 'TEAM BLUE' : 'TEAM YELLOW';
   const cls = net.myTeam === 'A' ? 'a' : 'b';
+  // See showWaitingScreen's own comment on `reconnect` — this room's own
+  // code/address, closed over so startGame() can retry this exact team's
+  // slot later without needing to know either itself.
+  const reconnect = (team) => connectMatch(code, hubAddress, team);
   // Alone with a generated code, nobody's joined yet — see
   // matchNetworkBackBtn's own comment for what this gates.
   hostedRoomNet = net;
@@ -3716,7 +3729,7 @@ function showMatchHostWaitingScreen(net, code, matchConfig) {
   });
   net.onOpponentJoined(() => {
     hostedRoomNet = null;
-    showReadyScreen(net, teamLabel, cls, (msg) => showRemoteConnectError(msg, matchConfig), matchConfig);
+    showReadyScreen(net, teamLabel, cls, (msg) => showRemoteConnectError(msg, matchConfig), matchConfig, reconnect);
   });
   net.onDisconnect(() => { hostedRoomNet = null; showRemoteConnectError('The other player disconnected.', matchConfig); });
 }
@@ -3877,7 +3890,8 @@ async function joinMatch(code, joinBtn, retryScreen) {
     // The creator's matchConfig, as stored server-side and handed back in
     // this connection's own 'joined' message (see net.js/party/arbiter.js)
     // — this client never chooses/sends its own (point 13 of the brief).
-    showWaitingScreen(net, (msg) => retryScreen(msg), net.matchConfig);
+    // reconnect: see showWaitingScreen's own comment on the param.
+    showWaitingScreen(net, (msg) => retryScreen(msg), net.matchConfig, (team) => connectMatch(code, hubAddress, team));
   } catch (err) {
     hideLoadingOverlay();
     retryScreen(err.message);

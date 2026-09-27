@@ -21,6 +21,13 @@
       "runtimeArgs": ["run", "duel"],
       "port": 5173,
       "autoPort": true
+    },
+    {
+      "name": "nim-ball-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview"],
+      "port": 4173,
+      "autoPort": true
     }
   ]
 }
