@@ -2121,6 +2121,16 @@ function showJoinCodeScreen(errorMsg) {
   });
   // Return just dismisses the on-screen keyboard — it doesn't submit the code.
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
+  // Mobile only: this panel sits vertically centered over the full layout
+  // viewport (.config-panel), which the on-screen keyboard doesn't shrink —
+  // so once it opens, the field can end up under it. Nudge it back into view
+  // once the keyboard has finished animating in (no reliable "keyboard open"
+  // event, so a short delay after focus is the only signal we have).
+  if (IS_MOBILE) {
+    input.addEventListener('focus', () => {
+      setTimeout(() => input.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+    });
+  }
   joinBtn.onclick = () => { audio.play('button'); joinWithCode(input.value, joinBtn, showJoinCodeScreen); };
   joinCodeOverlay.classList.remove('hidden');
   renderMyMatchesContent(); // bottom half of this same merged panel, see its own comment
