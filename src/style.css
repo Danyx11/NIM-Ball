@@ -2220,7 +2220,7 @@ button:disabled { opacity: 0.35; cursor: default; }
    to 5 buttons down to 2 ("Change Settings"/"Replay"/"Menu" gone, Menu's job
    moved to the small corner .config-back exit pill, which sits outside the
    flex flow entirely) — the freed vertical room goes to the ticket itself. */
-.ticket-img { max-width: 100%; max-height: 76vh; width: auto; border-radius: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
+.ticket-img { max-width: 100%; max-height: 84vh; width: auto; border-radius: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
 
 /* WEEK's own match-complete ticket screen (main.js's showWeekMatchTicket) —
    see index.html's #weekTicketOverlay comment for why this can't just be
