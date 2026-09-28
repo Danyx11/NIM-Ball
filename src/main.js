@@ -3600,9 +3600,21 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig, reconnect = n
     // asset warm-up and the identicon bake before either side's board appears.
     showLoadingOverlay();
     await preloadCoreAssets(IS_MOBILE);
+    // net.opponentAddress is already known by this point — onBothReady only
+    // ever fires after onOpponentJoined has set it (see showWaitingScreen/
+    // showMatchHostWaitingScreen above and net.js's 'joined'/'opponentJoined'
+    // handling) — so the opponent's own stone bubble can bake from their real
+    // address too, not just this device's own team (identiconOverride only
+    // ever covers myTeam). Previously the board deliberately left the
+    // opponent on DEFAULT_IDENTICON_ADDRESS (see game.js's IDENTICON_ADDRESS
+    // comment) even though the post-match panel/ticket already resolved the
+    // real one via this same net.opponentAddress.
+    const oppTeam = net.myTeam === 'A' ? 'B' : 'A';
     await new Promise((resolve) => {
       activeStopGame = startGame({
-        ...rockHandlers, net, myTeam: net.myTeam, identiconAddress: identiconOverride(net.myTeam), identiconLabel: identityLabelOverride(net.myTeam), mobile: IS_MOBILE, matchConfig, vibe: activeVibe,
+        ...rockHandlers, net, myTeam: net.myTeam,
+        identiconAddress: { ...identiconOverride(net.myTeam), ...(net.opponentAddress ? { [oppTeam]: net.opponentAddress } : {}) },
+        identiconLabel: identityLabelOverride(net.myTeam), mobile: IS_MOBILE, matchConfig, vibe: activeVibe,
         reconnectMatch: reconnect,
         onMatchReady: resolve,
       });
