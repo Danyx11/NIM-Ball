@@ -2867,8 +2867,11 @@ export function startGame(opts = {}) {
     audio.stopAmbience();
     audio.stopAllGlides();
     const { title, body } = NET_DEAD_END_COPY[kind];
-    showOverlay(`<h2>${title}</h2><p>${body}</p>`);
-    overlay.onclick = () => { stopGame(); onExit?.(); };
+    // The panel itself stays a full click-anywhere target (overlay.onclick
+    // below), but a visible pill gives the exit an explicit affordance too —
+    // its click bubbles up to that same handler, so no separate listener.
+    showOverlay(`<h2>${title}</h2><p>${body}</p><button class="bigbtn" id="netDeadEndMenuBtn">🏠 Menu</button>`);
+    overlay.onclick = () => { audio.play('button'); stopGame(); onExit?.(); };
     chatComposeInput.disabled = true; chatComposeSendBtn.disabled = true; chatComposeEmojiBtn.disabled = true;
     chatInputEnabledCache = false; chatSendEnabledCache = false;
   }
