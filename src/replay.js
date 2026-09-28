@@ -173,6 +173,12 @@ export const UPLOAD_LABEL_CX = s(724), UPLOAD_LABEL_Y = s(775);
 // l'intérieur du ticket" — while still visibly landing on the photo's corner.
 export const LEAGUE_STAMP_CX = s(418), LEAGUE_STAMP_CY = s(160), LEAGUE_STAMP_R = s(105);
 export const LEAGUE_STAMP_ROTATE_DEG = -9;
+// NIM prize stamp — mirrored across the ticket's own vertical centerline
+// (NATIVE_W/2) so it lands symmetrically on the photo's top-RIGHT corner,
+// independent of the League stamp (a match can earn either, both, or
+// neither — see game.js's showVictory).
+export const PRIZE_STAMP_CX = s(NATIVE_W - 418), PRIZE_STAMP_CY = s(160), PRIZE_STAMP_R = s(105);
+export const PRIZE_STAMP_ROTATE_DEG = 9;
 
 // ---------- base64url <-> bytes ----------
 function bytesToBase64Url(bytes) {

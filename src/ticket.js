@@ -18,6 +18,7 @@ import {
   traceBannerTabPath,
   UPLOAD_LABEL_CX, UPLOAD_LABEL_Y,
   LEAGUE_STAMP_CX, LEAGUE_STAMP_CY, LEAGUE_STAMP_R, LEAGUE_STAMP_ROTATE_DEG,
+  PRIZE_STAMP_CX, PRIZE_STAMP_CY, PRIZE_STAMP_R, PRIZE_STAMP_ROTATE_DEG,
 } from './replay.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
@@ -145,7 +146,7 @@ function drawSpacedText(ctx, text, cx, y, font, color, spacing) {
 // busy photo — plain opaque white + solid ink text + a soft drop shadow for
 // separation reads far better there (see conversation: "fond blanc piqué et
 // très opaque").
-function drawLeagueStamp(ctx, lp) {
+export function drawLeagueStamp(ctx, lp) {
   ctx.save();
   ctx.translate(LEAGUE_STAMP_CX, LEAGUE_STAMP_CY);
   ctx.rotate((LEAGUE_STAMP_ROTATE_DEG * Math.PI) / 180);
@@ -170,7 +171,38 @@ function drawLeagueStamp(ctx, lp) {
   ctx.restore();
 }
 
-export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winner, stats, points = [], leagueLp = null }) {
+// NIM prize stamp — mirrored on the ticket's top-right corner, same solid
+// opaque-white treatment as the League Beta stamp above (see its own comment
+// for why) and same exported-for-later-patching pattern: game.js's
+// showVictory renders the ticket without either stamp first, then calls
+// these directly on the already-shown canvas once League/Prize actually
+// answer, instead of blocking the ticket's own appearance on that wait.
+export function drawPrizeStamp(ctx, nim) {
+  ctx.save();
+  ctx.translate(PRIZE_STAMP_CX, PRIZE_STAMP_CY);
+  ctx.rotate((PRIZE_STAMP_ROTATE_DEG * Math.PI) / 180);
+  const r = PRIZE_STAMP_R;
+  ctx.shadowColor = 'rgba(15, 28, 63, 0.35)';
+  ctx.shadowBlur = Math.round(14 * SCALE);
+  ctx.shadowOffsetY = Math.round(3 * SCALE);
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.lineWidth = Math.round(3 * SCALE);
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  drawSpacedText(ctx, 'NIM PRIZE', 0, -r * 0.18, `800 ${Math.round(15 * SCALE)}px ${FONT}`, INK, 1.5 * SCALE);
+  ctx.font = `800 ${Math.round(34 * SCALE)}px ${FONT}`;
+  ctx.fillStyle = INK;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(`+${nim}`, 0, r * 0.34);
+  ctx.restore();
+}
+
+export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winner, stats, points = [], leagueLp = null, prizeNim = null }) {
   await document.fonts.ready;
   const [[polaroidImg, bannerImg, guestBlueImg, guestYellowImg, botYellowImg], identiconA, identiconB] = await Promise.all([
     preloadTicketAssets(),
@@ -288,6 +320,7 @@ export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winn
   ctx.restore();
 
   if (leagueLp != null) drawLeagueStamp(ctx, leagueLp);
+  if (prizeNim != null) drawPrizeStamp(ctx, prizeNim);
 
   return canvas;
 }

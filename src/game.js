@@ -11,7 +11,7 @@ import { COLORS } from './colors.js';
 import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
 import { computeCurlingAiShots, DEFAULT_CURLING_AI_CONFIG } from './aiCurling.js';
 import { isBasicLaser } from './settings.js';
-import { preloadTicketAssets, renderTicket } from './ticket.js';
+import { preloadTicketAssets, renderTicket, drawLeagueStamp, drawPrizeStamp } from './ticket.js';
 import { loadImages } from './preload.js';
 import * as recorder from './recorder.js';
 import { MAX_POINTS_ON_TICKET, pointTileRect, buildReplayUrl, TICKET_W, TICKET_H } from './replay.js';
@@ -4237,6 +4237,17 @@ export function startGame(opts = {}) {
     if (howTo) { resetPositions(); beginAimPhase(); return; }
     if (isWipeout) audio.play('wipeout');
     else audio.play('goal', { volume: 0.447 }); // -7dB
+    // Fire the reward request (League/Prize) the instant a match-winning goal
+    // lands, rather than after resolveGoal()'s own GOAL_PAUSE_MS settle wait —
+    // the final score is already known here, so this overlaps the server
+    // round-trip with the celebration animation instead of paying for both
+    // back to back (see conversation). No-op via optional chaining for every
+    // mode without net (Pass & Play/AI/replay/WEEK's externalManche).
+    if (!externalManche) {
+      const projA = scoreA + (scoringTeam === 'A' ? 1 : 0);
+      const projB = scoreB + (scoringTeam === 'B' ? 1 : 0);
+      if (projA >= WIN_SCORE || projB >= WIN_SCORE) net?.sendMatchOver?.(projA, projB, matchIndex);
+    }
     // Same GOAL_PAUSE_MS pause (or, for curling, resolveCurlingPoint's own
     // shorter CURLING_REVEAL_MS — pauseMs) whether the round continues or the
     // match just
@@ -4312,7 +4323,8 @@ export function startGame(opts = {}) {
         // reaches this branch at all, see the externalManche comment above).
         // No-op on Duel LAN's arbiter (server/arbiter.js has no 'matchOver'
         // handler, LAN is intentionally out of Radar's scope — see CLAUDE.md).
-        net?.sendMatchOver?.(scoreA, scoreB, matchIndex);
+        // The actual send now happens earlier, in onGoal() itself, right as
+        // the point lands — see its own comment.
         showVictory();
       } else if (isMatchWin) {
         // WEEK's deciding point: no +1 panel — like every other mode's last
@@ -4440,10 +4452,15 @@ export function startGame(opts = {}) {
       maybeAdvanceRound();
     }, { once: true, signal });
   }
-  // Match-win panel: the shareable "ticket" (see src/ticket.js) doubles as
-  // this panel itself, per design brief — shows both teams' objective result
-  // (score + winner), not a personalized "gagné/perdu" like the old panel, so
-  // LAN opponents can look at the exact same ticket without inconsistency.
+  // Match-win panel: same neutral "+1" point panel as every other point in
+  // the match (not a personalized "gagné/perdu" — see conversation: LAN
+  // opponents both see identical, objective feedback), held for a short beat,
+  // then swapped for the shareable "ticket" (src/ticket.js) with a slide-up
+  // reveal. The ticket itself shows without its League/Prize stamps at
+  // first — those get patched onto the same canvas whenever the server
+  // actually answers, instead of blocking the ticket's own appearance on
+  // that wait (see conversation: the reward request already fired back in
+  // onGoal(), as early as possible, so this is usually a short wait already).
   async function showVictory() {
     phase = 'gameover';
     // A "Match over" dead-end shown earlier (showNetDeadEnd, e.g. the opponent
@@ -4457,9 +4474,22 @@ export function startGame(opts = {}) {
     // resumes it for the fresh match).
     audio.stopAmbience();
     audio.stopAllGlides();
-    audio.play('pointOk', { volume: 0.252 }); // was 0.315, -20% — ticket2 fanfare removed
     const winningTeam = scoreA >= WIN_SCORE ? 'A' : 'B';
-    showOverlay(`<p>Generating ticket…</p>`);
+
+    // ---------- Step 1: the +1 goal panel, held a fixed beat (not click-to-
+    // dismiss — there's no next manche to advance into) while the ticket
+    // below gets built in parallel. ----------
+    const PANEL_BEFORE_TICKET_MS = 2000;
+    const panelShownAt = performance.now();
+    audio.play('pointOk', { volume: 0.252 }); // was 0.315, -20%
+    const teamTintClass = winningTeam === 'A' ? 'team-a-scored' : 'team-b-scored';
+    overlay.classList.add(teamTintClass, 'goal-box-70');
+    showOverlay(resultPanelHtml(winningTeam, winningTeam === 'A' ? 'a' : 'b', '+1'));
+    fillResultIdenticon('A');
+    fillResultIdenticon('B');
+    upgradePanelHandle('A');
+    upgradePanelHandle('B');
+
     const stats = {
       durationMs: performance.now() - matchStartTime,
       goals: scoreA + scoreB,
@@ -4483,10 +4513,10 @@ export function startGame(opts = {}) {
     const looksClassic = matchConfig.skin === DEFAULT_MATCH_CONFIG.skin && matchConfig.stonesPerTeam === DEFAULT_MATCH_CONFIG.stonesPerTeam
       && matchConfig.pointsToWin === DEFAULT_MATCH_CONFIG.pointsToWin && matchConfig.turnTime === DEFAULT_MATCH_CONFIG.turnTime
       && matchConfig.curlingCycles === DEFAULT_MATCH_CONFIG.curlingCycles;
-    // Waited on alongside the prize below (Promise.all) rather than before it,
-    // and for as long as the prize — the League answer used to get only 2s
-    // and, arriving later, silently cost the ticket its stamp. A null answer
-    // (not rewarded) ends the wait at once, so this only costs time when the
+    // Started now, not awaited yet — the reward request itself already went
+    // out back in onGoal(), so this wait has been running since well before
+    // this function even started (see its own comment). A null answer (not
+    // rewarded) ends the wait at once, so this only costs time when the
     // server is genuinely slow.
     const leagueWait = (net && looksClassic) ? waitForLeagueLp(8000) : Promise.resolve(null);
     // NIM prizes — same Classic-ruleset requirement as League above (see
@@ -4504,8 +4534,7 @@ export function startGame(opts = {}) {
     // non-null for the WINNING side (see party/arbiter.js's 'matchOver'
     // handler — prizeResult is sent to the winner's connection only).
     const looksPrizeEligible = net && looksClassic && net.opponentAddress && IDENTICON_ADDRESS[myTeam] !== DEFAULT_IDENTICON_ADDRESS[myTeam];
-    const [leagueLp, prizeNim] = await Promise.all([leagueWait, looksPrizeEligible ? waitForPrizeNim(8000) : Promise.resolve(null)]);
-    if (net && looksClassic && leagueLp == null && !leagueLpAnswered) console.info('[rewards] no League answer from the server within 8s');
+    const prizeWait = looksPrizeEligible ? waitForPrizeNim(8000) : Promise.resolve(null);
     // Opponent's real identicon/address/handle for a net match (see
     // conversation) — IDENTICON_ADDRESS/LABEL only ever carry a real value
     // for myTeam (see DEFAULT_IDENTICON_ADDRESS's own comment: the opponent
@@ -4526,6 +4555,10 @@ export function startGame(opts = {}) {
         if (identity?.handle) ticketLabels[oppTeam] = `@${identity.handle}`;
       } catch { /* best-effort — ticket falls back to the shortened address */ }
     }
+    // ---------- Step 2: build the ticket WITHOUT its League/Prize stamps —
+    // those are patched in later, whenever the server actually answers (see
+    // the Promise.all below), so a slow reward round-trip never blocks the
+    // ticket's own appearance. ----------
     const ticketCanvas = await renderTicket({
       scoreA, scoreB,
       teamA: { address: ticketAddresses.A, label: ticketLabels.A, isAI: isBotTeam('A') },
@@ -4533,35 +4566,62 @@ export function startGame(opts = {}) {
       winner: winningTeam,
       stats,
       points: ticketPoints,
-      leagueLp,
     });
     // Rejouer/Menu (or a LAN disconnect) may have already moved the overlay on
     // by the time this async render resolves — don't stomp on it.
     if (phase !== 'gameover') return;
+
+    // Let the +1 panel above sit for its full PANEL_BEFORE_TICKET_MS beat —
+    // only actually waits out whatever's left of it, since building the
+    // ticket above already ate into it.
+    const remainingPanelMs = PANEL_BEFORE_TICKET_MS - (performance.now() - panelShownAt);
+    if (remainingPanelMs > 0) await new Promise((resolve) => trackedTimeout(resolve, remainingPanelMs));
+    if (phase !== 'gameover') return;
+
+    overlay.classList.remove(teamTintClass, 'goal-box-70');
     showOverlay(`
       <button class="config-back" id="goalExitBtn" type="button" aria-label="Exit">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
       </button>
-      <div class="ticket-row">
+      <div class="ticket-row ticket-reveal">
         <div class="ticket-wrap" id="ticketWrap">
           <img class="ticket-img" id="ticketImg" alt="Nim-Curl match ticket">
         </div>
         <div class="goal-actions">
-          ${prizeNim != null ? `<p class="prize-banner">🏆 +${prizeNim} NIM prize</p>` : ''}
           <button class="bigbtn" id="goalPlayAgainBtn">▶ Play Again</button>
-          <button class="bigbtn" id="goalShareBtn">📤 Share</button>
+          <button class="bigbtn" id="goalShareBtn" disabled>📤 Share</button>
           <button class="bigbtn" id="goalMenuBtn">🏠 Menu</button>
         </div>
       </div>
     `);
+    audio.play('ticketReveal', { volume: 0.2 }); // slightly under the +1 panel's pointOk (0.252) — see conversation
     syncTicketRematchButton(); // the opponent may already have left while the ticket was being built
     const ticketImg = document.getElementById('ticketImg');
     ticketImg.src = ticketCanvas.toDataURL('image/png');
-    // The league stamp itself is baked straight into the canvas pixels (see
-    // ticket.js's drawLeagueStamp) — nothing in the DOM for a screen reader
-    // to land on, so its info goes on the <img>'s own alt text instead (see
-    // conversation: the brief's own accessibility note).
-    if (leagueLp != null) ticketImg.alt = `Nim-Curl match ticket. League Beta match, +${leagueLp} points.`;
+    // ---------- Step 3: patch the League/Prize stamps onto the SAME canvas
+    // as soon as the server answers (a null answer still counts, and just
+    // means no stamp — see leagueWait/prizeWait's own comments above), then
+    // unlock Share. Doesn't reshow the overlay — the <img> is simply updated
+    // in place. ----------
+    Promise.all([leagueWait, prizeWait]).then(([leagueLp, prizeNim]) => {
+      if (phase !== 'gameover') return; // Rejouer/Menu/exit may have already moved on
+      if (net && looksClassic && leagueLp == null && !leagueLpAnswered) console.info('[rewards] no League answer from the server within 8s');
+      if (leagueLp != null || prizeNim != null) {
+        const stampCtx = ticketCanvas.getContext('2d');
+        if (leagueLp != null) {
+          drawLeagueStamp(stampCtx, leagueLp);
+          // The league stamp itself is baked straight into the canvas pixels
+          // — nothing in the DOM for a screen reader to land on, so its info
+          // goes on the <img>'s own alt text instead (see conversation: the
+          // brief's own accessibility note).
+          ticketImg.alt = `Nim-Curl match ticket. League Beta match, +${leagueLp} points.`;
+        }
+        if (prizeNim != null) drawPrizeStamp(stampCtx, prizeNim);
+        ticketImg.src = ticketCanvas.toDataURL('image/png');
+      }
+      const shareBtn = document.getElementById('goalShareBtn');
+      if (shareBtn) shareBtn.disabled = false;
+    });
     // Each point QR baked onto the ticket is also directly clickable on the
     // same device (no second phone needed to scan it) — see CLAUDE.md replay
     // section. Covers the whole tile column (QR + label), not just the QR
