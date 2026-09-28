@@ -161,10 +161,20 @@ export class Arbiter extends Server {
   // pointed at the season's own Durable Object (see party/leagueSeason.js's
   // header comment on why this RPC boundary is itself the auth).
   leagueNotify(method, payload) {
-    if (!this.env?.LeagueSeason) return; // e.g. local `npm run wrangler:dev` without the binding configured
-    getServerByName(this.env.LeagueSeason, CURRENT_SEASON_ID)
+    // This used to be missing its `return` before getServerByName(...) —
+    // meaning the function always fell through to an implicit `undefined`
+    // return, unconditionally, whether or not the binding existed. The
+    // matchOver handler below unconditionally chains `.then()` onto this
+    // call's result, so every single completed League match threw `Cannot
+    // read properties of undefined (reading 'then')` right there — the RPC
+    // itself (this.serialized(...) in leagueSeason.js) still ran and
+    // recorded the match fine, but the code that sends the result back to
+    // the players never got reached (confirmed live with `wrangler tail`).
+    // Same shape as prizeNotify below now, on purpose.
+    if (!this.env?.LeagueSeason) return Promise.resolve(undefined); // e.g. local `npm run wrangler:dev` without the binding configured
+    return getServerByName(this.env.LeagueSeason, CURRENT_SEASON_ID)
       .then((league) => league[method](payload))
-      .catch((err) => console.error(`[league] ${method} failed:`, err));
+      .catch((err) => { console.error(`[league] ${method} failed:`, err); return undefined; });
   }
 
   // NIM prizes (party/prize.js) — same RPC shape as leagueNotify above, and
@@ -179,7 +189,18 @@ export class Arbiter extends Server {
   }
 
   send(connection, msg) {
-    if (connection) connection.send(JSON.stringify(msg));
+    if (!connection) return;
+    // A connection can go stale without onClose ever firing (the same "a
+    // client's own socket can drop on its own" case the auto-reconnect
+    // feature already handles on the receiving end — see conversation: a
+    // real match traced live with `wrangler tail` caught this exact race —
+    // team A's connection threw here while resolving League, which aborted
+    // this function before team B's own send() on the next line ever ran,
+    // silently costing B their League stamp even though the RPC itself had
+    // already succeeded). One player's dead connection must never stop the
+    // other's message from going out.
+    try { connection.send(JSON.stringify(msg)); }
+    catch (err) { console.error('[arbiter] send failed (stale connection):', err); }
   }
 
   resetRound() {
