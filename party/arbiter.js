@@ -179,7 +179,18 @@ export class Arbiter extends Server {
   }
 
   send(connection, msg) {
-    if (connection) connection.send(JSON.stringify(msg));
+    if (!connection) return;
+    // A connection can go stale without onClose ever firing (the same "a
+    // client's own socket can drop on its own" case the auto-reconnect
+    // feature already handles on the receiving end — see conversation: a
+    // real match traced live with `wrangler tail` caught this exact race —
+    // team A's connection threw here while resolving League, which aborted
+    // this function before team B's own send() on the next line ever ran,
+    // silently costing B their League stamp even though the RPC itself had
+    // already succeeded). One player's dead connection must never stop the
+    // other's message from going out.
+    try { connection.send(JSON.stringify(msg)); }
+    catch (err) { console.error('[arbiter] send failed (stale connection):', err); }
   }
 
   resetRound() {
