@@ -2121,14 +2121,33 @@ function showJoinCodeScreen(errorMsg) {
   });
   // Return just dismisses the on-screen keyboard — it doesn't submit the code.
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
-  // Mobile only: this panel sits vertically centered over the full layout
-  // viewport (.config-panel), which the on-screen keyboard doesn't shrink —
-  // so once it opens, the field can end up under it. Nudge it back into view
-  // once the keyboard has finished animating in (no reliable "keyboard open"
-  // event, so a short delay after focus is the only signal we have).
-  if (IS_MOBILE) {
+  // Mobile only: this panel is position:absolute + top:50%/left:50%, centered
+  // against the full layout viewport — nothing here is actually scrollable
+  // (touch-action:none on html/body), so a plain scrollIntoView has no
+  // scrollable ancestor to act on and can't move the panel on screen. The
+  // on-screen keyboard doesn't shrink that layout viewport either, so once it
+  // opens the field can end up underneath it. visualViewport is the only
+  // reliable signal for how much space the keyboard actually took (there's no
+  // "keyboard opened" event) — once it shrinks, nudge the whole panel up by
+  // however much the input still overlaps the keyboard, layered on top of the
+  // base centering transform. Re-runs on every visualViewport resize since the
+  // keyboard finishes animating in asynchronously after focus.
+  if (IS_MOBILE && window.visualViewport) {
+    const nudgeAboveKeyboard = () => {
+      const rect = input.getBoundingClientRect();
+      const visibleBottom = window.visualViewport.height + window.visualViewport.offsetTop;
+      const overlap = rect.bottom - visibleBottom;
+      joinCodeOverlay.style.transform = overlap > 0
+        ? `translate(-50%, calc(-50% - ${Math.ceil(overlap + 16)}px))`
+        : '';
+    };
     input.addEventListener('focus', () => {
-      setTimeout(() => input.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+      window.visualViewport.addEventListener('resize', nudgeAboveKeyboard);
+      setTimeout(nudgeAboveKeyboard, 350);
+    });
+    input.addEventListener('blur', () => {
+      window.visualViewport.removeEventListener('resize', nudgeAboveKeyboard);
+      joinCodeOverlay.style.transform = '';
     });
   }
   joinBtn.onclick = () => { audio.play('button'); joinWithCode(input.value, joinBtn, showJoinCodeScreen); };
@@ -2139,6 +2158,7 @@ modeJoinCode.addEventListener('click', () => { audio.play('button'); showJoinCod
 joinCodeBackBtn.addEventListener('click', () => {
   audio.play('button');
   joinCodeOverlay.classList.add('hidden');
+  joinCodeOverlay.style.transform = ''; // undo any keyboard-avoidance nudge left over from the code field
   notifPanel.classList.add('hidden');
   returnToModeSelect();
 });
