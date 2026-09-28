@@ -200,6 +200,14 @@
         <button type="button" id="connectBtnLabel">Connecter</button>
         <span class="connect-status" id="connectBtnStatus"></span>
       </span>
+      <!-- League Beta calendar-day streak (party/leagueSeason.js), pinned to
+           the pill's own top-right corner (position:absolute, see style.css's
+           .pill-streak) — see main.js's refreshStreakCache/
+           applyIdentityPillState. Hidden on Guest or a zero streak. -->
+      <span class="pill-streak hidden" id="pillStreak">
+        <span class="pill-streak-label">streak</span>
+        <span class="pill-streak-value" id="pillStreakValue"></span>
+      </span>
     </div>
   </div>
   <!-- Help button (see conversation) — sits just left of the sidebar/

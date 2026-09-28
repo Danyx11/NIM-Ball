@@ -412,6 +412,7 @@ html, body {
    background color swap (kept a step further below, scoped to mobile only,
    where that swap is still the established look). */
 .nq-connect-btn {
+  position: relative;
   flex: none;
   margin-top: auto;
   display: flex;
@@ -539,6 +540,40 @@ html, body {
   color: var(--nb-60);
 }
 .connect-status.mono { font-family: 'Fira Mono', ui-monospace, SFMono-Regular, monospace; letter-spacing: .01em; }
+/* League Beta streak badge — pinned to the pill's own top-right corner via
+   absolute positioning (see .nq-connect-btn's position:relative above),
+   out of the avatar/label/status flex flow entirely so it never crushes
+   "Claim a handle"/the handle itself on the narrower mobile pill (see
+   main.js's refreshStreakCache). Two stacked lines, both tiny: "streak"
+   then "+N" centered below it. Same on desktop and mobile —
+   .nq-connect-btn.has-streak's own padding-right (below) reserves the room
+   so the label/status text wraps around it instead of under it. "streak" in
+   Nimiq Blue Navy (var(--nb-100)), "+N" in Nimiq Gold (var(--accent)), per
+   explicit request. */
+.pill-streak {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
+  pointer-events: none;
+}
+.pill-streak.hidden { display: none; }
+.pill-streak-label {
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--nb-100);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.pill-streak-value {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--accent);
+}
+.nq-connect-btn.has-streak .connect-text { padding-right: 30px; }
 /* EXPERIMENT (reversible — see main.js's setProfilePillTeam): the pill keeps
    its normal white surface, and signals whichever team is up during a live
    match with a fixed halo, not a ring — literally the same glow the stones'

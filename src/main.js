@@ -754,6 +754,21 @@ const connectBtn = document.getElementById('connectBtn');
 const connectBtnLabel = document.getElementById('connectBtnLabel');
 const connectBtnStatus = document.getElementById('connectBtnStatus');
 const connectAvatar = document.getElementById('connectAvatar');
+const connectPillStreak = document.getElementById('pillStreak');
+const connectPillStreakValue = document.getElementById('pillStreakValue');
+// Same pending-then-repaint caching shape as handleCache/refreshHandleCache
+// below, keyed off address, feeding the pill's small "streak +N" badge with
+// the same League Beta calendar-day streak renderLeagueMeStats shows in the
+// League panel.
+const streakCache = new Map();
+function refreshStreakCache(address) {
+  if (streakCache.has(address)) return;
+  streakCache.set(address, null);
+  fetchLeagueStats(address).then((data) => {
+    streakCache.set(address, data?.player?.streak ?? 0);
+    syncIdentityPill();
+  }).catch(() => streakCache.delete(address));
+}
 const connectText = document.querySelector('.connect-text');
 const sidebar = document.getElementById('sidebar');
 // Spins .connect-text 500ms round-trip (rotateX, style.css's perspective on
@@ -926,6 +941,8 @@ function applyIdentityPillState() {
   connectAvatar.style.backgroundImage = '';
   if (!hubAddress) {
     connectBtnLabel.textContent = 'Guest';
+    connectPillStreak.classList.add('hidden');
+    connectBtn.classList.remove('has-streak');
     if (inMatch) {
       connectBtnStatus.textContent = '';
       connectBtnStatus.classList.add('hidden');
@@ -938,6 +955,11 @@ function applyIdentityPillState() {
     if (hubAddress) connectAvatar.style.backgroundImage = `url(${url})`;
   });
   refreshHandleCache(hubAddress);
+  refreshStreakCache(hubAddress);
+  const streak = streakCache.get(hubAddress);
+  connectPillStreak.classList.toggle('hidden', !streak);
+  connectBtn.classList.toggle('has-streak', !!streak);
+  if (streak) connectPillStreakValue.textContent = `+${streak}`;
   const handle = handleCache.get(hubAddress)?.handle;
   connectBtnStatus.textContent = shortenAddressCompact(hubAddress);
   connectBtnStatus.classList.add('mono');
