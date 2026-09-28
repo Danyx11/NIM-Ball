@@ -2121,25 +2121,29 @@ function showJoinCodeScreen(errorMsg) {
   });
   // Return just dismisses the on-screen keyboard — it doesn't submit the code.
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
-  // Mobile only: this panel is position:absolute + top:50%/left:50%, centered
-  // against the full layout viewport — nothing here is actually scrollable
-  // (touch-action:none on html/body), so a plain scrollIntoView has no
-  // scrollable ancestor to act on and can't move the panel on screen. The
-  // on-screen keyboard doesn't shrink that layout viewport either, so once it
-  // opens the field can end up underneath it. visualViewport is the only
-  // reliable signal for how much space the keyboard actually took (there's no
-  // "keyboard opened" event) — once it shrinks, nudge the whole panel up by
-  // however much the input still overlaps the keyboard, layered on top of the
-  // base centering transform. Re-runs on every visualViewport resize since the
-  // keyboard finishes animating in asynchronously after focus.
+  // Mobile only: #joinCodeOverlay (.config-panel) is itself overflow:auto —
+  // with My Matches below it, its content is genuinely taller than the panel
+  // most of the time, so it's a real scroll container, not just a fixed box.
+  // Nudging it via a transform (previous attempt) moved the whole panel
+  // including the part that was already fine, and a plain scrollIntoView()
+  // doesn't know about the keyboard at all — it scrolls based on the panel's
+  // own (un-shrunk) layout bounds, which already consider the input "in
+  // view" even when the keyboard visually covers it. visualViewport is the
+  // only signal for how much of the bottom the keyboard actually covers;
+  // apply that as extra scrollTop on the panel itself instead. Re-runs on
+  // every visualViewport resize since the keyboard finishes animating in
+  // asynchronously after focus.
   if (IS_MOBILE && window.visualViewport) {
     const nudgeAboveKeyboard = () => {
       const rect = input.getBoundingClientRect();
       const visibleBottom = window.visualViewport.height + window.visualViewport.offsetTop;
       const overlap = rect.bottom - visibleBottom;
-      joinCodeOverlay.style.transform = overlap > 0
-        ? `translate(-50%, calc(-50% - ${Math.ceil(overlap + 16)}px))`
-        : '';
+      if (overlap > 0) {
+        joinCodeOverlay.scrollTop = Math.min(
+          joinCodeOverlay.scrollTop + overlap + 16,
+          joinCodeOverlay.scrollHeight - joinCodeOverlay.clientHeight
+        );
+      }
     };
     input.addEventListener('focus', () => {
       window.visualViewport.addEventListener('resize', nudgeAboveKeyboard);
@@ -2147,7 +2151,7 @@ function showJoinCodeScreen(errorMsg) {
     });
     input.addEventListener('blur', () => {
       window.visualViewport.removeEventListener('resize', nudgeAboveKeyboard);
-      joinCodeOverlay.style.transform = '';
+      joinCodeOverlay.scrollTop = 0;
     });
   }
   joinBtn.onclick = () => { audio.play('button'); joinWithCode(input.value, joinBtn, showJoinCodeScreen); };
@@ -2158,7 +2162,7 @@ modeJoinCode.addEventListener('click', () => { audio.play('button'); showJoinCod
 joinCodeBackBtn.addEventListener('click', () => {
   audio.play('button');
   joinCodeOverlay.classList.add('hidden');
-  joinCodeOverlay.style.transform = ''; // undo any keyboard-avoidance nudge left over from the code field
+  joinCodeOverlay.scrollTop = 0; // undo any keyboard-avoidance nudge left over from the code field
   notifPanel.classList.add('hidden');
   returnToModeSelect();
 });
