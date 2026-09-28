@@ -161,10 +161,20 @@ export class Arbiter extends Server {
   // pointed at the season's own Durable Object (see party/leagueSeason.js's
   // header comment on why this RPC boundary is itself the auth).
   leagueNotify(method, payload) {
-    if (!this.env?.LeagueSeason) return; // e.g. local `npm run wrangler:dev` without the binding configured
-    getServerByName(this.env.LeagueSeason, CURRENT_SEASON_ID)
+    // This used to be missing its `return` before getServerByName(...) —
+    // meaning the function always fell through to an implicit `undefined`
+    // return, unconditionally, whether or not the binding existed. The
+    // matchOver handler below unconditionally chains `.then()` onto this
+    // call's result, so every single completed League match threw `Cannot
+    // read properties of undefined (reading 'then')` right there — the RPC
+    // itself (this.serialized(...) in leagueSeason.js) still ran and
+    // recorded the match fine, but the code that sends the result back to
+    // the players never got reached (confirmed live with `wrangler tail`).
+    // Same shape as prizeNotify below now, on purpose.
+    if (!this.env?.LeagueSeason) return Promise.resolve(undefined); // e.g. local `npm run wrangler:dev` without the binding configured
+    return getServerByName(this.env.LeagueSeason, CURRENT_SEASON_ID)
       .then((league) => league[method](payload))
-      .catch((err) => console.error(`[league] ${method} failed:`, err));
+      .catch((err) => { console.error(`[league] ${method} failed:`, err); return undefined; });
   }
 
   // NIM prizes (party/prize.js) — same RPC shape as leagueNotify above, and
