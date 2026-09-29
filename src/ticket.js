@@ -17,6 +17,7 @@ import {
   BANNER_WIPE_X, BANNER_WIPE_Y, BANNER_WIPE_W, BANNER_WIPE_H, BANNER_WIPE_RADIUS,
   traceBannerTabPath,
   UPLOAD_LABEL_CX, UPLOAD_LABEL_Y,
+  VIBE_LABEL_CX, VIBE_LABEL_Y,
   LEAGUE_STAMP_CX, LEAGUE_STAMP_CY, LEAGUE_STAMP_R, LEAGUE_STAMP_ROTATE_DEG,
   PRIZE_STAMP_CX, PRIZE_STAMP_CY, PRIZE_STAMP_R, PRIZE_STAMP_ROTATE_DEG,
 } from './replay.js';
@@ -202,7 +203,7 @@ export function drawPrizeStamp(ctx, nim) {
   ctx.restore();
 }
 
-export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winner, stats, points = [], leagueLp = null, prizeNim = null }) {
+export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winner, stats, points = [], leagueLp = null, prizeNim = null, vibe = 'hockey' }) {
   await document.fonts.ready;
   const [[polaroidImg, bannerImg, guestBlueImg, guestYellowImg, botYellowImg], identiconA, identiconB] = await Promise.all([
     preloadTicketAssets(),
@@ -218,6 +219,14 @@ export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winn
   ctx.imageSmoothingQuality = 'high';
 
   ctx.drawImage(polaroidImg, 0, 0, W, H);
+
+  // ---------- Vibe title (see conversation) — which game mode this match
+  // was, above the icon/score row (itself shifted down to make room, see
+  // replay.js's ICON_ROW_SHIFT_N). ----------
+  drawSpacedText(
+    ctx, vibe === 'curling' ? 'PURE CURLING' : 'NIMICURL',
+    VIBE_LABEL_CX, VIBE_LABEL_Y, `800 ${Math.round(15 * SCALE)}px ${FONT}`, INK, 2 * SCALE,
+  );
 
   // ---------- Icon + address/handle/guest-code, one side per team, either
   // side of the score dash. ----------

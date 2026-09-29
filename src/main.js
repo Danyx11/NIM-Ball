@@ -3488,10 +3488,27 @@ replayUploadBox.addEventListener('drop', (e) => {
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
   if (file) handleReplayFile(file);
 });
+// Read the uploaded ticket's own bytes back out as a dataURL (not an object
+// URL — those get revoked/GC'd, a dataURL survives untouched for as long as
+// the replay session needs it) so showReplayEndTicket() can show the exact
+// original ticket at the end of a replay instead of rebuilding a generic-
+// looking one from the replay's own stats (see game.js's originalTicketDataUrl).
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 async function handleReplayFile(file) {
   showLoadingOverlay();
   try {
-    const points = await decodePointsFromTicketImage(file);
+    const [points, originalTicketDataUrl] = await Promise.all([
+      decodePointsFromTicketImage(file),
+      fileToDataUrl(file),
+    ]);
     if (points.length === 0) {
       hideLoadingOverlay();
       replayUploadStatus.textContent = 'No points found on this ticket.';
@@ -3513,7 +3530,7 @@ async function handleReplayFile(file) {
     // replay leans just as hard on the identicon bubbles as a live match.
     await preloadCoreAssets(IS_MOBILE);
     await new Promise((resolve) => {
-      activeStopGame = startGame({ ...rockHandlers, replayPoints: points, mobile: IS_MOBILE, onMatchReady: resolve });
+      activeStopGame = startGame({ ...rockHandlers, replayPoints: points, vibe: points[0]?.vibe || 'hockey', originalTicketDataUrl, mobile: IS_MOBILE, onMatchReady: resolve });
     });
     hideLoadingOverlay();
     syncIdentityPill();
@@ -4874,11 +4891,15 @@ homeOverlay.addEventListener('click', () => {
   }, HOME_SLIDE_MS + HOME_FADE_MS);
 });
 
-// Magic links, all three skip mode-select (and now the home screen) entirely:
+// Magic links, all four skip mode-select (and now the home screen) entirely:
 // ?duel (printed by `npm run duel`) connects straight to this same page's
 // arbiter; ?replay=<data> (from a point QR — see src/replay.js
 // buildReplayUrl) jumps straight into replaying that single point — same
-// "no menu detour" idea as ?duel, now also skipping the splash screen.
+// "no menu detour" idea as ?duel, now also skipping the splash screen;
+// ?code=<4 chars> (a shared match-invite link — e.g. the Nimiq Pay deep link
+// nimpay.app/miniapps/open/<host> lands here with the code already in the
+// query string) joins that match the same way the "Join with a code" screen's
+// own submit button does.
 const replayFromLink = parseReplayFromLocation();
 if (replayFromLink) {
   // This runs at module load, ahead of any user gesture, so the branded
@@ -4895,7 +4916,7 @@ if (replayFromLink) {
   (async () => {
     await preloadCoreAssets(IS_MOBILE);
     await new Promise((resolve) => {
-      activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], mobile: IS_MOBILE, onMatchReady: resolve });
+      activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], vibe: replayFromLink.vibe || 'hockey', mobile: IS_MOBILE, onMatchReady: resolve });
     });
     hideLoadingOverlay();
     syncIdentityPill();
@@ -4908,4 +4929,11 @@ if (replayFromLink) {
   magicLinkOwnsLoadingOverlay = true;
   homeOverlay.classList.add('hidden');
   joinLan(defaultLanAddress(), null);
+} else if (new URLSearchParams(location.search).get('code')) {
+  const sharedCode = new URLSearchParams(location.search).get('code').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+  if (sharedCode.length === 4) {
+    magicLinkOwnsLoadingOverlay = true;
+    homeOverlay.classList.add('hidden');
+    joinWithCode(sharedCode, null, showJoinCodeScreen);
+  }
 }

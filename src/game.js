@@ -250,7 +250,7 @@ export function startGame(opts = {}) {
   // running total. Ignored by every other mode (default 0, same as
   // before).
   const {
-    myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, mobile = false,
+    myTeam = null, aiTeam = null, aiConfig = {}, identiconAddress = {}, identiconLabel = {}, replayPoints = null, originalTicketDataUrl = null, mobile = false,
     onRockSound = null, onRockExit = null, onRockPower = null, onExit = null, onTurnChange = null,
     matchConfig: rawMatchConfig = null, vibe = 'hockey', howTo = false, onMatchReady = null,
     singleShotTeam = null, onShotCommitted = null, externalManche: externalMancheOpt = null, onMancheSettled = null, resumeManches = null, weekPointStart = false,
@@ -284,6 +284,12 @@ export function startGame(opts = {}) {
   // auto-feeds recorded shots through the exact same aim->pending->sim path
   // (see beginAimPhase/maybeAdvanceReplay below), so physics/rendering/goal
   // detection are all the same code as a live match.
+  // originalTicketDataUrl: the exact uploaded ticket image (dataURL, see
+  // main.js's handleReplayFile), shown as-is at the end of a ticket-upload
+  // replay instead of rebuilding a fresh generic-looking one (see
+  // showReplayEndTicket). Null for a single-point `?replay=` link, which
+  // never had a ticket image to begin with — that path still falls back to
+  // renderTicket() same as before.
   const isReplay = Array.isArray(replayPoints) && replayPoints.length > 0;
   const replayAllPoints = isReplay ? replayPoints : [];
   let replayCursor = { pointIdx: 0, mancheIdx: 0 };
@@ -1898,13 +1904,60 @@ export function startGame(opts = {}) {
   // ---------- Replay playback bar (custom, distinct from the arcade toolbar
   // — see CLAUDE.md replay section) ----------
   const replayBar = document.getElementById('replayBar');
+  // #replayRail now lives inside #sidebar (index.html), not #replayBar —
+  // same id, just a different parent, so this lookup is unchanged. #sidebar
+  // itself is main.js-owned everywhere else, but the replay playback bar is
+  // already a documented exception (CLAUDE.md: "the two exceptions that
+  // still build DOM inside the closure are the replay playback bar and the
+  // goal/victory result panels") — toggling its .in-replay class alongside
+  // showReplayBar/hideReplayBar keeps that one exception self-contained
+  // rather than plumbing a callback through main.js for it.
   const replayRailEl = document.getElementById('replayRail');
+  const sidebarEl = document.getElementById('sidebar');
   const replaySegmentsEl = document.getElementById('replaySegments');
   const replaySoundBtn = document.getElementById('replaySoundBtn');
   const replayPlayBtn = document.getElementById('replayPlayBtn');
   const replayPrevBtn = document.getElementById('replayPrevBtn');
   const replayNextBtn = document.getElementById('replayNextBtn');
   const replayExitBtn = document.getElementById('replayExitBtn');
+  // #replayBar is `position:fixed` with no CSS top/left/width/height of its
+  // own (see style.css) — #game-card (its reparented home, see main.js's
+  // detach block) is deliberately bigger than the real visible board
+  // whenever the viewport's ratio doesn't match the 3312/1896 art
+  // (letterboxed, see #game-card's own comment), so a plain inset:0 against
+  // it left the transport bar/corner exit off-center from the real board
+  // edges (bug report: "à centrer par rapport au terrain"). Matching the
+  // canvas's own live getBoundingClientRect() instead sidesteps that
+  // regardless of DOM reparenting or letterboxing.
+  // canvas.getBoundingClientRect() alone isn't enough on desktop: #stage-wrap
+  // stays nested inside #scene there (only mobile detaches it, see
+  // .stage-wrap-detached), and #scene applies its own always-on
+  // transform:scale(1.3) "zoom" — canvas's reported rect is the POST-
+  // transform size, ~30% bigger than what's actually visible, overflowing
+  // #game-card on every side and getting clipped by its own overflow:hidden.
+  // Intersecting with #game-card's own rect handles desktop (#game-card's
+  // 80vw box IS the real clip there, narrower than the viewport — the
+  // sidebar's own 20vw sits past its right edge). Mobile needs a SECOND
+  // clamp against the actual viewport too: .mobile-layout #game-card is
+  // itself deliberately oversized and centered past every edge of the
+  // screen (see its own style.css comment: "clipped by the viewport's own
+  // overflow:hidden (html/body)"), so #game-card's rect alone isn't the real
+  // clip boundary there the way it is on desktop.
+  const gameCardEl = document.getElementById('game-card');
+  function syncReplayBarRect() {
+    if (!isReplay) return;
+    const canvasRect = canvas.getBoundingClientRect();
+    const clipRect = gameCardEl.getBoundingClientRect();
+    const left = Math.max(canvasRect.left, clipRect.left, 0);
+    const top = Math.max(canvasRect.top, clipRect.top, 0);
+    const right = Math.min(canvasRect.right, clipRect.right, window.innerWidth);
+    const bottom = Math.min(canvasRect.bottom, clipRect.bottom, window.innerHeight);
+    replayBar.style.left = `${left}px`;
+    replayBar.style.top = `${top}px`;
+    replayBar.style.width = `${right - left}px`;
+    replayBar.style.height = `${bottom - top}px`;
+  }
+  if (isReplay) window.addEventListener('resize', syncReplayBarRect, { signal });
 
   // Real per-point preview frames (not fake art): fast-forwards each point
   // to its final settled frame (reusing fastForwardManche) and snapshots the
@@ -1922,8 +1975,16 @@ export function startGame(opts = {}) {
       point.manches.forEach(fastForwardManche);
       render();
       const thumbCanvas = document.createElement('canvas');
-      thumbCanvas.width = 220;
-      thumbCanvas.height = Math.round(220 * 905 / 1200);
+      // 320, not the old 220 — the rail now fills #sidebar's own column
+      // width (see style.css), noticeably wider than the small floating box
+      // this used to be, so the capture needs the extra resolution to still
+      // read sharp there.
+      thumbCanvas.width = 320;
+      // canvas's own backing-buffer ratio (cropW/cropH*dpr, see resize()), not
+      // a hardcoded one — mobile draws from a narrower MOBILE_CROP sub-rect
+      // than desktop's full W/H, so a fixed ratio here would stretch one of
+      // the two (was the stale pre-V2 1200x905 ratio, worse on both).
+      thumbCanvas.height = Math.round(320 * canvas.height / canvas.width);
       thumbCanvas.getContext('2d').drawImage(canvas, 0, 0, thumbCanvas.width, thumbCanvas.height);
       return thumbCanvas.toDataURL('image/webp', 0.7);
     });
@@ -1972,13 +2033,21 @@ export function startGame(opts = {}) {
   function showReplayBar() {
     if (!isReplay) return;
     captureThumbnails();
+    syncReplayBarRect();
     replayBar.classList.remove('hidden');
+    // #sidebar.in-replay swaps .sidebar-nav out for #replayRail in that same
+    // column (see style.css) — .sidebar-brand and the identity pill stay up
+    // untouched, only the nav list hides.
+    sidebarEl.classList.add('in-replay');
+    replayRailEl.classList.remove('hidden');
     renderReplayRail();
     renderReplaySegments();
     updateReplayBar();
   }
   function hideReplayBar() {
     replayBar.classList.add('hidden');
+    sidebarEl.classList.remove('in-replay');
+    replayRailEl.classList.add('hidden');
   }
   function updateReplayBar() {
     if (!isReplay) return;
@@ -4283,7 +4352,7 @@ export function startGame(opts = {}) {
       devHeadlessExpected = null;
     }
     barGlowSide = null; // bar stays lit through the whole pause/settle wait, cut right as the point is actually displayed below
-    if (!isReplay) recorder.finishPoint(scoringTeam, isWipeout);
+    if (!isReplay) recorder.finishPoint(scoringTeam, isWipeout, vibe);
     if (scoringTeam === 'A') scoreA++; else scoreB++;
     lastMancheScoringTeam = scoringTeam; // see its own declaration — WEEK's onMancheSettled reads this back out
     if (isReplay) {
@@ -4569,6 +4638,7 @@ export function startGame(opts = {}) {
       winner: winningTeam,
       stats,
       points: ticketPoints,
+      vibe,
     });
     // Rejouer/Menu (or a LAN disconnect) may have already moved the overlay on
     // by the time this async render resolves — don't stomp on it.
@@ -4722,24 +4792,36 @@ export function startGame(opts = {}) {
     phase = 'gameover';
     audio.play('win');
     hideReplayBar();
-    const winningTeam = scoreA >= scoreB ? 'A' : 'B';
-    showOverlay(`<p>Loading…</p>`);
-    const stats = {
-      durationMs: performance.now() - matchStartTime,
-      goals: scoreA + scoreB,
-      collisions: totalCollisions,
-      bestShotPercent: Math.min(100, (bestShotSpeed / (MAX_DRAG * POWER_SCALE)) * 100),
-      stonesDestroyed,
-    };
-    const ticketCanvas = await renderTicket({
-      scoreA, scoreB,
-      teamA: { address: IDENTICON_ADDRESS.A, label: IDENTICON_LABEL.A },
-      teamB: { address: IDENTICON_ADDRESS.B, label: IDENTICON_LABEL.B },
-      winner: winningTeam,
-      stats,
-      points: [], // a replay of a replay doesn't offer further point QRs
-    });
-    if (phase !== 'gameover') return;
+    // A ticket-upload replay already has the real, original ticket image
+    // (see originalTicketDataUrl's own comment above) — show that as-is
+    // instead of rebuilding a generic-looking one from this replay's own
+    // running stats. Only a single-point `?replay=` link (no ticket image to
+    // begin with) still falls back to renderTicket() below.
+    let ticketSrc;
+    if (originalTicketDataUrl) {
+      ticketSrc = originalTicketDataUrl;
+    } else {
+      const winningTeam = scoreA >= scoreB ? 'A' : 'B';
+      showOverlay(`<p>Loading…</p>`);
+      const stats = {
+        durationMs: performance.now() - matchStartTime,
+        goals: scoreA + scoreB,
+        collisions: totalCollisions,
+        bestShotPercent: Math.min(100, (bestShotSpeed / (MAX_DRAG * POWER_SCALE)) * 100),
+        stonesDestroyed,
+      };
+      const ticketCanvas = await renderTicket({
+        scoreA, scoreB,
+        teamA: { address: IDENTICON_ADDRESS.A, label: IDENTICON_LABEL.A },
+        teamB: { address: IDENTICON_ADDRESS.B, label: IDENTICON_LABEL.B },
+        winner: winningTeam,
+        stats,
+        points: [], // a replay of a replay doesn't offer further point QRs
+        vibe,
+      });
+      if (phase !== 'gameover') return;
+      ticketSrc = ticketCanvas.toDataURL('image/png');
+    }
     showOverlay(`
       <button class="config-back" id="replayTicketExitBtn" type="button" aria-label="Exit">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
@@ -4752,7 +4834,7 @@ export function startGame(opts = {}) {
         </div>
       </div>
     `);
-    document.getElementById('ticketImg').src = ticketCanvas.toDataURL('image/png');
+    document.getElementById('ticketImg').src = ticketSrc;
     document.getElementById('goalReplayAgainBtn').onclick = () => {
       audio.play('button');
       scoreA = 0; scoreB = 0;

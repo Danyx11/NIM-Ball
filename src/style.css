@@ -288,6 +288,22 @@ html, body {
 .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
 .sidebar-nav::-webkit-scrollbar-thumb { background: var(--nb-16); border-radius: 999px; }
 .nav-section { display: flex; flex-direction: column; gap: 4px; }
+
+/* Replay mode: swaps .sidebar-nav out for a rail of real point thumbnails
+   (Point 1, Point 2… — filled by game.js's renderReplayRail/captureThumbnails,
+   see CLAUDE.md replay section) in this exact same column — .sidebar-brand
+   and the identity pill below stay up untouched (per explicit request), only
+   the nav list hides. Applies on both platforms (unlike .in-match further
+   down, which is mobile-only and tied to the joystick/toolbar's own
+   lifecycle) — replay never shows the arcade toolbar on either platform, so
+   there's no equivalent live-match reason to keep this desktop-only. */
+#sidebar.in-replay .sidebar-nav { display: none; }
+#replayRail {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 10px;
+  overflow-y: auto;
+}
+#replayRail.hidden { display: none; }
 /* Wraps just the <button>s below a .nav-label (see index.html) — collapsed
    by default on BOTH platforms now (see conversation: this used to be an
    always-expanded plain list on desktop, only collapsible on mobile; the
@@ -4000,28 +4016,27 @@ button:disabled { opacity: 0.35; cursor: default; }
 #replayUploadStatus { font-size: 13px; color: var(--ink-dim); min-height: 18px; margin: 0; }
 
 /* Custom replay playback chrome — deliberately not the arcade #toolbar (see
-   CLAUDE.md). Two pieces, both absolutely positioned over the board: a
-   YouTube-style vertical rail of real point thumbnails (see
-   captureThumbnails in game.js) on the right, and a bottom bar with a
-   point-segmented scrubber + a prev/play-pause/next/exit transport pill
-   (manche-level navigation — see jumpToManche). Exit used to be its own
-   corner-pinned button, but that corner sits inside #game-card's own
-   deliberate viewport-overflow margin (see .mobile-layout #game-card) and
-   got clipped off on mobile same as the transport pill originally did — folded
-   into the transport row instead of tuning yet another corner offset. */
-#replayBar { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+   CLAUDE.md): a bottom bar with a point-segmented scrubber + a prev/
+   play-pause/next transport pill (manche-level navigation — see
+   jumpToManche), plus a corner exit button. The point thumbnail rail itself
+   now lives in #sidebar instead (see that element's own #replayRail rule
+   further up, near .sidebar-nav) — moved out of here per explicit request,
+   using the sidebar's real column instead of floating over the ice.
+   position: fixed with NO inset/top/left of its own: game.js's
+   syncReplayBarRect() sets left/top/width/height in px every time the board's
+   own on-screen rect can change (show, window resize) — #game-card is
+   deliberately larger than the actual visible board (letterboxed on any
+   viewport ratio that doesn't match the 3312/1896 art, see #game-card's own
+   comment), so a plain inset:0 against it (the old approach) left the bottom
+   bar/corner exit off-center from the real board edges (bug report: "à
+   centrer par rapport au terrain"). Matching the real canvas rect in
+   viewport coordinates sidesteps that letterboxing entirely, regardless of
+   where in the DOM this element ends up reparented (see main.js's detach
+   block) — position:fixed resolves against the viewport either way. */
+#replayBar { position: fixed; z-index: 6; pointer-events: none; }
 #replayBar.hidden { display: none; }
 #replayBar > * { pointer-events: auto; }
 
-/* Sits outside the board itself (#stage-wrap is only 70% of #app's width,
-   see style.css's own #stage-wrap rule) rather than over the ice — left:
-   calc(100% + ...) starts right at the board's own right edge and extends
-   into the margin #game-card already reserves around it, instead of a
-   right: value that would anchor inside the board and overlap it. */
-#replayRail {
-  position: absolute; top: 58px; left: calc(100% + 18px); bottom: 96px; width: 128px;
-  display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
-}
 .replay-rail-thumb {
   flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px;
   background: var(--panel); border: 2px solid transparent; border-radius: 10px;
@@ -4065,17 +4080,8 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 #replaySoundBtn svg, #replayPrevBtn svg, #replayNextBtn svg { width: 18px; height: 18px; display: block; }
 #replaySoundBtn.muted { color: var(--ink-dim); }
-/* Quit action, not a transport control — darker fill (was its own
-   corner button's exact background, see CLAUDE.md replay note) and an extra
-   14px of breathing room past the transport row's own 22px gap keeps it
-   reading as a separate "leave" affordance instead of a 5th playback button. */
-#replayExitBtn {
-  flex: 0 0 auto; width: 36px; height: 36px; padding: 0; margin-left: 14px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 50%; border: none; background: var(--scrim-70); color: var(--ink);
-  cursor: pointer;
-}
-#replayExitBtn svg { width: 18px; height: 18px; display: block; }
+/* #replayExitBtn is .config-back now (see index.html) — moved to the board's
+   own corner instead of the transport row, own rule no longer needed here. */
 #replayPlayBtn {
   flex: 0 0 auto; width: 54px; height: 54px; padding: 0;
   display: flex; align-items: center; justify-content: center;

@@ -21,8 +21,8 @@ export function recordManche({ stonesA, stonesB, sweepA, sweepB }) {
   });
 }
 
-export function finishPoint(scoringTeam, isWipeout) {
-  points.push({ index: points.length, scoringTeam, isWipeout, manches: currentManches });
+export function finishPoint(scoringTeam, isWipeout, vibe) {
+  points.push({ index: points.length, scoringTeam, isWipeout, vibe, manches: currentManches });
   currentManches = [];
 }
 
