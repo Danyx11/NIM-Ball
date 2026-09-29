@@ -178,6 +178,15 @@
         <div class="nav-scroll-pill" aria-hidden="true"></div>
       </div>
     </nav>
+    <!-- Replay point rail (see CLAUDE.md replay section, src/game.js's
+         captureThumbnails/renderReplayRail): reuses this same utility column
+         instead of floating over the board — #sidebar.in-replay (game.js's
+         showReplayBar/hideReplayBar) hides .sidebar-nav above and reveals
+         this instead, keeping .sidebar-brand and the identity pill below
+         exactly as they are the rest of the time (per explicit request).
+         Empty until game.js fills it; starts hidden like .sidebar-nav's
+         replay-mode opposite number. -->
+    <div id="replayRail" class="hidden"></div>
     <!-- Nimiq wallet identity pill: real "nq-login" glyph from @nimiq/style's
          icon sprite (see src/nimiq.js's chooseAddress()), inlined rather than
          pulling in the whole @nimiq/style CSS package for one icon — kept as
@@ -522,7 +531,16 @@
          animating (the rollback tween), not hide them behind a backdrop. -->
     <div id="syncToast" class="hidden"></div>
     <div id="replayBar" class="hidden">
-      <div id="replayRail"></div>
+      <!-- Exit lives in its own board corner now (.config-back, same
+           component every other overlay's exit uses), not the transport
+           row — see conversation. game.js's own left/top/width/height sync
+           (see its own comment) sizes THIS element to the real board rect
+           every frame the layout can change, so .config-back's usual
+           top:24px/right:28px lands on the board's actual corner instead of
+           #game-card's own larger, letterboxed box. -->
+      <button class="config-back" id="replayExitBtn" type="button" aria-label="Exit replay">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
+      </button>
       <div id="replayBottomBar">
         <div id="replaySegments"></div>
         <div id="replayTransport">
@@ -533,9 +551,6 @@
           <button id="replayPlayBtn" type="button" aria-label="Play"></button>
           <button id="replayNextBtn" type="button" aria-label="Next manche">
             <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5,5 5,19 16,12" fill="currentColor"/><rect x="16.6" y="5" width="2.4" height="14" fill="currentColor"/></svg>
-          </button>
-          <button id="replayExitBtn" type="button" aria-label="Exit replay">
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
           </button>
         </div>
       </div>

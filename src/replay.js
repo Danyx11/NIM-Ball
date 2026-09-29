@@ -45,9 +45,19 @@ const s = (n) => Math.round(n * SCALE);
 // row) — bleue/jaune/tiret are hidden XCF layers (design/ticket-guest-*.png,
 // this file's own dash) marking where the guest hexagon icons and the score
 // dash go; a real identicon reuses the same icon slot. ----
-export const ICON_A_CX = s(581), ICON_A_CY = s(563), ICON_A_R = s(37);
-export const ICON_B_CX = s(866), ICON_B_CY = s(565), ICON_B_R = s(40);
-export const DASH_CX = s(724), DASH_CY = s(565), DASH_W = s(32), DASH_H = s(4);
+// Row shifted down a bit from its original 563/565 native position to open
+// room above it for the vibe title (NimiCurl/Pure Curling — see
+// VIBE_LABEL_Y below and ticket.js), per explicit request rather than
+// crowding the label into whatever's directly above (the polaroid photo).
+const ICON_ROW_SHIFT_N = 26;
+export const ICON_A_CX = s(581), ICON_A_CY = s(563 + ICON_ROW_SHIFT_N), ICON_A_R = s(37);
+export const ICON_B_CX = s(866), ICON_B_CY = s(565 + ICON_ROW_SHIFT_N), ICON_B_R = s(40);
+export const DASH_CX = s(724), DASH_CY = s(565 + ICON_ROW_SHIFT_N), DASH_W = s(32), DASH_H = s(4);
+// Vibe title ("NimiCurl" / "Pure Curling") — small label centered above the
+// (now-shifted-down) icon/score row, roughly where that row used to sit, so
+// a downloaded/shared ticket says which game mode it's from (see
+// conversation). See ticket.js for the actual text picked per vibe.
+export const VIBE_LABEL_CX = DASH_CX, VIBE_LABEL_Y = s(555);
 // The icon-to-stats-row gap is too tight (~10-15px native) for a text line
 // underneath the icon, so the address/handle/guest-code sits beside it
 // instead — see ticket.js, which anchors it off ICON_A_CX-ICON_A_R (right-
@@ -233,6 +243,14 @@ export function encodePoint(point) {
   bytes.push(VERSION, point.index & 0xff);
   let outcome = point.scoringTeam === 'B' ? 1 : 0;
   if (point.isWipeout) outcome |= 2;
+  // Bit 2: vibe (0 = hockey, 1 = curling) — added after v1 shipped, but
+  // backward-compatible without a VERSION bump: every point encoded before
+  // this bit existed always had it unset, which happens to decode as
+  // 'hockey' anyway (the only vibe replay supported at the time). See
+  // game.js's startGame({vibe}) — without this, a curling match's points
+  // replay under the wrong physics constants (STONE_MAX_HITS, no
+  // resolveCurlingPoint, a ball that shouldn't exist — see CLAUDE.md).
+  if (point.vibe === 'curling') outcome |= 4;
   bytes.push(outcome, point.manches.length & 0xff);
   for (const manche of point.manches) packManche(bytes, manche);
   return bytesToBase64Url(Uint8Array.from(bytes));
@@ -248,6 +266,7 @@ export function decodePoint(base64url) {
   const mancheCount = raw[offset++];
   const scoringTeam = (outcome & 1) ? 'B' : 'A';
   const isWipeout = !!(outcome & 2);
+  const vibe = (outcome & 4) ? 'curling' : 'hockey';
   const manches = [];
   for (let m = 0; m < mancheCount; m++) {
     const flags = raw[offset++];
@@ -268,7 +287,7 @@ export function decodePoint(base64url) {
     const sweepB = (flags & (1 << 7)) ? readSweep() : null;
     manches.push({ stonesA, stonesB, sweepA, sweepB });
   }
-  return { index, scoringTeam, isWipeout, manches };
+  return { index, scoringTeam, isWipeout, vibe, manches };
 }
 
 // ---------- URL / magic link ----------
