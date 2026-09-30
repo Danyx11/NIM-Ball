@@ -7,13 +7,22 @@
 // ---- Season ----
 // One fixed-name Durable Object per season (see party/leagueSeason.js) —
 // CURRENT_SEASON_ID doubles as that DO's room name, so starting a future
-// season is just bumping this constant: a brand new, cleanly-isolated DO
+// season would be bumping this constant: a brand new, cleanly-isolated DO
 // instance with fresh storage, while the old season's instance (and all its
 // history) stays exactly where it was, untouched. No in-storage season
 // namespacing needed.
+// The League is an ongoing "Main" ranking now, not a time-boxed beta —
+// no end date anywhere any more (there used to be a SEASON_START_UTC/
+// SEASON_END_UTC pair here; both were dead — nothing ever read them, LP
+// already accrued with no cutoff — so they're removed rather than left
+// lying around as a stale, misleading "there's a season end date" signal).
+// CURRENT_SEASON_ID deliberately still reads 'beta-2026': it's the Durable
+// Object room name, so changing it would point at a brand new, empty
+// instance and silently strand every League Point already earned in the
+// old one. Never rename it to "reflect the rebrand" — if a truly new
+// season is ever wanted later, that's the bump-this-constant path the
+// comment above describes, a deliberate reset, not a drive-by rename.
 export const CURRENT_SEASON_ID = 'beta-2026';
-export const SEASON_START_UTC = '2026-09-16';
-export const SEASON_END_UTC = '2026-09-30';
 
 // ---- Rating (hidden, Elo-style) ----
 // Starting value is intentionally 100, not the traditional chess-Elo 1000 —
