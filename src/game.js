@@ -18,6 +18,7 @@ import { MAX_POINTS_ON_TICKET, pointTileRect, buildReplayUrl, TICKET_W, TICKET_H
 import { DEFAULT_MATCH_CONFIG, STONE_SLOTS_BY_COUNT, TIMER_WARNING_SECONDS_BY_TURN_TIME, sanitizeMatchConfig } from './matchConfig.js';
 import { HOWTO_STEPS_MOBILE, HOWTO_STEPS_DESKTOP } from './howto.js';
 import { resolveIdentity } from './alias.js';
+import { keyboardAvoidTranslate } from './keyboardAvoidance.js';
 import { loadSponsorBanner } from './partnership.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
@@ -2714,6 +2715,13 @@ export function startGame(opts = {}) {
   const chatComposeEmojiPicker = document.getElementById('chatComposeEmojiPicker');
   const chatComposeTimerFill = document.getElementById('chatComposeTimerFill');
   const chatBadgeMobile = document.getElementById('tbtn-chat-badge');
+  // #chatMask fills #game-card edge-to-edge, which is sized off --stable-vh
+  // (keyboard-immune, see main.js) — it never shrinks for the keyboard, so
+  // the compose bar pinned to its bottom can end up physically covered.
+  // Nothing to scroll here (the bar is the only thing that needs to move),
+  // so translate it instead — same helper/reasoning as main.js's menu-side
+  // text fields, see keyboardAvoidance.js.
+  keyboardAvoidTranslate(chatComposeInput, mobile, chatComposeForm);
   // Real per-address identicons (same lib/algorithm as the stone bubbles and
   // the goal-panel avatar) rather than a generic icon — reuses IDENTICON_ADDRESS,
   // already resolved (real wallet for this device's own team, the shared

@@ -28,6 +28,7 @@ import { DEFAULT_MATCH_CONFIG, getCustomConfig, setCustomConfig } from './matchC
 import { decodePointsFromTicketImage, parseReplayFromLocation } from './replay.js';
 import { audio } from './audio.js';
 import { COLORS, CSS_VAR_NAMES } from './colors.js';
+import { keyboardAvoidScroll, keyboardAvoidTranslate } from './keyboardAvoidance.js';
 
 // Single source of truth for the 7 colors style.css and ticket.js both need
 // (see src/colors.js) — pushed onto :root here, synchronously, before
@@ -1111,6 +1112,14 @@ function renderClaimStep(step, ctx) {
     aliasInput.focus();
     // Return just dismisses the on-screen keyboard — it doesn't submit the claim.
     aliasInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); aliasInput.blur(); } });
+    // Unlike #joinCodeOverlay (genuinely taller than the panel once My
+    // Matches renders below it), this dialog's content never overflows its
+    // own .config-panel — confirmed scrollHeight === clientHeight here, so
+    // keyboardAvoidScroll would be a no-op. Translate the inner
+    // .config-lobby-content instead (not claimAliasOverlay itself, which is
+    // centered via its own CSS `transform: translate(-50%,-50%)` — an
+    // inline style.transform there would stomp that and de-center it).
+    keyboardAvoidTranslate(aliasInput, IS_MOBILE, claimAliasContent);
     document.getElementById('aliasCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
     document.getElementById('aliasConfirmBtn').onclick = () => {
       const value = aliasInput.value.trim().toLowerCase();
@@ -2164,39 +2173,12 @@ function showJoinCodeScreen(errorMsg) {
   });
   // Return just dismisses the on-screen keyboard — it doesn't submit the code.
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
-  // Mobile only: #joinCodeOverlay (.config-panel) is itself overflow:auto —
-  // with My Matches below it, its content is genuinely taller than the panel
-  // most of the time, so it's a real scroll container, not just a fixed box.
-  // Nudging it via a transform (previous attempt) moved the whole panel
-  // including the part that was already fine, and a plain scrollIntoView()
-  // doesn't know about the keyboard at all — it scrolls based on the panel's
-  // own (un-shrunk) layout bounds, which already consider the input "in
-  // view" even when the keyboard visually covers it. visualViewport is the
-  // only signal for how much of the bottom the keyboard actually covers;
-  // apply that as extra scrollTop on the panel itself instead. Re-runs on
-  // every visualViewport resize since the keyboard finishes animating in
-  // asynchronously after focus.
-  if (IS_MOBILE && window.visualViewport) {
-    const nudgeAboveKeyboard = () => {
-      const rect = input.getBoundingClientRect();
-      const visibleBottom = window.visualViewport.height + window.visualViewport.offsetTop;
-      const overlap = rect.bottom - visibleBottom;
-      if (overlap > 0) {
-        joinCodeOverlay.scrollTop = Math.min(
-          joinCodeOverlay.scrollTop + overlap + 16,
-          joinCodeOverlay.scrollHeight - joinCodeOverlay.clientHeight
-        );
-      }
-    };
-    input.addEventListener('focus', () => {
-      window.visualViewport.addEventListener('resize', nudgeAboveKeyboard);
-      setTimeout(nudgeAboveKeyboard, 350);
-    });
-    input.addEventListener('blur', () => {
-      window.visualViewport.removeEventListener('resize', nudgeAboveKeyboard);
-      joinCodeOverlay.scrollTop = 0;
-    });
-  }
+  // #joinCodeOverlay (.config-panel) is itself overflow:auto — with My
+  // Matches below it, its content is genuinely taller than the panel most
+  // of the time, so it's a real scroll container (see keyboardAvoidance.js
+  // for why this needs doing by hand at all, and why scroll rather than
+  // translate here specifically).
+  keyboardAvoidScroll(input, IS_MOBILE, joinCodeOverlay);
   joinBtn.onclick = () => { audio.play('button'); joinWithCode(input.value, joinBtn, showJoinCodeScreen); };
   joinCodeOverlay.classList.remove('hidden');
   renderMyMatchesContent(); // bottom half of this same merged panel, see its own comment
@@ -3603,6 +3585,9 @@ function showLanJoinScreen(errorMsg) {
   const joinBtn = document.getElementById('lanJoinBtn');
   // Return just dismisses the on-screen keyboard — it doesn't submit the address.
   addrInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addrInput.blur(); } });
+  // #overlay (showLobby's panel, see conversation) has nothing to scroll
+  // (no overflow:auto, content already fits) — translate it instead.
+  keyboardAvoidTranslate(addrInput, IS_MOBILE, overlay);
   joinBtn.onclick = () => { audio.play('button'); joinLan(addrInput.value.trim(), joinBtn); };
 }
 
@@ -4541,6 +4526,13 @@ function showWeekWaitingScreen(week, boardSnapshot) {
     <button class="bigbtn" id="weekQuitBtn">Quit</button>
     <p>Find your match again under Code / Matches.</p>
   `, boardSnapshot);
+  // #weekBoardPanelBox has overflow:auto but its content never actually
+  // overflows it (confirmed scrollHeight === clientHeight with this exact
+  // template) — scrolling would be a no-op, so translate the box itself
+  // instead (it carries no competing CSS transform of its own, only a
+  // transient entrance animation that's long done by the time a keyboard
+  // could open).
+  keyboardAvoidTranslate(document.getElementById('weekMsgInput'), IS_MOBILE, weekBoardPanelBox);
 
   // The panel's single Quit — a single message slot per recipient
   // (see party/weekArbiter.js's inbox), sent on the way out with whatever
@@ -4852,6 +4844,11 @@ async function renderMyMatchesContent() {
       const input = document.getElementById('weekMatchNameInput');
       input.focus();
       input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); document.getElementById('weekMatchNameSaveBtn').click(); } });
+      // Same as the alias dialog above: this content never overflows its
+      // own .config-panel, so translate the inner .config-lobby-content
+      // rather than scrolling (a no-op) or translating weekMatchDialogOverlay
+      // itself (would stomp its own centering transform).
+      keyboardAvoidTranslate(input, IS_MOBILE, weekMatchDialogContent);
       document.getElementById('weekMatchNameSaveBtn').addEventListener('click', () => {
         audio.play('button');
         setWeekMatchLabel(code, input.value.trim());
