@@ -701,20 +701,16 @@ connectNimiq()
   .catch((err) => console.log('[nimiq] not running inside Nimiq Pay:', err.message));
 
 // Manual recovery path: `?setIdentity=<address>` overwrites the stored
-// identity outright, for the one case nothing else here can self-correct —
-// a player whose connected identity (accounts[0] from Nimiq Pay, see
-// sendNimPayment's own comment on why that can be the wrong account) was
-// already wrong *before* this session's own self-correcting fix shipped
-// (the alias 'confirmed' step adopting the real payer going forward — this
-// only ever fixes it looking forward from a NEW successful payment, not a
-// stuck identity from an old one). No in-game UI for this on purpose: it's a
-// one-off fix for a known-wrong address the player already has independent
-// proof of (e.g. the wallet that actually sent a real payment), not a
-// general "switch accounts" feature — same trust level `hubAddress` already
-// has everywhere else (a plain, unverified client-reported string, see
-// CLAUDE.md's Radar trust-model note), so accepting it from a URL param
-// changes nothing about what the server already trusts. Stripped from the
-// URL immediately so a reload/share doesn't keep re-applying it.
+// identity outright. No in-game UI for this on purpose — it's a one-off fix
+// for a player whose connected identity (accounts[0] from connectPayAccount(),
+// see src/nimiq.js) turns out to be genuinely wrong, for whatever reason,
+// when they already have independent proof of their real address (e.g. a
+// wallet explorer). Not a general "switch accounts" feature — same trust
+// level `hubAddress` already has everywhere else in this codebase (a plain,
+// unverified client-reported string, see CLAUDE.md's Radar trust-model
+// note), so accepting it from a URL param changes nothing about what the
+// server already trusts. Stripped from the URL immediately so a reload/share
+// doesn't keep re-applying it.
 {
   const forcedIdentity = new URLSearchParams(location.search).get('setIdentity');
   if (forcedIdentity) {
@@ -1262,33 +1258,18 @@ function renderClaimStep(step, ctx) {
   if (step === 'confirming') {
     showClaimLobby(`<p>Confirming with the server…</p>`);
     confirmAliasPayment({ alias: ctx.value, wallet: hubAddress, paymentTx: ctx.paymentTx }).then((res) => {
-      if (res.ok) { renderClaimStep('confirmed', { ...ctx, wallet: res.wallet }); return; }
+      if (res.ok) { renderClaimStep('confirmed', ctx); return; }
       renderClaimStep('confirmFailed', { ...ctx, error: res.error, confirmations: res.confirmations, required: res.required });
     }).catch(() => renderClaimStep('confirmFailed', { ...ctx, error: 'network error' }));
     return;
   }
   if (step === 'confirmed') {
     clearPendingClaim();
-    // ctx.wallet is whichever account actually signed the payment (see
-    // party/aliases.js's confirmPayment comment — Nimiq Pay can't be told
-    // which of a player's accounts to pay from) — almost always hubAddress,
-    // but when it isn't, a successful real payment is strong, chain-verified
-    // proof of an address this player actually controls, more trustworthy
-    // than connectPayAccount()'s original accounts[0] guess. Adopted outright
-    // (not just noted) so every other address-keyed screen (League, My
-    // Matches, the ranking ticker, the pill itself) picks it up too, instead
-    // of staying pointed at an identity that can never show this alias.
-    const identityUpdated = !!ctx.wallet && ctx.wallet !== hubAddress;
-    if (identityUpdated) {
-      hubAddress = ctx.wallet;
-      setStoredAddress(ctx.wallet);
-    }
     aliasCache.set(hubAddress, { address: hubAddress, alias: ctx.value });
     syncIdentityPill();
     showClaimLobby(`
       <h2>Alias confirmed ✓</h2>
       <p>@${ctx.value} is now yours, visible everywhere in NimiCurl.</p>
-      ${identityUpdated ? `<p>Paid from a different account than the one shown before — switched your connected identity to it (${shortenAddressCompact(hubAddress)}).</p>` : ''}
       <button class="bigbtn" id="aliasDoneBtn">Close</button>
     `);
     document.getElementById('aliasDoneBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
@@ -1298,20 +1279,19 @@ function renderClaimStep(step, ctx) {
     // Fatal: an explicit allowlist of party/aliases.js's own confirmPayment
     // error strings that mean the tx that was sent can NEVER satisfy this
     // reservation no matter how many times it's re-checked (wrong amount/
-    // recipient, already used elsewhere, failed on-chain, or the reservation
-    // itself is gone — see that method's own comment for each). No 'sender
-    // mismatch' here any more — confirmPayment() stopped checking that (see
-    // its own comment: @nimiq/mini-app-sdk's sendBasicTransaction can't be
-    // told which account to sign from, so it was rejecting real, correctly-
-    // priced payments outright). Deliberately an ALLOWLIST, not a denylist of
-    // "known transient" errors: a network hiccup, an RPC timeout, or any
-    // other error surfaces as some arbitrary fetch-failure string here
-    // (net.js's postAliasRegistry catches and returns err.message, it never
-    // throws a fixed "network error" string) — treating everything NOT on
-    // this list as retryable fails safe, since the alternative (treating
-    // anything unrecognized as fatal) is exactly what clearPendingClaim()'d a
-    // real in-flight payment during testing.
-    const FATAL_ERRORS = ['transaction execution failed', 'recipient mismatch', 'amount mismatch', 'transaction already used', 'not your pending reservation'];
+    // sender/recipient, already used elsewhere, failed on-chain, or the
+    // reservation itself is gone — see that method's own comment for each;
+    // 'sender mismatch' checks `wallet` against the tx's relatedAddresses,
+    // not just tx.from, specifically so it doesn't misfire for Nimiq Pay's
+    // own HTLC-routed payments — see conversation). Deliberately an
+    // ALLOWLIST, not a denylist of "known transient" errors: a network
+    // hiccup, an RPC timeout, or any other error surfaces as some arbitrary
+    // fetch-failure string here (net.js's postAliasRegistry catches and
+    // returns err.message, it never throws a fixed "network error" string)
+    // — treating everything NOT on this list as retryable fails safe, since
+    // the alternative (treating anything unrecognized as fatal) is exactly
+    // what clearPendingClaim()'d a real in-flight payment during testing.
+    const FATAL_ERRORS = ['transaction execution failed', 'sender mismatch', 'recipient mismatch', 'amount mismatch', 'transaction already used', 'not your pending reservation'];
     const fatal = FATAL_ERRORS.includes(ctx.error);
     // Offering a one-click retry on a fatal error would mean "Pay in wallet"
     // again, i.e. signing a SECOND real transaction on top of money that's

@@ -438,7 +438,18 @@ export class Partnership extends Server {
         return { ok: false, error: 'pending', confirmations, required: REQUIRED_CONFIRMATIONS };
       }
       if (!tx.executionResult) return { ok: false, error: 'transaction execution failed' };
-      if (normalizeAddress(tx.from) !== normalizeAddress(wallet)) return { ok: false, error: 'sender mismatch' };
+      // Not a plain tx.from === wallet check — verified live (see
+      // party/aliases.js's confirmPayment, same fix applied here) that
+      // Nimiq Pay routes its payments through a shared HTLC/swap settlement
+      // contract: tx.from for one of these is that SAME shared contract
+      // address for every Nimiq Pay payment (fromType 2, not a Basic
+      // account), not personal to any one player, while the player's own
+      // wallet shows up in tx.relatedAddresses instead. A plain Basic-account
+      // transfer (the Hub checkout() fallback, fromType 0) has
+      // relatedAddresses = [from, to], so tx.from === wallet is really just
+      // a special case of "wallet appears among this tx's related addresses".
+      const relatedNormalized = [tx.from, ...(tx.relatedAddresses || [])].map(normalizeAddress);
+      if (!relatedNormalized.includes(normalizeAddress(wallet))) return { ok: false, error: 'sender mismatch' };
       const expectedRecipient = this.env?.PARTNERSHIP_PAYMENT_ADDRESS;
       if (!expectedRecipient) return { ok: false, error: 'server misconfigured: no payment address' };
       if (normalizeAddress(tx.to) !== normalizeAddress(expectedRecipient)) return { ok: false, error: 'recipient mismatch' };
