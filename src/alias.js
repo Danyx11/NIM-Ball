@@ -37,7 +37,7 @@ export function resolveIdentity(address) {
 // used here to make the fake-mode response shape realistic, never trusted
 // for a real payment (confirmAliasPayment below always goes through the
 // server either way).
-const FAKE_PRICE_LUNA = 100 * 1e5;
+const FAKE_PRICE_LUNA = 30 * 1e5;
 
 export async function reserveAlias(alias, wallet) {
   if (FAKE_MODE) {

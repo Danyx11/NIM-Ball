@@ -27,7 +27,7 @@ const LUNA_PER_NIM = 1e5;
 // squatting a pile of aliases for fun isn't worth it even with today's
 // near-zero traffic (see conversation: "ca evite qu'un bad actor s'amuse à
 // tout saturer pour le fun").
-const ALIAS_PRICE_LUNA = 100 * LUNA_PER_NIM;
+const ALIAS_PRICE_LUNA = 30 * LUNA_PER_NIM;
 
 // Reuses the exact same project wallet Partnership already collects
 // payments into (wrangler.jsonc's PARTNERSHIP_PAYMENT_ADDRESS) — one

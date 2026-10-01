@@ -17,14 +17,25 @@ export function attachKeyboardAvoidance(input, mobile, apply) {
     const visibleBottom = window.visualViewport.height + window.visualViewport.offsetTop;
     apply(Math.max(0, rect.bottom - visibleBottom));
   };
-  input.addEventListener('focus', () => {
+  const onFocus = () => {
     window.visualViewport.addEventListener('resize', recompute);
     setTimeout(recompute, 350);
-  });
+  };
+  input.addEventListener('focus', onFocus);
   input.addEventListener('blur', () => {
     window.visualViewport.removeEventListener('resize', recompute);
     apply(0);
   });
+  // Several call sites (the alias claim dialog, WEEK match rename) call
+  // input.focus() themselves right after building the dialog, to open the
+  // keyboard immediately with no extra tap — that focus() fires the 'focus'
+  // event synchronously, so if this function runs after it (the natural
+  // reading order: build dialog, focus it, then wire up its behavior) the
+  // listener above is attached too late to ever see that first focus and
+  // never schedules a single recompute. Catch that case here too, not just
+  // by reordering every call site (confirmed on a real iPhone — the alias
+  // field stayed hidden behind the keyboard because of exactly this).
+  if (document.activeElement === input) onFocus();
 }
 
 // Strategy for an ancestor that's already a real overflow:auto scroll
