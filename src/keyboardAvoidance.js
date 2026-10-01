@@ -12,10 +12,23 @@
 // right on focus would usually run before the keyboard has actually opened.
 export function attachKeyboardAvoidance(input, mobile, apply) {
   if (!mobile || !window.visualViewport) return;
+  // How many px our own last correction already shifted `input` up by —
+  // both strategies move the input itself (a transform, or scrolling its
+  // container), which also moves its own getBoundingClientRect(). Without
+  // adding this back before measuring, a second firing (the keyboard's real
+  // resize event landing right after the first setTimeout-driven call, or
+  // vice versa) reads the ALREADY-corrected position, computes ~0 overlap,
+  // and wipes out the correction it just applied — confirmed on a real
+  // iPhone as "se positionne bien un instant puis ça redescend derrière le
+  // clavier". `apply(overlap)` must always receive the field's TRUE overlap
+  // against its natural, uncorrected position.
+  let appliedOffset = 0;
   const recompute = () => {
     const rect = input.getBoundingClientRect();
     const visibleBottom = window.visualViewport.height + window.visualViewport.offsetTop;
-    apply(Math.max(0, rect.bottom - visibleBottom));
+    const overlap = Math.max(0, (rect.bottom + appliedOffset) - visibleBottom);
+    appliedOffset = overlap > 0 ? overlap + 16 : 0;
+    apply(overlap);
   };
   const onFocus = () => {
     window.visualViewport.addEventListener('resize', recompute);
@@ -24,6 +37,7 @@ export function attachKeyboardAvoidance(input, mobile, apply) {
   input.addEventListener('focus', onFocus);
   input.addEventListener('blur', () => {
     window.visualViewport.removeEventListener('resize', recompute);
+    appliedOffset = 0;
     apply(0);
   });
   // Several call sites (the alias claim dialog, WEEK match rename) call
@@ -45,10 +59,22 @@ export function attachKeyboardAvoidance(input, mobile, apply) {
 // on the panel's own (un-shrunk) layout bounds, which already consider the
 // input "in view" even when the keyboard visually covers it.
 export function keyboardAvoidScroll(input, mobile, scrollContainer) {
+  // `overlap` is now always the TRUE overlap (see attachKeyboardAvoidance's
+  // own comment), not shrinking on repeat firings the way it used to —
+  // so this can no longer just add it to the container's current scrollTop
+  // (that would keep compounding on every firing instead of converging).
+  // Remember the scrollTop this correction started from instead, and always
+  // scroll to baseline + overlap, an absolute target.
+  let baseline = 0;
+  let correcting = false;
   attachKeyboardAvoidance(input, mobile, (overlap) => {
-    scrollContainer.scrollTop = overlap > 0
-      ? Math.min(scrollContainer.scrollTop + overlap + 16, scrollContainer.scrollHeight - scrollContainer.clientHeight)
-      : 0;
+    if (overlap > 0) {
+      if (!correcting) { baseline = scrollContainer.scrollTop; correcting = true; }
+      scrollContainer.scrollTop = Math.min(baseline + overlap + 16, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+    } else {
+      scrollContainer.scrollTop = 0;
+      correcting = false;
+    }
   });
 }
 
