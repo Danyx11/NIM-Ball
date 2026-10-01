@@ -23,7 +23,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // src/net.js's LEAGUE_SEASON_ID already documents for itself). The SERVER's
 // own copy is the one that matters here: it's what reserve() below actually
 // locks a price against, never a client-supplied number.
-const PARTNERSHIP_WEEKLY_USD = 10;
+const PARTNERSHIP_WEEKLY_USD = 5;
 const LUNA_PER_NIM = 1e5;
 
 // Public, keyless, CORS-open (server-side fetch anyway, so CORS wouldn't
@@ -182,7 +182,7 @@ const RATE_FETCH_RETRY_DELAY_MS = 400; // linear backoff: 400ms, 800ms
 // not ctx.storage — doesn't need to survive a restart, this is purely a
 // short-lived fallback, not a source of truth). If every retry above still
 // fails, a recent-enough price is a better outcome than failing the whole
-// reservation: $10/week doesn't need to-the-second accuracy, see
+// reservation: $5/week doesn't need to-the-second accuracy, see
 // RATE_CACHE_TTL_MS.
 let cachedRate = null; // { rate, at }
 const RATE_CACHE_TTL_MS = 10 * 60 * 1000;
