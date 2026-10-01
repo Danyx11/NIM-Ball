@@ -18,6 +18,7 @@ import { MAX_POINTS_ON_TICKET, pointTileRect, buildReplayUrl, TICKET_W, TICKET_H
 import { DEFAULT_MATCH_CONFIG, STONE_SLOTS_BY_COUNT, TIMER_WARNING_SECONDS_BY_TURN_TIME, sanitizeMatchConfig } from './matchConfig.js';
 import { HOWTO_STEPS_MOBILE, HOWTO_STEPS_DESKTOP } from './howto.js';
 import { resolveIdentity } from './alias.js';
+import { loadSponsorBanner } from './partnership.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 // Placeholder demo addresses, used unless opts.identiconAddress overrides a
@@ -60,7 +61,15 @@ const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
 // Same sponsor art as the end-of-match ticket (src/ticket.js's BANNER_SRC) —
 // shown again at the bottom of the +1 goal panel below (resultPanelHtml)
 // since that panel is seen far more often, mid-match, than the ticket ever is.
+// This is the FALLBACK: when a week actually has a paid Partnership sponsor,
+// their uploaded banner replaces it (see goalSponsorBannerSrc below).
 const GOAL_SPONSOR_BANNER_SRC = `${ASSET_BASE}ticket/banner-nimiq-space.webp`;
+// This week's paid sponsor banner URL once it's known to exist, else null —
+// filled in by the loadSponsorBanner() promise kicked off at match start
+// (preloadCoreAssets below), so by the time the first goal panel is built
+// it has long since settled. Reading it before it settles is not a bug:
+// null simply means "no sponsor", which is exactly the fallback we want.
+let goalSponsorBannerSrc = null;
 // Mobile-only pre-crop of the above (see scripts/bake_mobile_frame.py and
 // the MOBILE_CROP comment in startGame() below) — same pixels, just the
 // sub-rect mobile ever actually shows, so the phone downloads/decodes ~57%
@@ -136,6 +145,11 @@ const ICON_SOUND_OFF = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="
 // boot call finished) promise makes every later call a no-op.
 const corePreloadCache = new Map();
 export function preloadCoreAssets(mobile = false, howTo = false) {
+  // Sponsor banner (Partnership) — fired here rather than at module load so
+  // it costs nothing until a match is actually being set up. Its own promise
+  // is cached and shared with src/ticket.js, so this only ever hits the
+  // network once per page load however often preloadCoreAssets is called.
+  loadSponsorBanner().then((img) => { goalSponsorBannerSrc = img ? img.src : null; });
   const cacheKey = `${mobile}|${howTo}`;
   if (corePreloadCache.has(cacheKey)) return corePreloadCache.get(cacheKey);
   const urls = [
@@ -4491,7 +4505,7 @@ export function startGame(opts = {}) {
       <div class="goal-score">
         <span class="goal-score-a">${scoreA}</span><span class="goal-score-sep">–</span><span class="goal-score-b">${scoreB}</span>
       </div>
-      <img class="goal-sponsor-banner" src="${GOAL_SPONSOR_BANNER_SRC}" alt="Sponsor">
+      <img class="goal-sponsor-banner" src="${goalSponsorBannerSrc || GOAL_SPONSOR_BANNER_SRC}" alt="Sponsor">
       ${extraHtml || ''}
     `;
   }

@@ -60,7 +60,7 @@ const STATIC_MARK_SRC = {
   bot: `${ASSET_BASE}avatars/bot-mark.webp`,
 };
 const staticMarkCache = new Map();
-export function getStaticMarkImage(kind) {
+function getStaticMarkImage(kind) { // module-internal: getTintedMarkCanvas/getStaticMarkPngDataUrl below are the public surface
   if (!staticMarkCache.has(kind)) staticMarkCache.set(kind, loadImage(STATIC_MARK_SRC[kind]));
   return staticMarkCache.get(kind);
 }

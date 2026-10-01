@@ -3772,9 +3772,19 @@ const SHARE_TAUNTS = [
   "I'm ready. Are you? Challenge me on www.nimicurl.com",
   'Come and try to take me down! www.nimicurl.com',
 ];
+// Nimiq Pay's own deep link (nimiq.dev/mini-apps#sharing-your-mini-app):
+// tapping it on a phone opens Nimiq Pay, goes through wallet auth, then loads
+// this page inside its mini-app browser with `?code=` already in the query
+// string — which the ?code= magic link above (see its own comment) picks up
+// and joins automatically. On desktop it currently just opens nimpay.app
+// itself rather than nimicurl.com directly (that site's own catalog/fallback
+// behavior, not something to route around here) — a known gap, not a bug.
+function buildShareLink(code) {
+  return `https://nimpay.app/miniapps/open/nimicurl.com?code=${code}`;
+}
 function buildShareText(code) {
   const taunt = SHARE_TAUNTS[Math.floor(Math.random() * SHARE_TAUNTS.length)];
-  return `${taunt}\nCODE: ${code}`;
+  return `${taunt}\nCODE: ${code}\n${buildShareLink(code)}`;
 }
 
 // Icon reflects what the button actually does on this device (see

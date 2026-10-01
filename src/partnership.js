@@ -1,24 +1,18 @@
-// Partnership payment seam — quoting ($10/week -> NIM) and the actual wallet
-// transfer, kept separate from src/nimiq.js (general wallet identity/claim
-// integration) the same way src/nimconnect.js sits next to it as a
-// feature-specific consumer. Scope note: this file is ONLY the payment path
-// (quote + pay). Booking/reservation state, banner storage and on-chain
-// payment verification are separate, later pieces — see CLAUDE.md.
-import { getExchangeRates, CryptoCurrency, FiatCurrency, Provider } from '@nimiq/utils';
-import { sendNimPayment } from './nimiq.js';
-
-export const PARTNERSHIP_WEEKLY_USD = 10;
-
-// 1 NIM = 1e5 Luna — the unit every Nimiq wallet API here (mini-app-sdk's
-// provider.d.ts, hub-api's checkout `value`) actually takes.
-const LUNA_PER_NIM = 1e5;
-
-// How long a frozen quote stays valid for payment. NIM/USD moves slowly
-// enough minute-to-minute that this is about UX (don't let someone sit on a
-// stale "42.37 NIM" screen for an hour), not price-risk precision — pick a
-// different value if product wants a tighter/looser window, this isn't
-// derived from anything load-bearing.
-export const QUOTE_TTL_MS = 5 * 60 * 1000;
+// Partnership client seam — the browser half of the sponsor-week feature
+// (party/partnership.js is the server half). Kept separate from
+// src/nimiq.js (general wallet identity/claim integration) the same way
+// src/alias.js sits next to it as a feature-specific consumer.
+//
+// Two things live here, and only these two: the configured payment
+// recipient, and the read path for the active week's sponsor banner.
+//
+// This file used to also own a client-side quote ($5/week -> NIM via
+// CoinGecko) and a payPartnership() wrapper. Both are gone: pricing is
+// locked server-side by party/partnership.js's reserve() (so the client can
+// never report its own amount) and src/main.js calls nimiq.js's
+// sendNimPayment directly with the quote the server handed back. Nothing
+// imported either function.
+import { partnershipBannerUrl } from './net.js';
 
 // Never hardcoded: a real NIM address, but still configured through Vite's
 // build-time env (see .env.example) rather than written into source, so the
@@ -28,75 +22,56 @@ export const QUOTE_TTL_MS = 5 * 60 * 1000;
 // recipient.
 export const PARTNERSHIP_PAYMENT_ADDRESS = import.meta.env.VITE_PARTNERSHIP_PAYMENT_ADDRESS || '';
 
-// `?fakePartnership` (same convention as nimconnect.js's `?fakeHandles`) —
-// skips both the rate fetch and the real wallet call, for iterating on the
-// future Partnership UI without a funded wallet or a live price feed.
-// `?fakePartnership=cancelled` / `=error` select which outcome payPartnership
-// resolves to; any other value (including bare `?fakePartnership`) is the
-// success path.
-const fakeParam = new URLSearchParams(window.location.search).get('fakePartnership');
-export const FAKE_MODE = new URLSearchParams(window.location.search).has('fakePartnership');
-const FAKE_OUTCOME = fakeParam || 'submitted';
+// ---------------------------------------------------------------------
+// Active sponsor banner — the read side of the booking flow above.
+//
+// party/partnership.js's uploadBanner() stores a paid week's banner in R2
+// and its onRequest serves it back at `?banner=<weekId>`; until now nothing
+// ever asked for it, so a sponsor could pay, book and upload and still never
+// see their banner anywhere (src/game.js's goal panel and src/ticket.js both
+// drew the built-in Nimiq art unconditionally). This is the missing half.
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-// { weeks, usdTotal, rateUsdPerNim, amountNim, amountLuna, fetchedAt, expiresAt }
-// amountLuna is the integer that actually gets sent — amountNim is only for
-// display, so display rounding never drifts from the payment amount.
-export async function quotePartnership(weeks) {
-  if (!Number.isInteger(weeks) || weeks < 1) throw new Error(`Invalid week count: ${weeks}`);
-  const usdTotal = weeks * PARTNERSHIP_WEEKLY_USD;
-  let rateUsdPerNim;
-  if (FAKE_MODE) {
-    await wait(300);
-    rateUsdPerNim = 0.236; // matches the example in the spec, fake mode only
-  } else {
-    // Provider.CoinGecko, not the getExchangeRates default (CryptoCompare):
-    // verified in-browser that min-api.cryptocompare.com has no
-    // Access-Control-Allow-Origin header at all, so it can never be called
-    // client-side (it hangs, retrying forever — see FiatApi's own retry
-    // loop) — only from a server. CoinGecko's public API is CORS-open and
-    // was confirmed working from this app's own origin.
-    const rates = await getExchangeRates([CryptoCurrency.NIM], [FiatCurrency.USD], Provider.CoinGecko);
-    rateUsdPerNim = rates?.[CryptoCurrency.NIM]?.[FiatCurrency.USD];
-    if (!rateUsdPerNim) throw new Error('NIM/USD rate unavailable.');
-  }
-  const amountNim = usdTotal / rateUsdPerNim;
-  const fetchedAt = Date.now();
-  return {
-    weeks,
-    usdTotal,
-    rateUsdPerNim,
-    amountNim,
-    amountLuna: Math.round(amountNim * LUNA_PER_NIM),
-    fetchedAt,
-    expiresAt: fetchedAt + QUOTE_TTL_MS,
-  };
+// Monday 00:00:00 UTC of the ISO week containing `timestampMs`, as that
+// Monday's own ISO date — must produce the exact same string as
+// party/partnership.js's mondayUtcMs/weekIdFor, which is what the stored
+// banner is keyed by. Duplicated rather than shared for the same reason
+// that file duplicates it from party/leagueSeason.js: party/ is a separate
+// Cloudflare Worker bundle from the browser build. Keep in sync by hand.
+export function currentPartnershipWeekId(timestampMs = Date.now()) {
+  const d = new Date(timestampMs);
+  const utcMidnight = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const daysSinceMonday = (d.getUTCDay() + 6) % 7; // getUTCDay: 0=Sun..6=Sat
+  return new Date(utcMidnight - daysSinceMonday * DAY_MS).toISOString().slice(0, 10);
 }
 
-export function isQuoteExpired(quote) {
-  return Date.now() > quote.expiresAt;
-}
-
-// Structured result only — the UI never inspects a raw provider/HubApi
-// response. `quote` must come from quotePartnership() above: the amount
-// actually sent is quote.amountLuna, frozen at quote time — this function
-// never re-fetches the rate, so a wallet confirmation left open for a while
-// still pays exactly what the screen showed.
-export async function payPartnership({ quote, recipient = PARTNERSHIP_PAYMENT_ADDRESS }) {
-  if (!recipient) return { status: 'error', error: 'Partnership payment address is not configured.' };
-  if (isQuoteExpired(quote)) return { status: 'error', error: 'Quote expired — request a new one.' };
-  if (FAKE_MODE) {
-    await wait(900);
-    if (FAKE_OUTCOME === 'cancelled') return { status: 'cancelled' };
-    if (FAKE_OUTCOME === 'error') return { status: 'error', error: 'Simulated wallet error.' };
-    return { status: 'submitted', transaction: { hash: 'fake-tx-hash' } };
-  }
-  try {
-    const transaction = await sendNimPayment({ recipient, valueLuna: quote.amountLuna });
-    return { status: 'submitted', transaction };
-  } catch (err) {
-    if (err.cancelled) return { status: 'cancelled' };
-    return { status: 'error', error: err.message };
-  }
+// Resolves to a decoded <img> for this week's sponsor banner, or null when
+// there is no sponsor this week (the endpoint 404s) or the request fails for
+// any reason. Callers treat null as "use the built-in Nimiq banner", so the
+// no-sponsor path is byte-for-byte the behavior that shipped before this.
+//
+// The 404 IS the "no sponsor" signal — deliberately no extra JSON round-trip
+// against fetchPartnershipWeeks() just to find out whether to then load the
+// image. One request either way.
+//
+// crossOrigin: the banner is served from the Worker's origin, not the game's,
+// and src/ticket.js draws it into a canvas it then exports as a shareable
+// PNG — without this the canvas would be tainted and that export would throw.
+// party/partnership.js's banner route sends Access-Control-Allow-Origin: *,
+// so the anonymous request is served normally.
+//
+// Cached per page load: both consumers (the goal panel, which is rebuilt on
+// every scored point, and the end-of-match ticket) share this one promise.
+let sponsorBannerPromise = null;
+export function loadSponsorBanner() {
+  if (sponsorBannerPromise) return sponsorBannerPromise;
+  sponsorBannerPromise = new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img.naturalWidth > 0 ? img : null);
+    img.onerror = () => resolve(null); // 404 (no sponsor this week), offline, CORS — all "no banner"
+    img.src = partnershipBannerUrl(currentPartnershipWeekId());
+  });
+  return sponsorBannerPromise;
 }
