@@ -157,9 +157,14 @@ export class AliasRegistry extends Server {
 
   // Only ever returns a CONFIRMED alias — a wallet's own still-pending
   // reservation (itself mid-payment) never shows up as "this wallet's
-  // alias" to the rest of the game.
+  // alias" to the rest of the game. normalizeAddress() here is what makes
+  // this safe to call with whatever raw, possibly-spaced format the caller
+  // has on hand (hubAddress, tx.from, …) — byWallet keys are always written
+  // normalized below, so reads must normalize too or a real lookup silently
+  // misses (found live: confirmPayment() below started keying by tx.from's
+  // normalized form, which never matched a GET using hubAddress's spaced one).
   lookupByWallet(wallet) {
-    const alias = this.byWallet[wallet];
+    const alias = this.byWallet[normalizeAddress(wallet)];
     const row = alias ? this.aliases[alias] : null;
     return row && row.status === 'confirmed' ? alias : null;
   }
@@ -182,9 +187,10 @@ export class AliasRegistry extends Server {
       await this.ready();
       this.sweepExpired();
       if (!wallet || typeof wallet !== 'string') return { ok: false, error: 'wallet required' };
+      const normalizedWallet = normalizeAddress(wallet);
       const clean = typeof alias === 'string' ? alias.toLowerCase() : '';
       if (!ALIAS_RE.test(clean)) return { ok: false, error: 'invalid alias' };
-      const existingAlias = this.byWallet[wallet];
+      const existingAlias = this.byWallet[normalizedWallet];
       const existingRow = existingAlias ? this.aliases[existingAlias] : null;
       if (existingRow?.status === 'confirmed') return { ok: false, error: 'wallet already has an alias' };
       const now = Date.now();
@@ -203,11 +209,13 @@ export class AliasRegistry extends Server {
       // did, 100 -> 30 NIM) while a reservation from before that change is
       // still mid-confirmation. Same reasoning party/partnership.js's own
       // reserve() already documents for its own expectedAmountLuna.
+      // `wallet` is stored normalized — see lookupByWallet()'s own comment on
+      // why every byWallet key/row.wallet value has to agree on one format.
       this.aliases[clean] = {
-        alias: clean, status: 'pending', wallet, claimedAt: null, paymentTx: null,
+        alias: clean, status: 'pending', wallet: normalizedWallet, claimedAt: null, paymentTx: null,
         createdAt: now, pendingExpiresAt, expectedAmountLuna: ALIAS_PRICE_LUNA,
       };
-      this.byWallet[wallet] = clean;
+      this.byWallet[normalizedWallet] = clean;
       await this.persist();
       return { ok: true, alias: clean, amountLuna: ALIAS_PRICE_LUNA, pendingExpiresAt };
     });
@@ -223,10 +231,11 @@ export class AliasRegistry extends Server {
     return this.serialized(async () => {
       await this.ready();
       this.sweepExpired();
+      const normalizedWallet = normalizeAddress(wallet);
       const row = this.aliases[alias];
-      if (row && row.status === 'pending' && row.wallet === wallet) {
+      if (row && row.status === 'pending' && row.wallet === normalizedWallet) {
         delete this.aliases[alias];
-        if (this.byWallet[wallet] === alias) delete this.byWallet[wallet];
+        if (this.byWallet[normalizedWallet] === alias) delete this.byWallet[normalizedWallet];
         await this.persist();
       }
       return { ok: true };
@@ -235,25 +244,42 @@ export class AliasRegistry extends Server {
 
   // Verifies `paymentTx` against the real Nimiq chain before ever marking a
   // reservation confirmed — see this file's header comment for why. Same
-  // check order as party/partnership.js's confirmPayment:
-  //   1. the reservation still exists, is pending, and belongs to this wallet
+  // check order as party/partnership.js's confirmPayment, with one
+  // deliberate difference (see the sender step below):
+  //   1. the reservation still exists and is pending
   //   2. paymentTx hasn't already confirmed some other alias
   //   3. the transaction actually exists on-chain
   //   4. it has at least REQUIRED_CONFIRMATIONS (returns a distinct
   //      {ok:false, error:'pending', confirmations, required} so the client
   //      can poll/retry instead of being told it failed)
   //   5. it executed successfully
-  //   6. sender == the reservation's own wallet, recipient == the configured
-  //      payment address — never the client's say-so for either
+  //   6. recipient == the configured payment address — never the client's
+  //      say-so
   //   7. value == this row's own expectedAmountLuna, locked in at reserve()
   //      time — never the live ALIAS_PRICE_LUNA constant (see reserve()'s
   //      own comment for why that distinction matters)
-  confirmPayment({ alias, wallet, paymentTx }) {
+  //
+  // The alias is attributed to `tx.from` — whoever actually signed and sent
+  // the payment — not to the `wallet` the client reported at reserve() time.
+  // This used to be a hard `tx.from === wallet` check, which broke in
+  // practice inside Nimiq Pay: @nimiq/mini-app-sdk's sendBasicTransaction()
+  // has no `sender`/`forceSender` parameter (unlike the Hub checkout()
+  // fallback, see src/nimiq.js's sendNimPayment) — it signs from whatever
+  // account is active in the host app, which is not guaranteed to be
+  // accounts[0] (what connectPayAccount() recorded as hubAddress) if the
+  // player has more than one account there. A real, correctly-priced payment
+  // to the right address was being rejected outright as 'sender mismatch'
+  // with no way to retry into success (see conversation). Safe to drop:
+  // nothing else in this codebase cryptographically binds `wallet` to a real
+  // owned identity either (see CLAUDE.md's Radar trust-model note), and
+  // whoever's real NIM pays for a still-pending name is the only party who
+  // could possibly benefit from owning it.
+  confirmPayment({ alias, paymentTx }) {
     return this.serialized(async () => {
       await this.ready();
       this.sweepExpired();
       const row = this.aliases[alias];
-      if (!row || row.status !== 'pending' || row.wallet !== wallet) return { ok: false, error: 'not your pending reservation' };
+      if (!row || row.status !== 'pending') return { ok: false, error: 'not your pending reservation' };
       if (!paymentTx || typeof paymentTx !== 'string') return { ok: false, error: 'paymentTx required' };
       const normalizedHash = paymentTx.trim().toLowerCase();
       if (this.usedTxHashes[normalizedHash]) return { ok: false, error: 'transaction already used' };
@@ -270,17 +296,29 @@ export class AliasRegistry extends Server {
         return { ok: false, error: 'pending', confirmations, required: REQUIRED_CONFIRMATIONS };
       }
       if (!tx.executionResult) return { ok: false, error: 'transaction execution failed' };
-      if (normalizeAddress(tx.from) !== normalizeAddress(wallet)) return { ok: false, error: 'sender mismatch' };
       const expectedRecipient = this.env?.PARTNERSHIP_PAYMENT_ADDRESS;
       if (!expectedRecipient) return { ok: false, error: 'server misconfigured: no payment address' };
       if (normalizeAddress(tx.to) !== normalizeAddress(expectedRecipient)) return { ok: false, error: 'recipient mismatch' };
       const expectedAmountLuna = row.expectedAmountLuna ?? ALIAS_PRICE_LUNA; // ?? only ever for a row reserved before this field existed
       if (tx.value !== expectedAmountLuna) return { ok: false, error: 'amount mismatch', expected: expectedAmountLuna, actual: tx.value };
 
-      this.aliases[alias] = { ...row, status: 'confirmed', claimedAt: Date.now(), paymentTx: normalizedHash, pendingExpiresAt: null };
-      this.usedTxHashes[normalizedHash] = { alias, wallet, confirmedAt: Date.now() };
+      const realWallet = normalizeAddress(tx.from);
+      const existingForRealWallet = this.byWallet[realWallet];
+      if (existingForRealWallet && existingForRealWallet !== alias && this.aliases[existingForRealWallet]?.status === 'confirmed') {
+        return { ok: false, error: 'wallet already has an alias' };
+      }
+      // The reserving wallet's own byWallet pointer only needs clearing when
+      // it differs from realWallet — otherwise the line right after
+      // overwrites it with the same value anyway.
+      if (row.wallet !== realWallet && this.byWallet[row.wallet] === alias) delete this.byWallet[row.wallet];
+      this.aliases[alias] = { ...row, status: 'confirmed', wallet: realWallet, claimedAt: Date.now(), paymentTx: normalizedHash, pendingExpiresAt: null };
+      this.byWallet[realWallet] = alias;
+      this.usedTxHashes[normalizedHash] = { alias, wallet: realWallet, confirmedAt: Date.now() };
       await Promise.all([this.persist(), this.persistUsedTxHashes()]);
-      return { ok: true, alias };
+      // wallet included so the client can tell whether the alias landed on
+      // the identity it thinks is connected (realWallet) or a different
+      // account in the same Nimiq Pay app — see this method's own comment.
+      return { ok: true, alias, wallet: realWallet };
     });
   }
 
@@ -290,7 +328,10 @@ export class AliasRegistry extends Server {
   //   GET  ?wallet=<address>                       -> { alias: string|null }
   //   POST ?action=reserve  {alias, wallet}         -> reserve()
   //   POST ?action=release  {alias, wallet}         -> release()
-  //   POST ?action=confirm  {alias, wallet, paymentTx} -> confirmPayment()
+  //   POST ?action=confirm  {alias, paymentTx} -> confirmPayment() (the
+  //                         client still sends `wallet` too, kept for the
+  //                         request shape's own clarity; confirmPayment()
+  //                         itself ignores it, see that method's own comment)
   async onRequest(request) {
     await this.ready();
     const cors = { 'Access-Control-Allow-Origin': '*' };
