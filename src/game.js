@@ -17,7 +17,8 @@ import * as recorder from './recorder.js';
 import { MAX_POINTS_ON_TICKET, pointTileRect, buildReplayUrl, TICKET_W, TICKET_H } from './replay.js';
 import { DEFAULT_MATCH_CONFIG, STONE_SLOTS_BY_COUNT, TIMER_WARNING_SECONDS_BY_TURN_TIME, sanitizeMatchConfig } from './matchConfig.js';
 import { HOWTO_STEPS_MOBILE, HOWTO_STEPS_DESKTOP } from './howto.js';
-import { resolveIdentity } from './nimconnect.js';
+import { resolveIdentity } from './alias.js';
+import { loadSponsorBanner } from './partnership.js';
 
 const ASSET_BASE = import.meta.env.BASE_URL;
 // Placeholder demo addresses, used unless opts.identiconAddress overrides a
@@ -60,7 +61,15 @@ const ARENA_FRAME_SRC = `${ASSET_BASE}arena/frame.webp`;
 // Same sponsor art as the end-of-match ticket (src/ticket.js's BANNER_SRC) —
 // shown again at the bottom of the +1 goal panel below (resultPanelHtml)
 // since that panel is seen far more often, mid-match, than the ticket ever is.
+// This is the FALLBACK: when a week actually has a paid Partnership sponsor,
+// their uploaded banner replaces it (see goalSponsorBannerSrc below).
 const GOAL_SPONSOR_BANNER_SRC = `${ASSET_BASE}ticket/banner-nimiq-space.webp`;
+// This week's paid sponsor banner URL once it's known to exist, else null —
+// filled in by the loadSponsorBanner() promise kicked off at match start
+// (preloadCoreAssets below), so by the time the first goal panel is built
+// it has long since settled. Reading it before it settles is not a bug:
+// null simply means "no sponsor", which is exactly the fallback we want.
+let goalSponsorBannerSrc = null;
 // Mobile-only pre-crop of the above (see scripts/bake_mobile_frame.py and
 // the MOBILE_CROP comment in startGame() below) — same pixels, just the
 // sub-rect mobile ever actually shows, so the phone downloads/decodes ~57%
@@ -136,6 +145,11 @@ const ICON_SOUND_OFF = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="
 // boot call finished) promise makes every later call a no-op.
 const corePreloadCache = new Map();
 export function preloadCoreAssets(mobile = false, howTo = false) {
+  // Sponsor banner (Partnership) — fired here rather than at module load so
+  // it costs nothing until a match is actually being set up. Its own promise
+  // is cached and shared with src/ticket.js, so this only ever hits the
+  // network once per page load however often preloadCoreAssets is called.
+  loadSponsorBanner().then((img) => { goalSponsorBannerSrc = img ? img.src : null; });
   const cacheKey = `${mobile}|${howTo}`;
   if (corePreloadCache.has(cacheKey)) return corePreloadCache.get(cacheKey);
   const urls = [
@@ -348,21 +362,21 @@ export function startGame(opts = {}) {
     return panelLocalTeam && team !== panelLocalTeam ? (net?.opponentAddress || weekOpponentAddress || null) : null;
   }
   function panelAddressFor(team) { return panelOpponentAddress(team) || IDENTICON_ADDRESS[team]; }
-  const panelHandleCache = {}; // address -> "@handle" (only once resolved)
+  const panelAliasCache = {}; // address -> "@alias" (only once resolved)
   function panelLabelFor(team) {
     const real = panelOpponentAddress(team);
-    return real ? (panelHandleCache[real] || formatAddressShort(real)) : identityLabelFor(team);
+    return real ? (panelAliasCache[real] || formatAddressShort(real)) : identityLabelFor(team);
   }
-  // Best-effort upgrade of the shortened address to the opponent's @handle
-  // once NimConnect answers (resolveIdentity never rejects to "not found").
-  function upgradePanelHandle(team) {
+  // Best-effort upgrade of the shortened address to the opponent's @alias
+  // once the alias registry answers (resolveIdentity never rejects to "not found").
+  function upgradePanelAlias(team) {
     const real = panelOpponentAddress(team);
-    if (!real || panelHandleCache[real]) return;
+    if (!real || panelAliasCache[real]) return;
     resolveIdentity(real).then((identity) => {
-      if (!identity?.handle) return;
-      panelHandleCache[real] = `@${identity.handle}`;
+      if (!identity?.alias) return;
+      panelAliasCache[real] = `@${identity.alias}`;
       const el = document.querySelector(`#overlay .goal-address[data-team="${team}"]`);
-      if (el) el.textContent = panelHandleCache[real];
+      if (el) el.textContent = panelAliasCache[real];
     }).catch(() => { /* keeps the shortened address */ });
   }
   const canvas = document.getElementById('stage');
@@ -4491,7 +4505,7 @@ export function startGame(opts = {}) {
       <div class="goal-score">
         <span class="goal-score-a">${scoreA}</span><span class="goal-score-sep">–</span><span class="goal-score-b">${scoreB}</span>
       </div>
-      <img class="goal-sponsor-banner" src="${GOAL_SPONSOR_BANNER_SRC}" alt="Sponsor">
+      <img class="goal-sponsor-banner" src="${goalSponsorBannerSrc || GOAL_SPONSOR_BANNER_SRC}" alt="Sponsor">
       ${extraHtml || ''}
     `;
   }
@@ -4540,8 +4554,8 @@ export function startGame(opts = {}) {
     showOverlay(resultPanelHtml(scoringTeam, cls, '+1'));
     fillResultIdenticon('A');
     fillResultIdenticon('B');
-    upgradePanelHandle('A');
-    upgradePanelHandle('B');
+    upgradePanelAlias('A');
+    upgradePanelAlias('B');
     // Click-anywhere dismiss (no buttons here) — closing early doesn't rush
     // beginAimPhase(): maybeAdvanceRound() still waits on the slide animation
     // if that hasn't finished yet.
@@ -4588,8 +4602,8 @@ export function startGame(opts = {}) {
     showOverlay(resultPanelHtml(winningTeam, winningTeam === 'A' ? 'a' : 'b', '+1'));
     fillResultIdenticon('A');
     fillResultIdenticon('B');
-    upgradePanelHandle('A');
-    upgradePanelHandle('B');
+    upgradePanelAlias('A');
+    upgradePanelAlias('B');
 
     const stats = {
       durationMs: performance.now() - matchStartTime,
@@ -4636,13 +4650,13 @@ export function startGame(opts = {}) {
     // handler — prizeResult is sent to the winner's connection only).
     const looksPrizeEligible = net && looksClassic && net.opponentAddress && IDENTICON_ADDRESS[myTeam] !== DEFAULT_IDENTICON_ADDRESS[myTeam];
     const prizeWait = looksPrizeEligible ? waitForPrizeNim(8000) : Promise.resolve(null);
-    // Opponent's real identicon/address/handle for a net match (see
+    // Opponent's real identicon/address/alias for a net match (see
     // conversation) — IDENTICON_ADDRESS/LABEL only ever carry a real value
     // for myTeam (see DEFAULT_IDENTICON_ADDRESS's own comment: the opponent
     // side is a placeholder unless overridden), and net.opponentAddress
     // (party/arbiter.js's 'joined'/'opponentJoined' relay) is the only place
     // that placeholder can be overridden from. Best-effort: resolveIdentity
-    // never rejects to "not found" (see nimconnect.js), so a missing handle
+    // never rejects to "not found" (see src/alias.js), so a missing alias
     // just falls through to ticket.js's own shortened-address fallback.
     const ticketAddresses = { ...IDENTICON_ADDRESS };
     const ticketLabels = { ...IDENTICON_LABEL };
@@ -4650,10 +4664,10 @@ export function startGame(opts = {}) {
       const oppTeam = myTeam === 'A' ? 'B' : 'A';
       ticketAddresses[oppTeam] = net.opponentAddress;
       try {
-        // Bounded: a stalled NimConnect lookup must never keep the ticket
+        // Bounded: a stalled alias lookup must never keep the ticket
         // from appearing (it only supplies a nicer label for the opponent).
         const identity = await Promise.race([resolveIdentity(net.opponentAddress), new Promise((resolve) => setTimeout(resolve, 3000))]);
-        if (identity?.handle) ticketLabels[oppTeam] = `@${identity.handle}`;
+        if (identity?.alias) ticketLabels[oppTeam] = `@${identity.alias}`;
       } catch { /* best-effort — ticket falls back to the shortened address */ }
     }
     // ---------- Step 2: build the ticket WITHOUT its League/Prize stamps —

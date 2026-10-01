@@ -42,6 +42,12 @@
 //                    WeekArbiter call into over DO RPC exactly like
 //                    RadarCollector/LeagueSeason — no HTTP surface at all,
 //                    same "the RPC boundary IS the auth" reasoning.
+//   AliasRegistry  — @alias claims (see party/aliases.js), NimiCurl's own
+//                    replacement for the now-deprecated NimConnect service.
+//                    A single fixed-name instance (ALIAS_ROOM_NAME) with a
+//                    plain HTTP GET/POST surface only
+//                    (/parties/alias-registry/<room>), same shape as
+//                    Partnership — nothing else in this Worker calls into it.
 import { routePartykitRequest, getServerByName } from 'partyserver';
 import { RADAR_ROOM_NAME } from './radar.js';
 import { TELEGRAM_LINK_ROOM_NAME } from './telegramLink.js';
@@ -53,6 +59,7 @@ export { LeagueSeason } from './leagueSeason.js';
 export { TelegramLink } from './telegramLink.js';
 export { Partnership } from './partnership.js';
 export { PrizeVault } from './prize.js';
+export { AliasRegistry } from './aliases.js';
 
 // Telegram calls this once a webhook is registered (see CLAUDE.md's Radar
 // section for the `setWebhook` call that points it here with a

@@ -406,7 +406,7 @@ export class Partnership extends Server {
   // `sponsorName` is the one field still taken from the client as-is
   // (sanitized/length-capped) — it's a display label the sponsor picks for
   // themselves, not something that gates money, same trust level as a
-  // player's own claimed NimConnect handle elsewhere in this codebase.
+  // player's own claimed alias elsewhere in this codebase (party/aliases.js).
   confirmPayment({ weekIds, wallet, paymentTx, sponsorName }) {
     return this.serialized(async () => {
       await this.ready();

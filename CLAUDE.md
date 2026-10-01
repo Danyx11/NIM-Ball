@@ -31,7 +31,23 @@ Both paths share the same arbiter logic (`server/arbiter.js`, mounted at the fix
 
 ### Production remote backend (`party/`)
 
-LIVE and WEEK are backed by a Cloudflare Worker (`party/index.js`, deployed via `npm run wrangler:deploy` / `deploy-wrangler.sh`, config in `wrangler.jsonc`), not the LAN Node servers above. Durable Object classes: `Arbiter` (`party/arbiter.js`, LIVE — a straight partyserver port of `server/arbiter.js`, room name = the 4-char match code), `WeekArbiter` (`party/weekArbiter.js`, WEEK — async, wallet-address-keyed, state persisted to `ctx.storage` since a match can span days), `PlayerIndex` (`party/playerIndex.js`, one instance per wallet address, tracks that player's active WEEK matches for the active-match cap and "My Matches"), and `RadarCollector` (`party/radar.js`, see "NIM-Curl Radar" below). Local dev: `npm run wrangler:dev` (needs `.dev.vars`, gitignored — see `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` already there for `Arbiter`'s desync alert). `Arbiter`'s own Durable Object instance is deliberately not persisted (`onStart` always starts blank) — see its own header comment.
+LIVE and WEEK are backed by a Cloudflare Worker (`party/index.js`, deployed via `npm run wrangler:deploy` / `deploy-wrangler.sh`, config in `wrangler.jsonc`), not the LAN Node servers above. **Nine** Durable Object classes, each added as its own `wrangler.jsonc` migration (`v1`..`v8`) alongside the previous ones, never folded into them:
+
+| Class | File | What it is |
+|---|---|---|
+| `Arbiter` | `party/arbiter.js` | LIVE — a straight partyserver port of `server/arbiter.js`, room name = the 4-char match code |
+| `WeekArbiter` | `party/weekArbiter.js` | WEEK — async, wallet-address-keyed, state persisted to `ctx.storage` since a match can span days |
+| `PlayerIndex` | `party/playerIndex.js` | one instance per wallet address: that player's active WEEK matches (active-match cap, "My Matches") + their Telegram notification link |
+| `RadarCollector` | `party/radar.js` | daily play stats -> Telegram, see "NIM-Curl Radar" below |
+| `LeagueSeason` | `party/leagueSeason.js` | League Beta season store, see "League Beta" below |
+| `TelegramLink` | `party/telegramLink.js` | short-lived WEEK-notification linking tokens, see "WEEK Telegram turn notifications" below |
+| `Partnership` | `party/partnership.js` | sponsor-week booking + banner storage, see "Partnership" below |
+| `PrizeVault` | `party/prize.js` | NIM win payouts, see "NIM prizes" below |
+| `AliasRegistry` | `party/aliases.js` | paid @alias claims, see "Alias registry" below |
+
+Two `party/` files are plain modules, not Durable Objects: `party/leagueRating.js` (the pure Elo/LP/streak math + `isClassicMatchConfig`, shared by `Arbiter`/`WeekArbiter`/`LeagueSeason`) and `party/nimiqTx.js` (hand-built Nimiq transaction building/signing — the only thing in this codebase that can *send* NIM server-side, see `PrizeVault`).
+
+Local dev: `npm run wrangler:dev` (needs `.dev.vars`, gitignored — see `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` already there for `Arbiter`'s desync alert). `Arbiter`'s own Durable Object instance is deliberately not persisted (`onStart` always starts blank) — see its own header comment.
 
 ### NIM-Curl Radar
 
@@ -50,7 +66,7 @@ An **ALL-TIME** section reports since-the-beginning totals, never reset by the d
 
 **Privacy**: wallet addresses are SHA-256 hashed with `RADAR_WALLET_SALT` before ever being stored — Radar only ever holds `hash → firstSeenDate`, never an address, and never posts one to Telegram. "New wallet" means "an address Radar has never seen before", not "a wallet created that day" — don't conflate the two.
 
-**Trust model — addresses are not cryptographically verified.** `hubAddress` (`src/main.js`) is just whatever `src/nimiq.js`'s `chooseAddress()`/Nimiq Pay's `listAccounts()` returned and cached in `localStorage` — a plain string, never signed. It travels unmodified through `connectMatch(code, hubAddress)` (`src/net.js`) as a `?address=` query param and `party/arbiter.js`'s `onConnect` reads it straight off the URL with zero proof of wallet ownership (WEEK's `party/weekArbiter.js` has the exact same property — it already documents itself as trusting every client-sent field). Practical consequence: anyone who can open two connections to a LIVE room (or two WEEK addresses) can hand-craft any address string and inflate "new wallet"/"unique player" counts — Radar's identity signal is only as trustworthy as the client that reports it. This is an accepted v1 trade-off (no anti-cheat), not a bug; real verification would need wallet-signature auth wired into the connect handshake itself, which is out of scope here.
+**Trust model — addresses are not cryptographically verified.** `hubAddress` (`src/main.js`) is just whatever `src/nimiq.js`'s `chooseAddress()`/Nimiq Pay's `listAccounts()` returned and cached in `localStorage` — a plain string, never signed. It travels unmodified through `connectMatch(code, hubAddress)` (`src/net.js`) as a `?address=` query param and `party/arbiter.js`'s `onConnect` reads it straight off the URL with zero proof of wallet ownership (WEEK's `party/weekArbiter.js` has the exact same property — it already documents itself as trusting every client-sent field). Practical consequence: anyone who can open two connections to a LIVE room (or two WEEK addresses) can hand-craft any address string and inflate "new wallet"/"unique player" counts — Radar's identity signal is only as trustworthy as the client that reports it. This is an accepted v1 trade-off (no anti-cheat), not a bug; real verification would need wallet-signature auth wired into the connect handshake itself, which is out of scope here. **That same unverified address is no longer Radar-only**: League LP and the 10 NIM prizes both route off it, so read "NIM prizes" below before assuming anything here is stats-only.
 
 **Telegram**: `/radar` and `/radar yesterday` arrive via a webhook (`POST /radar/telegram-webhook` on the same Worker), verified against `TELEGRAM_WEBHOOK_SECRET` (Telegram's `X-Telegram-Bot-Api-Secret-Token` header) plus a `TELEGRAM_CHAT_ID` match. The automatic daily report is driven by a Cloudflare Cron Trigger (`wrangler.jsonc`'s `triggers.crons`, every 15 min) calling `RadarCollector#maybeSendDailyReport`, which re-checks the current Europe/Paris date on every tick (DST-safe) and sends at most once per day, for whichever day just ended.
 
@@ -90,13 +106,55 @@ curl "https://api.telegram.org/bot<TELEGRAM_NOTIFY_BOT_TOKEN>/setWebhook?url=htt
 ```
 Also set `src/net.js`'s `TELEGRAM_NOTIFY_BOT_USERNAME` to the real `@BotFather` username (a public identifier, not a secret — needed client-side to build the deep link) and redeploy the frontend.
 
+### League Beta
+
+An ongoing Rating/LP/streak ladder over LIVE and WEEK — no end date (there used to be a `SEASON_START_UTC`/`SEASON_END_UTC` pair; both were dead, never read anywhere, and have been removed rather than left as a stale "this ends on X" signal). Two files, deliberately split:
+
+- **`party/leagueRating.js`** — pure math, no Durable Object plumbing, no `this`, no storage: runs identically under plain `node`. (Its own header points at a `scripts/league-rating-check.mjs` sanity script — that file only ever existed on the `league-beta` branch and is **not** in this tree; the comment is stale, not a missing file to go looking for.) Holds the season constant `CURRENT_SEASON_ID = 'beta-2026'` (see its own comment — never rename this to "reflect" the ranking being ongoing now; it's a Durable Object room name, and renaming it would point at a fresh, empty instance and strand every League Point already earned in the old one), a compressed Elo (`STARTING_RATING = 100`, `RATING_SCALE = 40`, `K_FACTOR = 5` — the scale is 10x smaller than classic chess Elo *on purpose*, see the constants' own comments before retuning anything), and `isClassicMatchConfig()`, which both arbiters use as their eligibility gate.
+- **`party/leagueSeason.js`** — one Durable Object per season, room name = `CURRENT_SEASON_ID`, holding every player's record and the full completed-match history. A genuinely new season (a deliberate reset, not a rebrand) would be bumping that constant: a fresh instance with clean storage, no migration.
+
+Reached two ways, same split as `PlayerIndex`: Durable Object RPC (`recordMatchCompleted`) from `Arbiter`/`WeekArbiter`, and a plain HTTP `GET` from the browser for the League panel and the home-screen ranking ticker (`src/main.js` via `src/net.js`'s `fetchLeagueStats`/`fetchLeagueLeaderboard`/`fetchLeagueWeeklyLeaderboard`).
+
+A match only counts for League if **all** of: both players actually connected, both reported a real wallet address (guests can't be ranked — same "no stable privacy-respecting id for a guest" reasoning as Radar), and it was played on the exact Classic preset. Those guards live in the *callers* (`party/arbiter.js`'s `matchOver` branch, `party/weekArbiter.js`'s `completeRound`), never in `LeagueSeason`, which trusts its RPC input completely and only adds idempotency on `leagueMatchId` (`live:<code>` / `week:<code>`, `:<n>` suffixed per rematch). The LP a match awarded comes back through the RPC's return value and is relayed to both clients as a `leagueResult` message — that's the only channel for it, since a plain `GET` returns season totals, not one match's delta.
+
+### Partnership
+
+Sponsor weeks: $5/week, paid in NIM, buys a banner shown in-game for that week.
+
+- **`party/partnership.js`** (`Partnership` DO, fixed name `v1`) is the source of truth for week availability and the only class here that gates a real paid feature — so it explicitly does *not* follow the "the RPC boundary is the auth" pattern the rest of `party/` uses. `confirmPayment()` verifies the reported transaction against the real Nimiq chain via `NIMIQ_RPC_URL` (existence, `REQUIRED_CONFIRMATIONS`, sender, recipient, value, reuse) and against the NIM price **it itself locked in at `reserve()` time** — never a client-reported amount. Banners go to R2 (`PARTNERSHIP_BANNERS`, bucket `nim-ball-partnership-banners`, which must be created by hand before the binding resolves); `sniffImageType()` reads the real file signature rather than trusting `Content-Type`, so a renamed HTML/SVG can't get served as an image.
+- **`src/partnership.js`** is the browser side: `PARTNERSHIP_PAYMENT_ADDRESS` (from `VITE_PARTNERSHIP_PAYMENT_ADDRESS`, see `.env.example`) plus the banner *read* path.
+
+`weekId` is the Monday of an ISO week as a plain `YYYY-MM-DD` UTC date — not an ISO week number. `src/partnership.js`'s `currentPartnershipWeekId()` is a hand-kept duplicate of `party/partnership.js`'s `weekIdFor()` (separate bundles); they must agree exactly or every banner lookup 404s.
+
+**Where the banner actually shows**: `loadSponsorBanner()` (`src/partnership.js`) resolves the current week's banner once per page load, to an `<img>` or to `null`. `null` — no sponsor this week, offline, anything — means "use the built-in Nimiq art", so the unsponsored path is exactly the behavior that shipped before sponsors existed. Two consumers share that one promise: the goal panel (`src/game.js`'s `resultPanelHtml`, falling back to `GOAL_SPONSOR_BANNER_SRC`) and the match ticket (`src/ticket.js`'s `renderTicket`, falling back to `BANNER_SRC`). The image is requested with `crossOrigin='anonymous'` because the ticket draws it into a canvas it then exports — the Worker's banner route sends `Access-Control-Allow-Origin: *` for exactly this.
+
+### NIM prizes
+
+`PrizeVault` (`party/prize.js`, fixed name `v1`) decides whether a just-finished match earns its winner **10 NIM**, and if so signs and broadcasts the payout itself with `party/nimiqTx.js` (hand-built because nothing else here could send NIM server-side — `Partnership`'s transfers are all *verified read-only*, signed by the player's own wallet). Needs the `PRIZE_WALLET_PRIVATE_KEY` secret; `wrangler.jsonc`'s plain `PRIZE_WALLET_ADDRESS` var is only a startup sanity check that the key derives to the expected address.
+
+`evaluate()` is the whole public surface, idempotent per `matchId` (the same `live:`/`week:` ids League uses). Limits: `DAILY_BUDGET_LUNA` (1000 NIM/day), `MAX_WALLET_PAYOUTS_PER_DAY` (3), `PAIR_COOLDOWN_MS` (7 days for the same pair of addresses), no self-play.
+
+**Trust model — read this before touching the eligibility path.** A LIVE prize is decided from two things the client controls: the `?address=` it connected with (see the trust note in "NIM-Curl Radar" above — never verified, never signed) and the `scoreA`/`scoreB` it puts in its own `matchOver` message. `Arbiter` runs no physics, so it cannot recompute either. The one guard it *can* apply is its own state: `this.mancheIndex` only ever increments when the arbiter itself relayed a `launch` after both teams' shots arrived, so `matchOver` with `mancheIndex === 0` is refused (`reason: 'not_played'`, still sent to both clients so `showVictory()` doesn't wait out its timeout). That raises the bar from "one forged message" to "forge a manche exchange first" — **it is a speed bump, not a fix.** Real protection needs wallet-signature auth in the connect handshake plus a server-derived score. WEEK does not share this weakness: `WeekArbiter` resolves rounds itself in `completeRound`, so its winner is server-derived.
+
+### Alias registry
+
+NimConnect — the third-party service NimiCurl used to read/claim `@handle`s from — shut down (2026-10). `AliasRegistry` (`party/aliases.js`, fixed name `v1`) replaces it with a small registry NimiCurl owns outright: a flat **100 NIM** one-time claim, paid to the same project wallet `Partnership` already collects into (`wrangler.jsonc`'s `PARTNERSHIP_PAYMENT_ADDRESS`, reused rather than a second payment-address var). Priced well above the old claim's network-fee-only cost on purpose, so squatting a pile of aliases isn't worth it even at today's low traffic. Permanent once paid, same guarantee the old on-chain claim gave — no renaming, no release of an already-confirmed alias.
+
+Flow mirrors `Partnership`'s reserve → pay → confirm shape exactly (see "Partnership" above), minus the USD-pegged pricing and banner upload:
+- `reserve({ alias, wallet })` locks the name to that wallet as `pending` — this IS the availability check (same as `Partnership.reserve()`), so there's no separate "is this taken" probe and no on-chain race the way NimConnect's old registry had: `AliasRegistry`'s own serialized write queue is the sole arbiter of who gets a contested name.
+- `confirmPayment({ alias, wallet, paymentTx })` verifies the reported transaction against the real Nimiq chain (existence, confirmations, sender, recipient, exact `ALIAS_PRICE_LUNA` value, reuse) — the exact same checks `Partnership.confirmPayment()` runs, duplicated rather than shared (every Durable Object file in `party/` stays independent on purpose, see that directory's own convention).
+
+`src/alias.js` is the browser-side domain wrapper (replacing the old `src/nimconnect.js`) that `main.js`'s claim dialog drives — `resolveIdentity(address)` for read (address → `{ address, alias? }`, used everywhere an opponent/leaderboard/My-Matches row needs a display name) and `reserveAlias`/`releaseAlias`/`confirmAliasPayment` for the claim flow itself. `?fakeAlias` in the URL swaps all of it for an in-memory fake, same spirit as the old `?fakeHandles`, for iterating on the claim dialog without a funded wallet.
+
+**main.js's claim dialog** (`openClaimAliasDialog`/`renderClaimStep`) has one subtlety worth knowing before touching it: on a "still waiting for confirmations" result, "Check again" re-polls the *same* already-broadcast `paymentTx` (step `confirming`) rather than looping back through `paying`, which would otherwise risk signing and sending an entirely new real payment for an alias that's already been paid for once.
+
 ## Architecture
 
 This is a 2-player physics game rendered on a single `<canvas>`, playable locally (Pass & Play, vs AI) or against a remote opponent (LIVE, WEEK — see "Production remote backend" below; Duel LAN is a dev-only extra, see "LAN mode"). Almost all gameplay logic lives in one file, `src/game.js` (~7,500 lines), structured as one big `startGame()` closure with no external state/rendering libraries — it's plain Canvas2D + `requestAnimationFrame`.
 
 `src/main.js` (~3,400 lines) owns essentially all DOM outside the canvas: the home/splash screen, the mode-select tree, the Classic/Custom settings screens, the LIVE and WEEK lobbies and panels, the identity pill, and the How To hub. It calls `startGame()` once a mode is picked, and separately fires off the optional Nimiq Pay handshake. `src/game.js` is meant to stay canvas-and-rules; the two exceptions that still build DOM inside the closure are the replay playback bar and the goal/victory result panels.
 
-Supporting modules: `src/net.js` (WebSocket/fetch client for Duel LAN, LIVE and WEEK), `src/weekController.js` (WEEK orchestration on top of `startGame()`'s generic hooks), `src/ai.js` (vs-AI shot picking, hockey) / `src/aiCurling.js` (vs-AI shot picking, Pure Curling), `src/matchConfig.js` (Classic preset + Custom rules), `src/recorder.js` / `src/replay.js` / `src/ticket.js` (the replay + shareable-ticket chain), `src/howto.js` (tutorial step lists), `src/audio.js` (WebAudio SFX/ambience), `src/identicons.js` (`@nimiq/identicons`), `src/nimiq.js` (`@nimiq/mini-app-sdk` + Nimiq Hub wallet identity), `src/nimconnect.js` (NimConnect @handle read/claim), `src/background.js`, `src/colors.js`, `src/settings.js`, `src/preload.js`.
+Supporting modules: `src/net.js` (WebSocket/fetch client for Duel LAN, LIVE and WEEK), `src/weekController.js` (WEEK orchestration on top of `startGame()`'s generic hooks), `src/ai.js` (vs-AI shot picking, hockey) / `src/aiCurling.js` (vs-AI shot picking, Pure Curling), `src/matchConfig.js` (Classic preset + Custom rules), `src/recorder.js` / `src/replay.js` / `src/ticket.js` (the replay + shareable-ticket chain), `src/howto.js` (tutorial step lists), `src/audio.js` (WebAudio SFX/ambience), `src/identicons.js` (`@nimiq/identicons`), `src/nimiq.js` (`@nimiq/mini-app-sdk` + Nimiq Hub wallet identity), `src/alias.js` (alias registry read/claim, see "Alias registry"), `src/partnership.js` (sponsor week ids + the active sponsor banner, see "Partnership"), `src/background.js`, `src/colors.js`, `src/settings.js`, `src/preload.js`.
 
 ### Vibes (hockey / curling)
 
@@ -154,7 +212,11 @@ Playback itself is `startGame({ replayPoints })`: `beginAimPhase()` branches to 
 
 ```
 index.html        Vite entry: inline branded loading overlay + canvas + every
-                  menu/match overlay's markup
+                  menu/match overlay's markup. Comment it freely — vite.config.js's
+                  stripHtmlComments plugin removes HTML comments from the BUILT
+                  html only (they were ~45% of the shipped file), never from
+                  source and never in dev.
+vite.config.js    base (GitHub Pages subpath vs Vercel root) + that plugin
 scripts/          Python/Pillow asset-baking helpers — run by hand, never part of
                   `npm run build`. See "Coordinate system" above for the arena chain.
   bake_curling_arena.py  builds the 4 curling arena frames + curling score digits
@@ -175,8 +237,20 @@ server/           Duel LAN only (dev). Node-only, never in the browser build.
   lan-server.js     standalone arbiter for the two-process flow
   arbiter.js        WebSocket arbiter logic shared by both servers above
   lan-addresses.js  small os.networkInterfaces() helper
-party/            Cloudflare Worker + Durable Objects (LIVE, WEEK, Radar) — see
-                  "Production remote backend" above
+party/            Cloudflare Worker + its 9 Durable Objects — see "Production
+                  remote backend" above for the full table
+  index.js          Worker entry: routes + every DO class re-export
+  arbiter.js        Arbiter     — LIVE relay (port of server/arbiter.js)
+  weekArbiter.js    WeekArbiter — WEEK, persisted, server-resolved rounds
+  playerIndex.js    PlayerIndex — per-wallet: WEEK matches + Telegram link
+  radar.js          RadarCollector — daily stats -> Telegram
+  leagueSeason.js   LeagueSeason  — League Beta season store
+  telegramLink.js   TelegramLink  — one-shot WEEK-notification link tokens
+  partnership.js    Partnership   — sponsor weeks, chain-verified payment, R2 banners
+  prize.js          PrizeVault    — 10 NIM win payouts + anti-farming limits
+  aliases.js        AliasRegistry — paid @alias claims, chain-verified payment
+  leagueRating.js   plain module: Elo/LP/streak math + isClassicMatchConfig
+  nimiqTx.js        plain module: builds/signs NIM transactions (PrizeVault only)
 src/
   main.js         all DOM outside the canvas: splash, mode-select tree, Classic/Custom
                   settings, LIVE + WEEK lobbies/panels, identity pill, How To hub,
@@ -195,7 +269,8 @@ src/
   audio.js        WebAudio SFX + background ambience loop manager
   identicons.js   thin wrapper around @nimiq/identicons
   nimiq.js        Nimiq Pay Mini App SDK + Nimiq Hub wallet identity / guest mode
-  nimconnect.js   NimConnect @handle lookup + claim (?fakeHandles for UI testing)
+  alias.js        alias registry lookup + claim (?fakeAlias for UI testing, see Alias registry)
+  partnership.js  sponsor week ids + this week's banner (null = use Nimiq art)
   background.js   wires the logo + home/mode-select backdrops (incl. per-vibe swap)
   colors.js       the 7 colors shared by style.css's :root and ticket.js's canvas
   settings.js     shared prefs that outlive a match instance (basic-laser flag)
@@ -204,7 +279,7 @@ src/
 public/           only assets actually loaded by the game (kept lean — this ships,
                   verbatim: Vite copies public/ as-is, so .gitignore does NOT keep
                   a file out of the build)
-  arena/          4 arena frames + their -mobile crops, + PLAY button cap sprite
+  arena/          4 arena frames + their -mobile crops
   identicons/     stone body art per damage-LED state + the light-layer decal
   home/           splash + mode-select backdrops (default, nimicurl, curling)
   bg/             logo wordmarks (see src/background.js)

@@ -6,6 +6,7 @@
 // victory panel and the shareable result image (see showVictory() in
 // game.js).
 import { getIdenticonCanvas } from './identicons.js';
+import { loadSponsorBanner } from './partnership.js';
 import QRCode from 'qrcode';
 import {
   buildReplayUrl, pointTileRect, MAX_POINTS_ON_TICKET,
@@ -89,8 +90,8 @@ function formatDuration(ms) {
 }
 
 // team.label is identityLabelOverride()'s output (see main.js): undefined
-// (no override — fall back to the raw address), "@handle" (a claimed
-// NimConnect handle), or "Guest 4821" (this device's guest code). Only ever
+// (no override — fall back to the raw address), "@alias" (a claimed
+// alias, see src/alias.js), or "Guest 4821" (this device's guest code). Only ever
 // populated for whichever team this device's own identity controls — the
 // opponent/AI side normally has no label, same as today. team.isAI is set
 // explicitly by game.js's showVictory() (team === aiTeam), since vs-AI is
@@ -205,10 +206,14 @@ export function drawPrizeStamp(ctx, nim) {
 
 export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winner, stats, points = [], leagueLp = null, prizeNim = null, vibe = 'hockey' }) {
   await document.fonts.ready;
-  const [[polaroidImg, bannerImg, guestBlueImg, guestYellowImg, botYellowImg], identiconA, identiconB] = await Promise.all([
+  const [[polaroidImg, bannerImg, guestBlueImg, guestYellowImg, botYellowImg], identiconA, identiconB, sponsorImg] = await Promise.all([
     preloadTicketAssets(),
     getIdenticonCanvas(teamA.address),
     getIdenticonCanvas(teamB.address),
+    // This week's paid sponsor banner, or null when there isn't one — see
+    // loadSponsorBanner. Resolves to null rather than rejecting, so it can
+    // never fail a ticket render; BANNER_SRC stays the fallback.
+    loadSponsorBanner(),
   ]);
 
   const canvas = document.createElement('canvas');
@@ -319,7 +324,7 @@ export async function renderTicket({ scoreA, scoreB, teamA, teamB, winner: _winn
   ctx.beginPath();
   ctx.roundRect(BANNER_X, BANNER_Y, BANNER_W, BANNER_H, BANNER_RADIUS);
   ctx.clip();
-  ctx.drawImage(bannerImg, BANNER_X, BANNER_Y, BANNER_W, BANNER_H);
+  ctx.drawImage(sponsorImg || bannerImg, BANNER_X, BANNER_Y, BANNER_W, BANNER_H);
   ctx.restore();
 
   ctx.save();

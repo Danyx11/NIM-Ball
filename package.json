@@ -15,11 +15,9 @@
   "dependencies": {
     "@fontsource/fira-mono": "^5.3.0",
     "@fontsource/mulish": "^5.2.8",
-    "@nimconnect/profile-client": "^1.0.0",
     "@nimiq/hub-api": "^1.14.0",
     "@nimiq/identicons": "^1.6.2",
     "@nimiq/mini-app-sdk": "^0.1.0",
-    "@nimiq/utils": "^0.11.7",
     "@noble/ed25519": "^3.2.0",
     "@noble/hashes": "^2.4.0",
     "jsqr": "^1.4.0",

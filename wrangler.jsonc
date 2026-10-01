@@ -31,6 +31,10 @@
       // NIM win prizes (party/prize.js) — an eighth class, same reasoning
       // again: alongside every binding above, never folded into them.
       { "name": "PrizeVault", "class_name": "PrizeVault" },
+      // @alias claims (party/aliases.js) — a ninth class, replacing the now-
+      // deprecated NimConnect service, same reasoning again: alongside every
+      // binding above, never folded into them.
+      { "name": "AliasRegistry", "class_name": "AliasRegistry" },
     ],
   },
   // new_sqlite_classes (not new_classes) — required for Durable Objects on
@@ -49,6 +53,7 @@
     { "tag": "v5", "new_sqlite_classes": ["TelegramLink"] },
     { "tag": "v6", "new_sqlite_classes": ["Partnership"] },
     { "tag": "v7", "new_sqlite_classes": ["PrizeVault"] },
+    { "tag": "v8", "new_sqlite_classes": ["AliasRegistry"] },
   ],
   // Drives RadarCollector#maybeSendDailyReport (party/radar.js) — a coarse
   // 15-minute tick is enough since that method itself re-checks the current
@@ -65,7 +70,9 @@
   // of this same address. PARTNERSHIP_PAYMENT_ADDRESS below is currently the
   // address used for the supervised real-wallet test (see conversation), NOT
   // the production recipient — replace before this goes live, same caveat
-  // as the frontend's .env.example.
+  // as the frontend's .env.example. party/aliases.js's confirmPayment also
+  // reads this same var as its own payment recipient — one treasury address
+  // for every paid feature in this Worker, not a second var per feature.
   "vars": {
     "NIMIQ_RPC_URL": "https://rpc.nimiqwatch.com",
     "PARTNERSHIP_PAYMENT_ADDRESS": "NQ55 YBJ1 QDMF KHT2 25PJ KVAT YTVD 2JHE RHX7",

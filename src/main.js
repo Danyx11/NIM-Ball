@@ -12,8 +12,8 @@ import '@fontsource/fira-mono/500.css';
 import { startGame, preloadCoreAssets, DEFAULT_IDENTICON_ADDRESS } from './game.js';
 import { preloadTicketAssets, renderTicket } from './ticket.js';
 import { playSingleShot, playReveal } from './weekController.js';
-import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendClaimTransaction, sendNimPayment, getGuestCode } from './nimiq.js';
-import { resolveIdentity, checkHandleAvailable, buildClaimPayload, waitForClaimOutcome, isValidHandle, FAKE_MODE as FAKE_HANDLES } from './nimconnect.js';
+import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendNimPayment, getGuestCode } from './nimiq.js';
+import { resolveIdentity, isValidAlias, reserveAlias, releaseAlias, confirmAliasPayment, FAKE_MODE as FAKE_ALIAS } from './alias.js';
 // Real recipient address (src/partnership.js) — the actual $/week -> NIM
 // quote/price locking now happens server-side (party/partnership.js's
 // reserve(), see conversation), not via that file's own quotePartnership,
@@ -200,7 +200,7 @@ if (IS_MOBILE) document.body.classList.add('mobile-layout');
   // running) stays with #game-card above, same as #overlay/#syncToast — it's
   // gameplay chrome, not a menu screen, so this change doesn't touch it.
   const menuHost = document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'weekMatchDialogOverlay', 'claimHandleOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'partnershipOverlay', 'partnershipBookOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'weekMatchDialogOverlay', 'claimAliasOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'partnershipOverlay', 'partnershipBookOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -709,34 +709,34 @@ let hubAddress = getIdentity()?.address || null;
 function identiconOverride(team) {
   return hubAddress ? { [team]: hubAddress } : {};
 }
-// address -> NimConnect DisplayIdentity | null (fetch in flight) — populated
-// lazily by refreshHandleCache() below, read synchronously here and by
+// address -> { address, alias? } | null (fetch in flight) — populated lazily
+// by refreshAliasCache() below, read synchronously here and by
 // applyIdentityPillState() since neither can await a network round trip.
-// getDisplayIdentity() never rejects to "not found" (see nimconnect.js), so
-// `null` unambiguously means "still fetching", not "resolved, no handle".
-const handleCache = new Map();
-function refreshHandleCache(address) {
-  if (handleCache.has(address)) return;
-  handleCache.set(address, null);
+// resolveIdentity() never rejects to "not found" (see src/alias.js), so
+// `null` unambiguously means "still fetching", not "resolved, no alias".
+const aliasCache = new Map();
+function refreshAliasCache(address) {
+  if (aliasCache.has(address)) return;
+  aliasCache.set(address, null);
   resolveIdentity(address).then((identity) => {
-    handleCache.set(address, identity);
+    aliasCache.set(address, identity);
     syncIdentityPill();
-  }).catch(() => handleCache.delete(address)); // allow a retry on the next render
+  }).catch(() => aliasCache.delete(address)); // allow a retry on the next render
 }
 // Same priority as the sidebar identity pill below (syncIdentityPill): a
-// claimed handle beats everything, "Guest" if that's this device's decided
+// claimed alias beats everything, "Guest" if that's this device's decided
 // identity, otherwise no override at all — game.js falls back to a shortened
 // address on its own in that last case (see its formatAddressShort). Only
 // ever populated for `team`, i.e. whichever side this device's own identity
 // controls (see identiconOverride's own comment above) — the opponent/AI
-// side never gets a label override here. If the handle lookup hasn't
+// side never gets a label override here. If the alias lookup hasn't
 // resolved yet by the time a match actually starts, this just falls through
 // to no override, same as never having claimed one — resolution normally
 // finishes well before "Jouer" is pressed (see applyIdentityPillState).
 function identityLabelOverride(team) {
   if (hubAddress) {
-    const handle = handleCache.get(hubAddress)?.handle;
-    return handle ? { [team]: `@${handle}` } : {};
+    const alias = aliasCache.get(hubAddress)?.alias;
+    return alias ? { [team]: `@${alias}` } : {};
   }
   // "Guest 4821" — see src/ticket.js, which detects this exact "Guest "
   // prefix to swap in the guest hexagon icon instead of an identicon.
@@ -756,7 +756,7 @@ const connectBtnStatus = document.getElementById('connectBtnStatus');
 const connectAvatar = document.getElementById('connectAvatar');
 const connectPillStreak = document.getElementById('pillStreak');
 const connectPillStreakValue = document.getElementById('pillStreakValue');
-// Same pending-then-repaint caching shape as handleCache/refreshHandleCache
+// Same pending-then-repaint caching shape as aliasCache/refreshAliasCache
 // below, keyed off address, feeding the pill's small "streak +N" badge with
 // the same League Beta calendar-day streak renderLeagueMeStats shows in the
 // League panel.
@@ -872,9 +872,9 @@ window.addEventListener('resize', () => navSections.forEach(updateNavScrollPill)
 // address -> "abc…xyz" (first/last 3 chars), the sidebar pill's compact
 // format for the status line (both platforms now — mobile used to keep its
 // own plain `${slice(0,9)}…`/"Connected" pairing here, predating the
-// handle-claim flow below, but that was its own bottom-right CTA pill; now
+// alias-claim flow below, but that was its own bottom-right CTA pill; now
 // that mobile reuses this same in-column sidebar pill, it gets the same
-// handle-claim treatment too).
+// alias-claim treatment too).
 function shortenAddressCompact(address) {
   return address.length <= 8 ? address : `${address.slice(0, 3)}…${address.slice(-3)}`;
 }
@@ -923,8 +923,8 @@ function formatWeekExpiry(m) {
 // or not.
 // During a live match (activeStopGame set) the pill is pure display, never a
 // trigger (see its own click handler below, already gated on this same
-// flag) — so it never shows an actionable "Claim a handle"/"Connect wallet"
-// line then either, just whatever identity is already resolved: the handle
+// flag) — so it never shows an actionable "Claim an alias"/"Connect wallet"
+// line then either, just whatever identity is already resolved: the alias
 // (+ address below it) if one's claimed, otherwise a single line — just the
 // address, or just "Guest" — hiding the other line outright (see style.css's
 // #connectBtnLabel.hidden/.connect-status.hidden) rather than merely
@@ -954,28 +954,28 @@ function applyIdentityPillState() {
   getIdenticonPngDataUrl(hubAddress).then((url) => {
     if (hubAddress) connectAvatar.style.backgroundImage = `url(${url})`;
   });
-  refreshHandleCache(hubAddress);
+  refreshAliasCache(hubAddress);
   refreshStreakCache(hubAddress);
   const streak = streakCache.get(hubAddress);
   connectPillStreak.classList.toggle('hidden', !streak);
   connectBtn.classList.toggle('has-streak', !!streak);
   if (streak) connectPillStreakValue.textContent = `+${streak}`;
-  const handle = handleCache.get(hubAddress)?.handle;
+  const alias = aliasCache.get(hubAddress)?.alias;
   connectBtnStatus.textContent = shortenAddressCompact(hubAddress);
   connectBtnStatus.classList.add('mono');
-  if (handle) {
-    connectBtnLabel.textContent = `@${handle}`;
+  if (alias) {
+    connectBtnLabel.textContent = `@${alias}`;
   } else if (inMatch) {
     connectBtnLabel.textContent = '';
     connectBtnLabel.classList.add('hidden');
   } else {
-    connectBtnLabel.textContent = 'Claim a handle';
+    connectBtnLabel.textContent = 'Claim an alias';
     connectBtnLabel.classList.add('claim-cta');
   }
 }
 // pillInMatch tracks the menu/in-match side of the pill's *last applied*
 // state, separately from every other reason syncIdentityPill() gets called
-// (claiming a handle, connecting/disconnecting, switching mode) — only an
+// (claiming an alias, connecting/disconnecting, switching mode) — only an
 // actual menu <-> match flip should trigger flipConnectText; everything
 // else applies immediately, same as before this animation existed. null on
 // the very first call means "nothing applied yet", so that first paint is
@@ -1032,7 +1032,7 @@ connectBtn.addEventListener('click', () => {
   isFirstConnectGate = false; // a manual reconnect, not the true first one — see revealAfterGates
   showConnectGate();
 });
-// "Claim a handle" CTA (desktop only, see syncIdentityPill above — the label
+// "Claim an alias" CTA (desktop only, see syncIdentityPill above — the label
 // never gets the .claim-cta class on mobile, so this never fires there):
 // stopPropagation so it doesn't also trigger #connectBtn's own
 // disconnect-and-reopen-the-gate click above. Reuses the same
@@ -1046,40 +1046,48 @@ connectBtnLabel.addEventListener('click', (e) => {
   e.stopPropagation();
   if (activeStopGame) return;
   audio.play('button');
-  openClaimHandleDialog();
+  openClaimAliasDialog();
 });
-// Real on-chain claim, in steps: form (validate + let the player retype) ->
-// checking (resolveHandle, is it actually free right now) -> pending (build
-// the payload, sign+send via whichever wallet is live, then poll the
-// registry until it resolves) -> confirmed / raceLost (someone else's claim
-// landed first) / timeout / error. `?fakeHandles` (see nimconnect.js) swaps
-// checkHandleAvailable/waitForClaimOutcome for in-memory fakes and this skips
-// sendClaimTransaction entirely, so no wallet popup ever opens in fake mode.
+// Paid claim against party/aliases.js (100 NIM flat, see CLAUDE.md's "Alias
+// registry" — this replaced the deprecated NimConnect service, which used to
+// be a free on-chain claim verified by a third party), in steps: form
+// (validate + let the player retype) -> reserving (reserveAlias locks the
+// name to this wallet server-side — IS the availability check, same as
+// party/partnership.js's own reserve()) -> taken / reserveFailed, or
+// confirmPay (show the price) -> paying (sendNimPayment, a real transfer,
+// not the old value:0 claim) -> confirming (confirmAliasPayment verifies the
+// tx on-chain) -> confirmed / confirmFailed (still-confirming vs. a real
+// failure — "Check again" on the still-confirming branch re-polls the SAME
+// paymentTx via 'confirming' rather than looping back through 'paying',
+// which would otherwise risk sending a second real payment) / payError.
+// `?fakeAlias` (see src/alias.js) swaps reserveAlias/confirmAliasPayment for
+// in-memory fakes and this skips sendNimPayment entirely, so no wallet popup
+// ever opens in fake mode.
 //
-// Its own #claimHandleOverlay/.config-panel (index.html), not #overlay/
+// Its own #claimAliasOverlay/.config-panel (index.html), not #overlay/
 // showLobby() — #overlay lives inside #game-card, which desktop's menuHost
 // move (above) deliberately keeps behind #menuStage (see #menuStage's own
 // comment in style.css), so it can never paint over #modeOverlay's still-
 // visible arena backdrop no matter what we do to #overlay/#modeOverlay's own
-// classes. #claimHandleOverlay joins the #menuStage set instead (same as
+// classes. #claimAliasOverlay joins the #menuStage set instead (same as
 // Classic/Custom/"Join with a code"), so it naturally stacks above the menu
 // art. .config-lobby-content (index.html) already gives it the flex column +
 // gap + centering every other menu panel's content gets, and mode-connect
 // the same Nimiq-Blue "wallet/identity" tint #connectGateOverlay uses.
-const claimHandleOverlay = document.getElementById('claimHandleOverlay');
-const claimHandleContent = document.getElementById('claimHandleContent');
+const claimAliasOverlay = document.getElementById('claimAliasOverlay');
+const claimAliasContent = document.getElementById('claimAliasContent');
 function showClaimLobby(html) {
-  claimHandleContent.innerHTML = html;
-  claimHandleOverlay.classList.remove('hidden');
+  claimAliasContent.innerHTML = html;
+  claimAliasOverlay.classList.remove('hidden');
   modeDrawer.classList.add('hidden'); // tile grid stays unclickable underneath
 }
 function closeClaimDialog() {
-  claimHandleOverlay.classList.add('hidden');
+  claimAliasOverlay.classList.add('hidden');
   modeDrawer.classList.remove('hidden');
 }
-function openClaimHandleDialog() {
+function openClaimAliasDialog() {
   if (!hubAddress) return;
-  // "Claim a handle" is reachable from the identity pill's own label from
+  // "Claim an alias" is reachable from the identity pill's own label from
   // ANY menu screen (About/Nimiq/League/Partnership/How to play/…), not
   // just the tile grid — showClaimLobby only ever hid modeDrawer, so
   // whichever of those was open stayed showing underneath (same stuck-panel
@@ -1090,104 +1098,139 @@ function openClaimHandleDialog() {
 function renderClaimStep(step, ctx) {
   if (step === 'form') {
     showClaimLobby(`
-      <h2>Claim a handle</h2>
-      <p>Choisis un nom public pour ${shortenAddressCompact(hubAddress)}. Une fois confirmé sur la chaîne, il est permanent.</p>
-      <input type="text" id="handleInput" maxlength="31" placeholder="ton_handle" value="${ctx.value}">
+      <h2>Claim an alias</h2>
+      <p>Choose a public name for ${shortenAddressCompact(hubAddress)}. 100 NIM, permanent once confirmed.</p>
+      <input type="text" id="aliasInput" maxlength="31" placeholder="your_alias" value="${ctx.value}">
       ${ctx.error ? `<p class="lan-error">${ctx.error}</p>` : ''}
       <div style="display:flex; gap:12px;">
-        <button class="bigbtn" id="handleConfirmBtn">Claim</button>
-        <button class="bigbtn" id="handleCancelBtn">Cancel</button>
+        <button class="bigbtn" id="aliasConfirmBtn">Claim</button>
+        <button class="bigbtn" id="aliasCancelBtn">Cancel</button>
       </div>
     `);
-    const handleInput = document.getElementById('handleInput');
-    handleInput.focus();
+    const aliasInput = document.getElementById('aliasInput');
+    aliasInput.focus();
     // Return just dismisses the on-screen keyboard — it doesn't submit the claim.
-    handleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleInput.blur(); } });
-    document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
-    document.getElementById('handleConfirmBtn').onclick = () => {
-      const value = handleInput.value.trim().toLowerCase();
-      if (!isValidHandle(value)) {
-        renderClaimStep('form', { value, error: '3-31 caractères, a-z 0-9 _ uniquement' });
+    aliasInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); aliasInput.blur(); } });
+    document.getElementById('aliasCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    document.getElementById('aliasConfirmBtn').onclick = () => {
+      const value = aliasInput.value.trim().toLowerCase();
+      if (!isValidAlias(value)) {
+        renderClaimStep('form', { value, error: '3-31 characters, a-z 0-9 _ only' });
         return;
       }
       audio.play('button');
-      renderClaimStep('checking', { value });
+      renderClaimStep('reserving', { value });
     };
     return;
   }
-  if (step === 'checking') {
-    showClaimLobby(`<h2>Vérification…</h2><p>On vérifie que personne n'a déjà @${ctx.value}.</p>`);
-    checkHandleAvailable(ctx.value)
-      .then((available) => renderClaimStep(available ? 'pending' : 'taken', ctx))
-      .catch(() => renderClaimStep('error', ctx));
+  if (step === 'reserving') {
+    showClaimLobby(`<h2>Checking…</h2><p>Making sure nobody already has @${ctx.value}.</p>`);
+    reserveAlias(ctx.value, hubAddress).then((res) => {
+      if (!res.ok) {
+        renderClaimStep(res.error === 'already taken' ? 'taken' : 'reserveFailed', { ...ctx, error: res.error });
+        return;
+      }
+      renderClaimStep('confirmPay', { value: ctx.value, amountLuna: res.amountLuna });
+    }).catch(() => renderClaimStep('reserveFailed', { ...ctx, error: 'network error' }));
     return;
   }
   if (step === 'taken') {
     showClaimLobby(`
-      <h2>Handle déjà pris</h2>
-      <p>@${ctx.value} est déjà réclamé par quelqu'un d'autre. Essaie un autre nom.</p>
+      <h2>Alias already taken</h2>
+      <p>@${ctx.value} is already claimed by someone else. Try another name.</p>
       <div style="display:flex; gap:12px;">
-        <button class="bigbtn" id="handleRetryBtn">Réessayer</button>
-        <button class="bigbtn" id="handleCancelBtn">Annuler</button>
+        <button class="bigbtn" id="aliasRetryBtn">Try again</button>
+        <button class="bigbtn" id="aliasCancelBtn">Cancel</button>
       </div>
     `);
-    document.getElementById('handleRetryBtn').onclick = () => renderClaimStep('form', { value: ctx.value });
-    document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    document.getElementById('aliasRetryBtn').onclick = () => renderClaimStep('form', { value: ctx.value });
+    document.getElementById('aliasCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
     return;
   }
-  if (step === 'pending') {
-    showClaimLobby(`<h2>Confirme dans ton wallet</h2><p>Une transaction vers le registre partagé s'ouvre dans ton wallet. Valeur 0, juste les frais réseau.</p>`);
-    const payload = buildClaimPayload(ctx.value);
-    (FAKE_HANDLES ? Promise.resolve() : sendClaimTransaction(payload))
-      .then(() => waitForClaimOutcome(ctx.value, hubAddress))
-      .then((outcome) => renderClaimStep(outcome, ctx))
-      .catch(() => renderClaimStep('error', ctx));
+  if (step === 'reserveFailed') {
+    showClaimLobby(`
+      <h2>Couldn't reserve</h2>
+      <p>${escapeHtml(typeof ctx.error === 'string' ? ctx.error : 'Unknown error.')}</p>
+      <div style="display:flex; gap:12px;">
+        <button class="bigbtn" id="aliasRetryBtn">Try again</button>
+        <button class="bigbtn" id="aliasCancelBtn">Cancel</button>
+      </div>
+    `);
+    document.getElementById('aliasRetryBtn').onclick = () => renderClaimStep('form', { value: ctx.value || '' });
+    document.getElementById('aliasCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    return;
+  }
+  if (step === 'confirmPay') {
+    const amountNim = (ctx.amountLuna / 1e5).toFixed(2);
+    showClaimLobby(`
+      <h2>@${ctx.value}</h2>
+      <p class="partnership-price">${amountNim} NIM</p>
+      <div style="display:flex; gap:12px;">
+        <button class="bigbtn" id="aliasPayNowBtn">Pay in wallet</button>
+        <button class="bigbtn" id="aliasCancelPayBtn">Cancel</button>
+      </div>
+    `);
+    document.getElementById('aliasCancelPayBtn').onclick = () => {
+      audio.play('button');
+      releaseAlias(ctx.value, hubAddress);
+      closeClaimDialog();
+    };
+    document.getElementById('aliasPayNowBtn').onclick = () => {
+      audio.play('button');
+      renderClaimStep('paying', ctx);
+      (FAKE_ALIAS ? Promise.resolve({ hash: 'fake-tx' }) : sendNimPayment({ recipient: PARTNERSHIP_PAYMENT_ADDRESS, valueLuna: ctx.amountLuna }))
+        .then((tx) => renderClaimStep('confirming', { ...ctx, paymentTx: tx.hash }))
+        .catch((err) => renderClaimStep(err.cancelled ? 'confirmPay' : 'payError', { ...ctx, message: err.message }));
+    };
+    return;
+  }
+  if (step === 'paying') {
+    showClaimLobby(`<h2>Confirm in your wallet</h2><p>A payment request opens in your wallet.</p>`);
+    return;
+  }
+  if (step === 'confirming') {
+    showClaimLobby(`<p>Confirming with the server…</p>`);
+    confirmAliasPayment({ alias: ctx.value, wallet: hubAddress, paymentTx: ctx.paymentTx }).then((res) => {
+      if (res.ok) { renderClaimStep('confirmed', ctx); return; }
+      renderClaimStep('confirmFailed', { ...ctx, error: res.error, confirmations: res.confirmations, required: res.required });
+    }).catch(() => renderClaimStep('confirmFailed', { ...ctx, error: 'network error' }));
     return;
   }
   if (step === 'confirmed') {
-    handleCache.set(hubAddress, { address: hubAddress, handle: ctx.value });
+    aliasCache.set(hubAddress, { address: hubAddress, alias: ctx.value });
     syncIdentityPill();
     showClaimLobby(`
-      <h2>Handle confirmé ✓</h2>
-      <p>@${ctx.value} est maintenant à toi, visible dans NIM-Ball, NimFeed et Nimiq Pay.</p>
-      <button class="bigbtn" id="handleDoneBtn">Fermer</button>
+      <h2>Alias confirmed ✓</h2>
+      <p>@${ctx.value} is now yours, visible everywhere in NimiCurl.</p>
+      <button class="bigbtn" id="aliasDoneBtn">Close</button>
     `);
-    document.getElementById('handleDoneBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    document.getElementById('aliasDoneBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
     return;
   }
-  if (step === 'raceLost') {
+  if (step === 'confirmFailed') {
+    const waitingOnChain = ctx.error === 'pending';
     showClaimLobby(`
-      <h2>Handle perdu de justesse</h2>
-      <p>Quelqu'un d'autre a réclamé @${ctx.value} dans un bloc antérieur pendant ta confirmation. Essaie un autre nom.</p>
-      <div style="display:flex; gap:12px;">
-        <button class="bigbtn" id="handleRetryBtn">Réessayer</button>
-        <button class="bigbtn" id="handleCancelBtn">Annuler</button>
-      </div>
+      <h2>${waitingOnChain ? 'Waiting for confirmations' : "Couldn't confirm"}</h2>
+      <p>${waitingOnChain ? `${ctx.confirmations}/${ctx.required} confirmations so far — try again in a bit.` : escapeHtml(typeof ctx.error === 'string' ? ctx.error : 'Unknown error.')}</p>
+      <button class="bigbtn" id="aliasRetryConfirmBtn">Check again</button>
     `);
-    document.getElementById('handleRetryBtn').onclick = () => renderClaimStep('form', { value: '' });
-    document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    // On the still-confirming branch this re-polls the SAME already-broadcast
+    // paymentTx (step 'confirming') — never back through 'paying', which
+    // would send an entirely new real transaction for an alias that's
+    // already been paid for once.
+    document.getElementById('aliasRetryConfirmBtn').onclick = () => {
+      audio.play('button');
+      renderClaimStep(waitingOnChain ? 'confirming' : 'confirmPay', ctx);
+    };
     return;
   }
-  if (step === 'timeout') {
+  if (step === 'payError') {
     showClaimLobby(`
-      <h2>Toujours en attente</h2>
-      <p>La transaction n'est pas encore confirmée sur la chaîne. Tu peux fermer et revenir plus tard — la pill se mettra à jour dès que c'est prêt.</p>
-      <button class="bigbtn" id="handleCloseBtn">Fermer</button>
+      <h2>Payment error</h2>
+      <p>${escapeHtml(ctx.message || 'Unknown error.')}</p>
+      <button class="bigbtn" id="aliasRetryBtn">Try again</button>
     `);
-    document.getElementById('handleCloseBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
-    return;
-  }
-  if (step === 'error') {
-    showClaimLobby(`
-      <h2>Échec</h2>
-      <p>La transaction n'a pas pu être envoyée. Réessaie.</p>
-      <div style="display:flex; gap:12px;">
-        <button class="bigbtn" id="handleRetryBtn">Réessayer</button>
-        <button class="bigbtn" id="handleCancelBtn">Annuler</button>
-      </div>
-    `);
-    document.getElementById('handleRetryBtn').onclick = () => renderClaimStep('form', { value: ctx.value || '' });
-    document.getElementById('handleCancelBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+    document.getElementById('aliasRetryBtn').onclick = () => renderClaimStep('confirmPay', ctx);
   }
 }
 
@@ -2814,9 +2857,9 @@ const leagueRulesBtn = document.getElementById('leagueRulesBtn');
 const leagueRulesOverlay = document.getElementById('leagueRulesOverlay');
 const leagueRulesBackBtn = document.getElementById('leagueRulesBackBtn');
 // row: { rank, address, lp, matches, wins, losses, streak } from
-// party/leagueSeason.js's onRequest — no handle/name field, just the raw
+// party/leagueSeason.js's onRequest — no alias/name field, just the raw
 // wallet address, so display name resolution reuses this file's existing
-// handleCache/refreshHandleCache helpers (same as the identity pill above)
+// aliasCache/refreshAliasCache helpers (same as the identity pill above)
 // rather than a new resolution path. "me" highlighting compares against
 // hubAddress, normalized the same way src/net.js already normalizes every
 // address before it's ever stored server-side (Nimiq's user-friendly
@@ -2840,9 +2883,9 @@ function renderLeagueRankPill(el, rows, emptyText) {
   }
   const myAddress = hubAddress ? normalizeAddress(hubAddress) : null;
   el.innerHTML = rows.map((row) => {
-    const cached = handleCache.get(row.address);
-    const label = cached?.handle ? `@${cached.handle}` : shortenLeagueAddress(row.address);
-    const isAddr = !cached?.handle;
+    const cached = aliasCache.get(row.address);
+    const label = cached?.alias ? `@${cached.alias}` : shortenLeagueAddress(row.address);
+    const isAddr = !cached?.alias;
     const isMe = !!myAddress && row.address === myAddress;
     return `<div class="league-rank-row${isMe ? ' me' : ''}">
       <span class="league-rank-num">${row.rank}</span>
@@ -2854,16 +2897,16 @@ function renderLeagueRankPill(el, rows, emptyText) {
   el.querySelectorAll('.league-rank-avatar[data-address]').forEach((avatarEl) => {
     getIdenticonPngDataUrl(avatarEl.dataset.address).then((url) => { avatarEl.style.backgroundImage = `url(${url})`; });
   });
-  // Kick off (or reuse an in-flight/already-cached) handle resolution for
+  // Kick off (or reuse an in-flight/already-cached) alias resolution for
   // every row, fire-and-forget same as every other call site of this
-  // shared helper — then one short-delayed repaint so a handle that
+  // shared helper — then one short-delayed repaint so an alias that
   // resolves quickly still pops in, without blocking this pill's own first
   // paint on the network round trip. Not a polling loop: if some entries
   // are still unresolved after this single repaint, that repaint's own
   // pending check schedules one more, so it naturally settles once
   // everything's in cache instead of running forever.
-  rows.forEach((row) => refreshHandleCache(row.address));
-  const stillPending = rows.some((row) => !handleCache.get(row.address));
+  rows.forEach((row) => refreshAliasCache(row.address));
+  const stillPending = rows.some((row) => !aliasCache.get(row.address));
   if (stillPending) setTimeout(() => renderLeagueRankPill(el, rows, emptyText), 700);
 }
 // Mobile-only (index.html's .league-rank-col--mobile): one shared pill fed
@@ -2927,7 +2970,7 @@ let rankTickerRows = [];
 // CLAUDE.md's "Production remote backend" — that needs `npm run wrangler:dev`
 // separately), so fetchLeagueLeaderboard always comes back empty in the most
 // common local dev setup. DEV-only placeholder rows (stripped from prod
-// builds — see the `?fakeHandles` precedent in nimconnect.js) so the ticker
+// builds — see the `?fakeAlias` precedent in src/alias.js) so the ticker
 // is actually visible/scrollable while iterating on it locally, instead of
 // looking broken/empty every time.
 const DEV_FAKE_TICKER_ROWS = import.meta.env.DEV ? Array.from({ length: 11 }, (_, i) => ({
@@ -2935,17 +2978,17 @@ const DEV_FAKE_TICKER_ROWS = import.meta.env.DEV ? Array.from({ length: 11 }, (_
   address: `NQ${(1000 + i * 37).toString(36).toUpperCase().padEnd(32, 'X')}`,
   lp: 500 - i * 20,
 })) : [];
-// Paints (and, once per unresolved handle, repaints) the ticker's row list —
-// same handleCache/refreshHandleCache "show @handle once resolved, address
+// Paints (and, once per unresolved alias, repaints) the ticker's row list —
+// same aliasCache/refreshAliasCache "show @alias once resolved, address
 // until then" convention as renderLeagueRankPill above, so a player who's
-// claimed a handle reads the same way here as on the League screen itself.
+// claimed an alias reads the same way here as on the League screen itself.
 // Doesn't touch track.style.animationDuration or its animationiteration
 // listener (set once by the caller) — only ever replaces the row markup, so a
 // mid-scroll repaint doesn't restart the loop or double up the pause handler.
 function paintRankTicker(track, rows) {
   const itemsHtml = rows.map((row) => {
-    const cached = handleCache.get(row.address);
-    const label = cached?.handle ? `@${cached.handle}` : shortenLeagueAddress(row.address);
+    const cached = aliasCache.get(row.address);
+    const label = cached?.alias ? `@${cached.alias}` : shortenLeagueAddress(row.address);
     return `
       <span class="mode-rank-item" data-address="${row.address}">
         <span class="mode-rank-item-num">${row.rank}</span>
@@ -2958,8 +3001,8 @@ function paintRankTicker(track, rows) {
   track.querySelectorAll('.mode-rank-item-avatar[data-address]').forEach((avatarEl) => {
     getIdenticonPngDataUrl(avatarEl.dataset.address).then((url) => { avatarEl.style.backgroundImage = `url(${url})`; });
   });
-  rows.forEach((row) => refreshHandleCache(row.address));
-  const stillPending = rows.some((row) => !handleCache.get(row.address));
+  rows.forEach((row) => refreshAliasCache(row.address));
+  const stillPending = rows.some((row) => !aliasCache.get(row.address));
   if (stillPending) setTimeout(() => paintRankTicker(track, rows), 700);
 }
 function initHomeRankingTicker() {
@@ -3002,8 +3045,8 @@ async function onRankTickerLap() {
   if ((rank == null || lp === undefined) && import.meta.env.DEV) { rank = 47; lp = 260; }
   if (rank == null || lp === undefined) return; // no completed matches yet
   const avatarUrl = await getIdenticonPngDataUrl(myAddress);
-  refreshHandleCache(myAddress); // fire-and-forget — best-effort for next time, this 5s overlay isn't worth a repaint-retry loop
-  const label = handleCache.get(myAddress)?.handle ? `@${handleCache.get(myAddress).handle}` : shortenLeagueAddress(myAddress);
+  refreshAliasCache(myAddress); // fire-and-forget — best-effort for next time, this 5s overlay isn't worth a repaint-retry loop
+  const label = aliasCache.get(myAddress)?.alias ? `@${aliasCache.get(myAddress).alias}` : shortenLeagueAddress(myAddress);
   meEl.innerHTML = `
     <span>Your ranking:</span>
     <span class="mode-rank-item-num">${rank}</span>
@@ -3729,9 +3772,19 @@ const SHARE_TAUNTS = [
   "I'm ready. Are you? Challenge me on www.nimicurl.com",
   'Come and try to take me down! www.nimicurl.com',
 ];
+// Nimiq Pay's own deep link (nimiq.dev/mini-apps#sharing-your-mini-app):
+// tapping it on a phone opens Nimiq Pay, goes through wallet auth, then loads
+// this page inside its mini-app browser with `?code=` already in the query
+// string — which the ?code= magic link above (see its own comment) picks up
+// and joins automatically. On desktop it currently just opens nimpay.app
+// itself rather than nimicurl.com directly (that site's own catalog/fallback
+// behavior, not something to route around here) — a known gap, not a bug.
+function buildShareLink(code) {
+  return `https://nimpay.app/miniapps/open/nimicurl.com?code=${code}`;
+}
 function buildShareText(code) {
   const taunt = SHARE_TAUNTS[Math.floor(Math.random() * SHARE_TAUNTS.length)];
-  return `${taunt}\nCODE: ${code}`;
+  return `${taunt}\nCODE: ${code}\n${buildShareLink(code)}`;
 }
 
 // Icon reflects what the button actually does on this device (see
@@ -4093,13 +4146,13 @@ async function showWeekMatchTicket(week) {
   const labelOverride = identityLabelOverride(myTeam);
   const teams = { A: { address: DEFAULT_IDENTICON_ADDRESS.A }, B: { address: DEFAULT_IDENTICON_ADDRESS.B } };
   teams[myTeam] = { address: addressOverride[myTeam] || DEFAULT_IDENTICON_ADDRESS[myTeam], label: labelOverride[myTeam] };
-  // The opponent's real identicon/address/handle (see conversation) — WEEK
+  // The opponent's real identicon/address/alias (see conversation) — WEEK
   // always knows this (week.opponentAddress, a connected wallet on both
   // sides unconditionally — no guest mode at all, see party/weekArbiter.js's
   // own header comment), unlike LIVE where it has to arrive over the wire
   // (see game.js's own showVictory for that version of this same fix).
   // Best-effort: resolveIdentity never rejects to "not found" (see
-  // nimconnect.js), so a missing handle just falls through to ticket.js's
+  // src/alias.js), so a missing alias just falls through to ticket.js's
   // own shortened-address fallback.
   if (week.opponentAddress) {
     teams[oppTeam] = { address: week.opponentAddress };
@@ -4107,7 +4160,7 @@ async function showWeekMatchTicket(week) {
       // Bounded (same as game.js's showVictory): a stalled lookup must never
       // keep the ticket from appearing.
       const identity = await Promise.race([resolveIdentity(week.opponentAddress), new Promise((resolve) => setTimeout(resolve, 3000))]);
-      if (identity?.handle) teams[oppTeam].label = `@${identity.handle}`;
+      if (identity?.alias) teams[oppTeam].label = `@${identity.alias}`;
     } catch { /* best-effort — ticket falls back to the shortened address */ }
   }
   const ticketCanvas = await renderTicket({

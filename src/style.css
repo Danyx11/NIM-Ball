@@ -515,7 +515,7 @@ html, body {
   -webkit-backface-visibility: hidden;
 }
 /* In-match, whichever line doesn't apply (see main.js's syncIdentityPill —
-   "Connect wallet"/"Claim a handle" never show once a match is running,
+   "Connect wallet"/"Claim an alias" never show once a match is running,
    just whatever identity is already resolved) is hidden outright rather
    than just emptied, so .connect-text shrinks to a single line — already
    centered against the avatar's full height for free via .nq-connect-btn's
@@ -524,11 +524,11 @@ html, body {
    transition now — this swap always happens while .connect-text is edge-on
    mid-flip, so it's invisible regardless. */
 #connectBtnLabel.hidden, .connect-status.hidden { display: none; }
-/* Top line: "Guest", the claimed handle, or (all:unset resets its <button>
-   chrome away, see index.html) the "Claim a handle" CTA — Mulish always,
+/* Top line: "Guest", the claimed alias, or (all:unset resets its <button>
+   chrome away, see index.html) the "Claim an alias" CTA — Mulish always,
    since none of those three are raw chain data. Nimiq Gold (.claim-cta,
    var(--accent)) is reserved for exactly that one CTA state, per the "gold =
-   one primary action" rule — a claimed handle goes back to plain Nimiq Blue,
+   one primary action" rule — a claimed alias goes back to plain Nimiq Blue,
    same weight as "Guest". */
 #connectBtnLabel {
   all: unset;
@@ -559,7 +559,7 @@ html, body {
 /* League Beta streak badge — pinned to the pill's own top-right corner via
    absolute positioning (see .nq-connect-btn's position:relative above),
    out of the avatar/label/status flex flow entirely so it never crushes
-   "Claim a handle"/the handle itself on the narrower mobile pill (see
+   "Claim an alias"/the alias itself on the narrower mobile pill (see
    main.js's refreshStreakCache). Two stacked lines, both tiny: "streak"
    then "+N" centered below it. Same on desktop and mobile —
    .nq-connect-btn.has-streak's own padding-right (below) reserves the room
@@ -685,7 +685,7 @@ html, body {
 }
 .mobile-layout .nav-scroll-pill.visible { opacity: 1; }
 /* Identity pill: inherits the desktop white-card look as-is (avatar + real
-   handle/address, see main.js's syncIdentityPill() — no more mobile-only
+   alias/address, see main.js's syncIdentityPill() — no more mobile-only
    branch stripping that down to a bare address) rather than restoring the
    old bottom-right CTA pill this replaces. Its bottom-pinning margin-top:auto
    is the base .nq-connect-btn rule now (see conversation), same on both
@@ -999,7 +999,7 @@ html, body {
 .howto-rock-target { position: fixed; pointer-events: none; }
 /* The one real button in the whole overlay (see index.html's own comment on
    it) — Nimiq Gold, same accent already used for other CTAs (e.g. the
-   "Claim a handle" pill), so it reads as the one thing here worth tapping.
+   "Claim an alias" pill), so it reads as the one thing here worth tapping.
    Shared by both of the tutorial's un-gated info steps (label itself is set
    in JS per step — "Got it?"/"Ready", see howToRenderTile). Scaled down
    further still, per explicit feedback — matches #howToTileText's own
@@ -2002,11 +2002,11 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* Same translucent-white treatment, mode-connect's own Nimiq Light Blue
    (see .config-panel.mode-connect above) needs it same as every other tint
    here — solid gold .bigbtn reads fine nowhere on this panel family. */
-#claimHandleOverlay .bigbtn {
+#claimAliasOverlay .bigbtn {
   background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18); color: #fff;
   transition: background .15s ease, border-color .15s ease;
 }
-#claimHandleOverlay .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
+#claimAliasOverlay .bigbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.35); }
 /* Partnership panels (#partnershipOverlay/#partnershipBookOverlay) — the
    same large white .league-panel shell League uses (see that rule for the
    surface/padding/quit-icon retint), so everything below only adds what

@@ -469,6 +469,48 @@ export function partnershipBannerUrl(weekId) {
   return `${weekHttpHost()}/parties/partnership/${PARTNERSHIP_ROOM_NAME}?banner=${encodeURIComponent(weekId)}`;
 }
 
+// Alias registry (party/aliases.js) — single fixed room, same weekHttpHost()
+// plain-fetch shape as Partnership/League above. src/alias.js is the thin
+// domain wrapper main.js's claim dialog actually drives; these are the raw
+// HTTP calls underneath it.
+const ALIAS_ROOM_NAME = 'v1'; // must match party/aliases.js's own ALIAS_ROOM_NAME
+
+// Best-effort like fetchLeagueStats — resolves to { alias: null } on any
+// failure so a missing/offline alias lookup degrades to "no alias" rather
+// than throwing (every call site already treats null the same as "never
+// claimed one").
+export async function fetchAliasForWallet(wallet) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/alias-registry/${ALIAS_ROOM_NAME}?wallet=${encodeURIComponent(wallet)}`);
+    if (!res.ok) return { alias: null };
+    return await res.json();
+  } catch {
+    return { alias: null };
+  }
+}
+
+async function postAliasRegistry(action, body) {
+  try {
+    const res = await fetch(`${weekHttpHost()}/parties/alias-registry/${ALIAS_ROOM_NAME}?action=${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return await res.json();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+export function reserveAlias(alias, wallet) { return postAliasRegistry('reserve', { alias, wallet }); }
+export function releaseAlias(alias, wallet) { return postAliasRegistry('release', { alias, wallet }); }
+// No amount is sent here either — party/aliases.js's confirmPayment checks
+// the real on-chain value against its own fixed ALIAS_PRICE_LUNA, never a
+// client-reported number.
+export function confirmAliasPayment({ alias, wallet, paymentTx }) {
+  return postAliasRegistry('confirm', { alias, wallet, paymentTx });
+}
+
 // ---------------------------------------------------------------------
 // WEEK turn-notification linking (party/telegramLink.js, party/playerIndex.js,
 // see CLAUDE.md's WEEK Telegram section) — the Notifications panel behind My
