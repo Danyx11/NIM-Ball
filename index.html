@@ -194,7 +194,7 @@
          in style.css); the desktop pill leads with the identicon avatar
          instead (.connect-avatar, filled in by main.js's syncIdentityPill()).
          A plain div (not <button>), since it now nests a real, separately
-         clickable <button> (#connectBtnLabel, the "Claim a handle" CTA) —
+         clickable <button> (#connectBtnLabel, the "Claim an alias" CTA) —
          two nested <button>s isn't valid HTML. role="button"/tabindex mirror
          #homeOverlay's own div-as-button pattern elsewhere in this file. -->
     <div id="connectBtn" class="nq-connect-btn" role="button" tabindex="0">
@@ -203,9 +203,9 @@
         <svg class="connect-avatar-default" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 19.2a6.5 6.5 0 0 1 13 0"/></svg>
       </span>
       <span class="connect-text">
-        <!-- Guest: "Guest". Connected, no handle claimed: "Claim a handle"
+        <!-- Guest: "Guest". Connected, no alias claimed: "Claim an alias"
              (gold CTA, .claim-cta — see main.js's syncIdentityPill()).
-             Connected, handle claimed: the handle itself, plain text. -->
+             Connected, alias claimed: the alias itself, plain text. -->
         <button type="button" id="connectBtnLabel">Connecter</button>
         <span class="connect-status" id="connectBtnStatus"></span>
       </span>
@@ -1150,7 +1150,7 @@
     <div id="weekMatchDialogOverlay" class="config-panel mode-joincode week-match-dialog hidden">
       <div id="weekMatchDialogContent" class="config-lobby-content"></div>
     </div>
-    <!-- "Claim a handle" (see main.js's openClaimHandleDialog/renderClaimStep,
+    <!-- "Claim an alias" (see main.js's openClaimAliasDialog/renderClaimStep,
          reached from the sidebar identity pill, never a mode tile — no back
          arrow/mode icon needed, every step already has its own Cancel/Fermer
          button). Its own .config-panel/#menuStage element rather than
@@ -1160,8 +1160,8 @@
          paint over #modeOverlay's still-visible arena backdrop — this panel
          needs to, so it joins the #menuStage set instead. mode-connect: the
          same "wallet/identity" tint #connectGateOverlay's own panel uses. -->
-    <div id="claimHandleOverlay" class="config-panel mode-connect hidden">
-      <div id="claimHandleContent" class="config-lobby-content"></div>
+    <div id="claimAliasOverlay" class="config-panel mode-connect hidden">
+      <div id="claimAliasContent" class="config-lobby-content"></div>
     </div>
     <!-- "How to?" hub (see conversation — #helpBtn opens this, the sole
          entry point now that the sidebar's own "How to" nav item is gone)
@@ -1350,7 +1350,7 @@
     <!-- Partnership week picker (index.html's #partnershipOverlay "Book a
          week" button, wired in main.js) — same white League shell. Content
          filled dynamically by main.js's renderPartnershipBook(), same
-         swap-innerHTML-per-step convention as #claimHandleContent. -->
+         swap-innerHTML-per-step convention as #claimAliasContent. -->
     <div id="partnershipBookOverlay" class="config-panel league-panel partnership-panel hidden">
       <button class="config-back" id="partnershipBookBackBtn" type="button" aria-label="Back">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>

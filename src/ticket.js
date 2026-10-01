@@ -89,8 +89,8 @@ function formatDuration(ms) {
 }
 
 // team.label is identityLabelOverride()'s output (see main.js): undefined
-// (no override — fall back to the raw address), "@handle" (a claimed
-// NimConnect handle), or "Guest 4821" (this device's guest code). Only ever
+// (no override — fall back to the raw address), "@alias" (a claimed
+// alias, see src/alias.js), or "Guest 4821" (this device's guest code). Only ever
 // populated for whichever team this device's own identity controls — the
 // opponent/AI side normally has no label, same as today. team.isAI is set
 // explicitly by game.js's showVictory() (team === aiTeam), since vs-AI is
