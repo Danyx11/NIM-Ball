@@ -355,10 +355,7 @@ export class AliasRegistry extends Server {
   //   GET  ?wallet=<address>                       -> { alias: string|null }
   //   POST ?action=reserve  {alias, wallet}         -> reserve()
   //   POST ?action=release  {alias, wallet}         -> release()
-  //   POST ?action=confirm  {alias, paymentTx} -> confirmPayment() (the
-  //                         client still sends `wallet` too, kept for the
-  //                         request shape's own clarity; confirmPayment()
-  //                         itself ignores it, see that method's own comment)
+  //   POST ?action=confirm  {alias, wallet, paymentTx} -> confirmPayment()
   async onRequest(request) {
     await this.ready();
     const cors = { 'Access-Control-Allow-Origin': '*' };
