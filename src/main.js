@@ -1049,7 +1049,7 @@ connectBtnLabel.addEventListener('click', (e) => {
   audio.play('button');
   openClaimAliasDialog();
 });
-// Paid claim against party/aliases.js (100 NIM flat, see CLAUDE.md's "Alias
+// Paid claim against party/aliases.js (30 NIM flat, see CLAUDE.md's "Alias
 // registry" — this replaced the deprecated NimConnect service, which used to
 // be a free on-chain claim verified by a third party), in steps: form
 // (validate + let the player retype) -> reserving (reserveAlias locks the
@@ -1100,7 +1100,7 @@ function renderClaimStep(step, ctx) {
   if (step === 'form') {
     showClaimLobby(`
       <h2>Claim an alias</h2>
-      <p>Choose a public name for ${shortenAddressCompact(hubAddress)}. 100 NIM, permanent once confirmed.</p>
+      <p>Choose a public name for ${shortenAddressCompact(hubAddress)}. 30 NIM, permanent once confirmed.</p>
       <input type="text" id="aliasInput" maxlength="31" placeholder="your_alias" value="${ctx.value}">
       ${ctx.error ? `<p class="lan-error">${ctx.error}</p>` : ''}
       <div style="display:flex; gap:12px;">
