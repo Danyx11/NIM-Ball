@@ -35,6 +35,8 @@ const PRIZE_AMOUNT_LUNA = PRIZE_AMOUNT_NIM * LUNA_PER_NIM;
 const DAILY_BUDGET_LUNA = 1000 * LUNA_PER_NIM;
 const MAX_WALLET_PAYOUTS_PER_DAY = 3;
 const PAIR_COOLDOWN_MS = 7 * DAY_MS;
+// Anti-farming (A2 — see evaluate()'s own comment on this constant).
+const MIN_REFLECTION_MS_TOTAL = 2000;
 
 const DEFAULT_NIMIQ_RPC_URL = 'https://rpc.nimiqwatch.com';
 
@@ -59,7 +61,12 @@ function parisDate(timestampMs) {
 }
 
 function emptyDay(date) {
-  return { date, spentLuna: 0, paidCount: 0, walletPayoutsToday: {} };
+  return {
+    date, spentLuna: 0, paidCount: 0, walletPayoutsToday: {},
+    // Anti-farming refusal counts (A2/A3 — see evaluate()'s own comment),
+    // visibility-only: never gated/capped, nothing was ever spent on these.
+    botTimingRefused: 0, sameDeviceRefused: 0,
+  };
 }
 
 export class PrizeVault extends Server {
@@ -143,7 +150,7 @@ export class PrizeVault extends Server {
   // silently lost. Good enough for the "functional, simple, safe, ship
   // fast" brief this feature was built under; a retry queue is a real
   // possible follow-up, not a v1 requirement.
-  evaluate({ matchId, mode, timestampMs, playerA, playerB, winner }) {
+  evaluate({ matchId, mode, timestampMs, playerA, playerB, winner, reflectionMsTotal }) {
     return this.serialized(async () => {
       await this.ready();
       if (!matchId || typeof matchId !== 'string') return { status: 'not_eligible', reason: 'bad_request', amountNim: 0 };
@@ -171,6 +178,37 @@ export class PrizeVault extends Server {
         return finalize({ status: 'not_eligible', reason: 'same_wallet', amountNim: 0 });
       }
 
+      const date = parisDate(timestampMs);
+      const day = await this.loadDay(date);
+
+      // Anti-farming (A2/A3 — see conversation). Both signals below are
+      // self-reported by the caller (party/arbiter.js/party/weekArbiter.js
+      // relaying what the client itself sent, same trust level as every
+      // other client-sent field in this codebase) — neither stops a
+      // deliberate farmer willing to spoof them, only the cheap/lazy case:
+      // a scripted bot playing both sides, or two tabs sharing one
+      // browser's un-cleared device id. Tracked on the day doc purely for
+      // visibility (see RadarCollector's daily report via daySummary below)
+      // since nothing was ever at risk of being spent on a refused match.
+      //
+      // MIN_REFLECTION_MS_TOTAL is deliberately far below any real human
+      // pace — it's the SUM of every manche's "able to shoot" -> "shot
+      // submitted" gap across the whole match (see party/arbiter.js's
+      // reflectionMsTotal), and no human can drag-and-release even one
+      // manche that fast, let alone a full match's worth. A legitimate fast
+      // player is nowhere near this floor; this only ever catches a bot.
+      if (typeof reflectionMsTotal === 'number' && reflectionMsTotal < MIN_REFLECTION_MS_TOTAL) {
+        day.botTimingRefused = (day.botTimingRefused || 0) + 1;
+        await this.saveDay(day);
+        return finalize({ status: 'not_eligible', reason: 'bot_timing', winnerAddress, amountNim: 0 });
+      }
+      const deviceIdA = playerA?.deviceId, deviceIdB = playerB?.deviceId;
+      if (deviceIdA && deviceIdB && deviceIdA === deviceIdB) {
+        day.sameDeviceRefused = (day.sameDeviceRefused || 0) + 1;
+        await this.saveDay(day);
+        return finalize({ status: 'not_eligible', reason: 'same_device', winnerAddress, amountNim: 0 });
+      }
+
       // Anti-farming — checked (and, on success, committed) before the
       // actual payout attempt, atomically with it inside this same
       // serialized() call, so two matches racing for the same pair/wallet/
@@ -181,8 +219,6 @@ export class PrizeVault extends Server {
         return finalize({ status: 'not_eligible', reason: 'pair_cooldown', winnerAddress, amountNim: 0 });
       }
 
-      const date = parisDate(timestampMs);
-      const day = await this.loadDay(date);
       const normalizedWinner = normalizeAddress(winnerAddress);
       const walletCountToday = day.walletPayoutsToday[normalizedWinner] || 0;
       if (walletCountToday >= MAX_WALLET_PAYOUTS_PER_DAY) {
@@ -220,5 +256,20 @@ export class PrizeVault extends Server {
 
       return finalize({ status: 'paid', winnerAddress, amountNim: PRIZE_AMOUNT_NIM, txId: payment.txId });
     });
+  }
+
+  // A4 — read-only day summary for RadarCollector's daily report (see
+  // party/radar.js's own call site). No write, no idempotency concern, so
+  // deliberately NOT routed through serialized() — a report read racing a
+  // concurrent evaluate() can only ever see the day doc slightly before or
+  // after that write, never a torn/partial one (ctx.storage.get/put are
+  // each atomic on their own).
+  async daySummary(date) {
+    await this.ready();
+    const day = await this.loadDay(date);
+    return {
+      paidNim: day.spentLuna / LUNA_PER_NIM, paidCount: day.paidCount,
+      botTimingRefused: day.botTimingRefused || 0, sameDeviceRefused: day.sameDeviceRefused || 0,
+    };
   }
 }

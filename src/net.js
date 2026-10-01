@@ -41,6 +41,32 @@ export function connectLan(base) {
 // lan-server + npm run dev -- --host).
 const PARTY_HOST = import.meta.env.DEV ? 'ws://localhost:1999' : 'wss://nim-ball.nim-ball.workers.dev';
 
+// Anti-farming (A3 — see conversation): a per-browser random id, generated
+// once and cached in localStorage, sent on every LIVE connect alongside
+// `address` so party/arbiter.js/party/prize.js can tell when both teams in
+// a match came from the same browser (someone farming the prize against
+// themselves in two tabs) and refuse the prize. Same trust level as every
+// other client-sent field here — self-reported, trivially defeated by an
+// incognito window or clearing storage — it only catches the lazy/careless
+// case, not a deliberate farmer. Never used for anything beyond that one
+// check: no identity, no tracking across sessions, nothing sent to Radar.
+const DEVICE_ID_KEY = 'nimball_device_id';
+let cachedDeviceId;
+function getDeviceId() {
+  if (cachedDeviceId) return cachedDeviceId;
+  try {
+    let id = localStorage.getItem(DEVICE_ID_KEY);
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem(DEVICE_ID_KEY, id); }
+    cachedDeviceId = id;
+  } catch {
+    // Private browsing / storage blocked: fall back to a one-off id, still
+    // good enough for the one thing this is used for (comparing the two
+    // teams of THIS match) even though it won't persist across reloads.
+    cachedDeviceId = crypto.randomUUID();
+  }
+  return cachedDeviceId;
+}
+
 // `address` is optional and purely informational (NIM-Curl Radar, see
 // party/arbiter.js/party/radar.js) — a connected wallet's address, or
 // omitted entirely for a guest (see src/main.js's getIdentity()). Never
@@ -56,6 +82,7 @@ export function connectMatch(code, address = null, rejoinTeam = null) {
   const params = new URLSearchParams();
   if (address) params.set('address', normalizeAddress(address));
   if (rejoinTeam) params.set('rejoinTeam', rejoinTeam);
+  params.set('device', getDeviceId());
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return connectSocket(`${PARTY_HOST}/parties/arbiter/${code}${suffix}`);
 }

@@ -4067,14 +4067,33 @@ export function startGame(opts = {}) {
   // the live objects") since the two clients' own key-insertion order for a
   // spread clone is already identical here (same makeStone shape both
   // sides), but being explicit costs nothing and removes any doubt.
-  function quantizeMancheResult(state, goalResult) {
+  function quantizeMancheResult(state, goalResult, pointWinner = null) {
     const stone = g => [Math.round(g.x), Math.round(g.y), g.hits, g.dead ? 1 : 0, g.out ? 1 : 0];
     return {
       a: state.A.map(stone),
       b: state.B.map(stone),
       ball: [Math.round(state.ball.x), Math.round(state.ball.y), state.ball.out ? 1 : 0],
       result: goalResult || null,
+      // Curling only (null for hockey) — see pickClosestStone/computeMancheResult
+      // below for what this is and why it rides in this same cross-checked
+      // payload instead of being computed server-side.
+      pointWinner: pointWinner || null,
     };
+  }
+  // Curling's "closest stone to center wins the point" pick (see
+  // resolveCurlingPoint below) — pulled out into its own pure function so
+  // it can also run on computeMancheResult's headless clone (see
+  // pointWinner below) without a second copy of this loop to keep in sync.
+  function pickClosestStone(state) {
+    let bestTeam = null, bestStone = null, bestDist = Infinity;
+    for (const team of ['A', 'B']) {
+      for (const g of state[team]) {
+        if (g.dead || g.out) continue;
+        const d = Math.hypot(g.x - CENTER_X, g.y - CY);
+        if (d < bestDist) { bestDist = d; bestTeam = team; bestStone = g; }
+      }
+    }
+    return { bestTeam, bestStone };
   }
   // Headless fast-forward: runs silent physicsStep() on a clone of
   // initialState until it settles, fully decoupled from the real paced
@@ -4096,7 +4115,24 @@ export function startGame(opts = {}) {
       if (result && !goalResult) goalResult = result;
       if (allSettled(state) && !deadStonesStillAnimating(state)) break;
     }
-    return quantizeMancheResult(state, goalResult);
+    // Anti-farming (A1 — see conversation): curling has no ball, so a point
+    // is never decided by physicsStep's own goal-mouth check the way
+    // hockey's 'goalA'/'wipeoutB' strings are — it's resolveCurlingPoint()
+    // picking whoever's closest to center once a cycle's manches are done.
+    // That pick only ever ran client-side before, so party/arbiter.js had
+    // no way to verify a curling match's score. Embedding it here — on the
+    // exact manche that ends the cycle, using the same settled state both
+    // clients already cross-check byte-for-byte via mancheResult — gives
+    // the server that same trust for free, no new verification logic
+    // needed on the arbiter's side (it already compares this whole object).
+    // Skipped when a wipeout already decided this manche (goalResult set) —
+    // that's already carried by the 'result' field above and takes priority
+    // the exact same way resolveCurlingPoint's own wipeout bypass does.
+    let pointWinner = null;
+    if (vibe === 'curling' && !goalResult && curlingCycle + 1 >= CURLING_CYCLES_PER_POINT) {
+      pointWinner = pickClosestStone(state).bestTeam;
+    }
+    return quantizeMancheResult(state, goalResult, pointWinner);
   }
   // Dev-only diagnostic (see CLAUDE.md determinism work / conversation) — a
   // per-field breakdown of two quantizeMancheResult() payloads, in the
@@ -4241,14 +4277,7 @@ export function startGame(opts = {}) {
   // and reuses this same onGoal path if a team is fully wiped out before
   // all CURLING_CYCLES_PER_POINT manches even finish).
   function resolveCurlingPoint() {
-    let bestTeam = null, bestStone = null, bestDist = Infinity;
-    for (const team of ['A', 'B']) {
-      for (const g of entities[team]) {
-        if (g.dead || g.out) continue;
-        const d = Math.hypot(g.x - CENTER_X, g.y - CY);
-        if (d < bestDist) { bestDist = d; bestTeam = team; bestStone = g; }
-      }
-    }
+    const { bestTeam, bestStone } = pickClosestStone(entities);
     if (bestTeam) {
       // Every other still-alive stone (both teams, including the winning
       // team's own other two) reads as "lost this point" — grey out now so

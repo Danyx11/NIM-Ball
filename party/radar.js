@@ -31,7 +31,8 @@
 //   metrics — there is no reliable, privacy-respecting stable id for a guest
 //   across matches, and inventing one (e.g. a localStorage id) was
 //   explicitly declined in favor of keeping this simple.
-import { Server } from 'partyserver';
+import { Server, getServerByName } from 'partyserver';
+import { PRIZE_ROOM_NAME } from './prize.js';
 
 export const RADAR_ROOM_NAME = 'radar';
 const PARIS_TZ = 'Europe/Paris';
@@ -115,8 +116,21 @@ function dayReportNumbers(day) {
 // two separate lines (wallets vs. guest sessions), never summed — a guest
 // "count" isn't a player count (no identity to dedupe by), so adding it to
 // the wallet figure would misleadingly imply it was.
-function formatReport({ title, dateLabel, n, active, allTime, trendLine }) {
+// `prize` ({paidNim, paidCount, botTimingRefused, sameDeviceRefused} or
+// null on an RPC failure — see RadarCollector#prizeSummary below) is
+// visibility-only, same spirit as `active`/`allTime` above: NIM prizes
+// (party/prize.js) are a separate feature with its own budget/anti-farming
+// enforcement, this just surfaces its own day doc so a spike is visible in
+// the daily report instead of only in `wrangler tail` (A4 — see
+// conversation). The two refusal counts only ever show when non-zero, kept
+// out of the main report body otherwise so a normal day's report doesn't
+// grow a permanent "0 · 0" line.
+function formatReport({ title, dateLabel, n, active, allTime, prize, trendLine }) {
   const peakLine = n.peakCount > 0 ? `\n\n📈 Peak: ${String(n.peakHour).padStart(2, '0')}:00–${String((n.peakHour + 1) % 24).padStart(2, '0')}:00` : '';
+  const flaggedCount = (prize?.botTimingRefused || 0) + (prize?.sameDeviceRefused || 0);
+  const antiFarmLine = flaggedCount > 0
+    ? `\n\n🚩 Anti-farming: ${prize.botTimingRefused || 0} bot-timing · ${prize.sameDeviceRefused || 0} same-device refused`
+    : '';
   return [
     `📡 ${title}`,
     dateLabel,
@@ -138,11 +152,13 @@ function formatReport({ title, dateLabel, n, active, allTime, trendLine }) {
     '',
     `⏱ Active now — Live: ${active?.live ?? 0} · Week: ${active?.week ?? 0}`,
     '',
+    `💰 Prizes: ${prize?.paidNim ?? 0} NIM paid (${prize?.paidCount ?? 0})`,
+    '',
     'ALL-TIME',
     `• Wallets ever seen: ${allTime?.wallets ?? 0}`,
     `• Guest sessions: ${allTime?.guestSlots ?? 0}`,
     `• Matches: ${allTime?.matches ?? 0}`,
-  ].join('\n') + peakLine + (trendLine || '');
+  ].join('\n') + peakLine + antiFarmLine + (trendLine || '');
 }
 
 export class RadarCollector extends Server {
@@ -308,6 +324,22 @@ export class RadarCollector extends Server {
     }
   }
 
+  // A4 — RPC into PrizeVault for one Paris calendar day's prize totals (see
+  // party/prize.js's daySummary). Best-effort, same resilience pattern as
+  // radarNotify/leagueNotify elsewhere in this codebase (e.g. local dev
+  // without the binding configured, or the DO briefly unreachable) — a
+  // failure here must never block or blank out the rest of the report.
+  async prizeSummary(date) {
+    if (!this.env?.PrizeVault) return null;
+    try {
+      const prize = await getServerByName(this.env.PrizeVault, PRIZE_ROOM_NAME);
+      return await prize.daySummary(date);
+    } catch (err) {
+      console.error('[radar] prizeSummary failed:', err);
+      return null;
+    }
+  }
+
   // Called on every /radar[ yesterday] webhook hit (see party/index.js) —
   // returns nothing, sends directly to Telegram (single-owner personal bot,
   // no need to thread a reply-to-arbitrary-chat path through here).
@@ -317,13 +349,15 @@ export class RadarCollector extends Server {
     const today = parisDate(Date.now());
     if (cmd === '/radar' || cmd === '/radar today') {
       const day = await this.loadDay(today);
-      await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: 'Today', n: dayReportNumbers(day), active: this.activeCounts, allTime: this.allTimeNumbers() }));
+      const prize = await this.prizeSummary(today);
+      await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: 'Today', n: dayReportNumbers(day), active: this.activeCounts, allTime: this.allTimeNumbers(), prize }));
       return;
     }
     if (cmd === '/radar yesterday') {
       const yDate = shiftDate(today, -1);
       const day = await this.loadDay(yDate);
-      await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: formatDateLabel(yDate), n: dayReportNumbers(day), active: this.activeCounts, allTime: this.allTimeNumbers() }));
+      const prize = await this.prizeSummary(yDate);
+      await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: formatDateLabel(yDate), n: dayReportNumbers(day), active: this.activeCounts, allTime: this.allTimeNumbers(), prize }));
     }
     // Unrecognized command: silently ignored (see party/index.js's chat-id
     // check for who can even reach this).
@@ -344,6 +378,7 @@ export class RadarCollector extends Server {
     if (this.lastReportedDate === targetDate) return; // already sent
     const day = await this.loadDay(targetDate);
     const n = dayReportNumbers(day);
+    const prize = await this.prizeSummary(targetDate);
     const prevDay = await this.loadDay(shiftDate(targetDate, -1));
     const prevMatches = dayReportNumbers(prevDay).matches;
     let trendLine = '';
@@ -351,7 +386,7 @@ export class RadarCollector extends Server {
       const pct = Math.round(((n.matches - prevMatches) / prevMatches) * 1000) / 10;
       trendLine = `\n\nYesterday: ${prevMatches} matches\n${pct > 0 ? '+' : ''}${pct}%`;
     }
-    await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: formatDateLabel(targetDate), n, active: this.activeCounts, allTime: this.allTimeNumbers(), trendLine }));
+    await this.sendTelegram(formatReport({ title: 'NIM-CURL RADAR', dateLabel: formatDateLabel(targetDate), n, active: this.activeCounts, allTime: this.allTimeNumbers(), prize, trendLine }));
     this.lastReportedDate = targetDate;
     await this.ctx.storage.put('lastReportedDate', this.lastReportedDate);
   }

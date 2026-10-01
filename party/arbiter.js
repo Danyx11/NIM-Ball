@@ -106,6 +106,12 @@ export class Arbiter extends Server {
     // life of one match; Radar itself also dedupes by match code as a second
     // safety net (see recordMatchStarted/recordMatchCompleted).
     this.addresses = { A: null, B: null };
+    // Anti-farming (A3 — see conversation): a per-browser id each connection
+    // announces via its own connect URL's `?device=` (src/net.js's
+    // getDeviceId) — same "relayed verbatim, never proven" trust level as
+    // this.addresses above. Used only by the prize block below to refuse a
+    // payout when both teams share the same id (two tabs, one browser).
+    this.deviceIds = { A: null, B: null };
     this.radarStartedNotified = false;
     this.radarCompletedNotified = false;
     // League Beta (party/leagueSeason.js) — same one-shot-per-instance
@@ -128,6 +134,28 @@ export class Arbiter extends Server {
     // Which matchIndex already got its "no rewards, and why" answer — see
     // sendRewardsNone.
     this.noRewardSentFor = -1;
+    // Anti-farming (A1 — see conversation): the server's OWN tally of the
+    // match score, built up manche-by-manche from mancheResult's own
+    // byte-for-byte A/B comparison below (never from matchOver's
+    // client-reported scoreA/scoreB) — see the 'mancheResult' branch for how
+    // this gets incremented and src/game.js's CLAUDE.md note on why this was
+    // previously trusted from the client. Reset on every rematch alongside
+    // the one-shot flags above (same matchIndex-bump block).
+    this.liveScore = { A: 0, B: 0 };
+    // Set true the moment any manche in the CURRENT match comes back
+    // mismatched between the two clients (see 'mancheResult' below) — a
+    // desynced match's own score can't be trusted for the rest of its life,
+    // so this blocks the prize (not League — see that block's own comment)
+    // outright rather than paying out on a match that provably diverged.
+    this.hadMancheMismatch = false;
+    // Anti-farming (A2 — see conversation): Date.now() per team each time
+    // its 'shots' message arrives (first baseline set at connect, see
+    // onConnect below), summed across the whole match into
+    // reflectionMsTotal — a cheap, bot-only signal (see prize.js's own
+    // MIN_REFLECTION_MS_TOTAL comment for why this never meaningfully
+    // catches a fast human).
+    this.lastShotAt = { A: null, B: null };
+    this.reflectionMsTotal = 0;
   }
 
   // Tells both clients there's no League/prize result coming, and why. Sent
@@ -269,6 +297,13 @@ export class Arbiter extends Server {
     // connectMatch() appends this when the local player has a connected
     // wallet, omits it entirely for a guest.
     this.addresses[team] = url.searchParams.get('address') || null;
+    this.deviceIds[team] = url.searchParams.get('device') || null;
+    // Baseline for this team's reflection-time tally (A2 — see onStart's own
+    // comment) — a reconnect (rejoinTeam) re-baselines here too, which is
+    // fine: it only ever makes the measured time from here on LONGER (an
+    // idle gap waiting on a dropped connection can't make a match look
+    // faster), never shorter.
+    this.lastShotAt[team] = Date.now();
     // Team A (creator) reads back null here (it hasn't sent its config yet
     // at this point — it already knows its own choice locally, see main.js)
     // and team B (joiner) gets whatever A already stored, assuming the
@@ -316,6 +351,12 @@ export class Arbiter extends Server {
       this.matchConfig = msg.config;
       this.vibe = msg.vibe || null;
     } else if (msg.type === 'shots') {
+      // Anti-farming (A2 — see onStart's own comment) — how long this team
+      // took to go from able-to-shoot to actually submitting, summed across
+      // the whole match regardless of vibe/manche outcome.
+      const now = Date.now();
+      if (this.lastShotAt[team] != null) this.reflectionMsTotal += now - this.lastShotAt[team];
+      this.lastShotAt[team] = now;
       this.shots[team] = msg.stones;
       this.sweeps[team] = msg.sweep || null;
       if (this.shots.A && this.shots.B) {
@@ -342,6 +383,23 @@ export class Arbiter extends Server {
         this.send(this.players.A, payload);
         this.send(this.players.B, payload);
         if (!valid) this.sendSyncMismatchAlert(this.pendingMancheIndex, this.mancheResults.A, this.mancheResults.B);
+        // Anti-farming (A1 — see onStart's own liveScore comment): derive
+        // the score from this same cross-checked payload instead of ever
+        // trusting matchOver's client-reported scoreA/scoreB. Hockey's
+        // winning team is the last letter of the 'goalA'/'wipeoutB'-shaped
+        // result string (src/game.js's physicsStep); curling has no such
+        // string (no ball) so computeMancheResult embeds pointWinner
+        // instead on whichever manche ends a curling cycle — both already
+        // went through the JSON.stringify comparison above, so nothing new
+        // needs verifying here, just reading the field both sides agreed on.
+        if (valid) {
+          const r = this.mancheResults.A; // === .B, byte-for-byte
+          const scoringTeam = typeof r?.result === 'string' && r.result ? r.result.slice(-1)
+            : (r?.pointWinner === 'A' || r?.pointWinner === 'B') ? r.pointWinner : null;
+          if (scoringTeam === 'A' || scoringTeam === 'B') this.liveScore[scoringTeam]++;
+        } else {
+          this.hadMancheMismatch = true;
+        }
         this.resetManche();
       }
     } else if (msg.type === 'chat') {
@@ -387,6 +445,13 @@ export class Arbiter extends Server {
         this.matchIndex = matchIndex;
         this.leagueCompletedNotified = false;
         this.prizeCompletedNotified = false;
+        // A1/A2 state (see onStart's own comments) is per-match, not
+        // per-room — a rematch starts every one of these fresh exactly like
+        // mancheIndex/shots/etc already reset elsewhere.
+        this.liveScore = { A: 0, B: 0 };
+        this.hadMancheMismatch = false;
+        this.reflectionMsTotal = 0;
+        this.lastShotAt = { A: Date.now(), B: Date.now() };
       }
       const roomMatchId = matchIndex > 0 ? `live:${this.name}:${matchIndex}` : `live:${this.name}`;
       if (!this.radarCompletedNotified) {
@@ -420,12 +485,14 @@ export class Arbiter extends Server {
       if (!this.leagueCompletedNotified && this.radarStartedNotified
         && this.addresses.A && this.addresses.B
         && isClassicMatchConfig(this.matchConfig)) {
-        const scoreA = Number(msg.scoreA) || 0;
-        const scoreB = Number(msg.scoreB) || 0;
-        // A tie shouldn't be reachable (the match only ends once one side's
-        // score crosses the win threshold) but is checked for defensively
-        // rather than ever crediting/blaming either side incorrectly.
-        const winner = scoreA > scoreB ? 'A' : scoreB > scoreA ? 'B' : null;
+        // Anti-farming (A1 — see onStart's own liveScore comment): derived
+        // from the server's own cross-checked manche tally, never from
+        // matchOver's client-reported scoreA/scoreB (a forged/stale value
+        // there can no longer invent a League win either). A tie shouldn't
+        // be reachable (the match only ends once one side's score crosses
+        // the win threshold) but is checked for defensively rather than
+        // ever crediting/blaming either side incorrectly.
+        const winner = this.liveScore.A > this.liveScore.B ? 'A' : this.liveScore.B > this.liveScore.A ? 'B' : null;
         if (winner) {
           this.leagueCompletedNotified = true;
           // Unlike radarNotify's other fire-and-forget calls, this one's
@@ -463,19 +530,32 @@ export class Arbiter extends Server {
       // client-sent field this arbiter already relays as-is), kept as a
       // SEPARATE condition rather than nested inside League's own `if`
       // purely so a change to one can never accidentally affect the other.
-      // Anti-farming/budget/same-wallet checks are still enforced
-      // server-side in prize.js itself, never trusted from here — see
-      // prizeCompletedNotified's own comment for why this fires at most
-      // once per instance.
+      // Server-side budget/same-wallet/cooldown checks are still enforced in
+      // prize.js itself, never trusted from here — see prizeCompletedNotified's
+      // own comment for why this fires at most once per instance.
       if (!this.prizeCompletedNotified && this.radarStartedNotified && this.addresses.A && this.addresses.B && isClassicMatchConfig(this.matchConfig)) {
-        const scoreA = Number(msg.scoreA) || 0;
-        const scoreB = Number(msg.scoreB) || 0;
-        const winner = scoreA > scoreB ? 'A' : scoreB > scoreA ? 'B' : null;
-        if (winner) {
+        // Anti-farming (A1 — see onStart's own liveScore comment): winner is
+        // derived from this.liveScore, the server's own tally built up
+        // manche-by-manche from mutually cross-checked results — never from
+        // matchOver's client-reported scoreA/scoreB. Two sockets opened on
+        // the same room, a 'matchConfig' and a single fabricated 'matchOver'
+        // used to be enough to collect a payout without a single shot (see
+        // git history); now liveScore can only move via a manche the server
+        // itself relayed AND both clients agreed settled identically, so a
+        // winner can no longer exist without a real, undisputed match.
+        // hadMancheMismatch (set in the 'mancheResult' branch) refuses the
+        // prize outright on any match with even one desynced manche — a
+        // match the server can no longer vouch for shouldn't pay out,
+        // whatever caused the mismatch (forged client or a genuine physics
+        // bug either way gets a Telegram alert via sendSyncMismatchAlert).
+        const winner = this.liveScore.A > this.liveScore.B ? 'A' : this.liveScore.B > this.liveScore.A ? 'B' : null;
+        if (winner && !this.hadMancheMismatch) {
           this.prizeCompletedNotified = true;
           this.prizeNotify('evaluate', {
             matchId: roomMatchId, mode: 'live', timestampMs: Date.now(),
-            playerA: { address: this.addresses.A }, playerB: { address: this.addresses.B }, winner,
+            playerA: { address: this.addresses.A, deviceId: this.deviceIds.A },
+            playerB: { address: this.addresses.B, deviceId: this.deviceIds.B },
+            winner, reflectionMsTotal: this.reflectionMsTotal,
           }).then((result) => {
             // Both sides always get an answer (null = nothing to show:
             // not_eligible/budget_exhausted/an unpaid 'eligible'), so neither
@@ -486,6 +566,15 @@ export class Arbiter extends Server {
               this.send(this.players[t], { type: 'prizeResult', amountNim: paid && t === winner ? result.amountNim : null, reason });
             }
           });
+        } else {
+          this.prizeCompletedNotified = true;
+          // No real winner (no manche ever relayed through this room — a
+          // forged matchOver with nothing played) or the match desynced —
+          // answer anyway rather than staying silent, since showVictory()
+          // waits on a prizeResult and would otherwise sit out its full
+          // timeout, same reasoning as sendRewardsNone's own comment.
+          const reason = this.hadMancheMismatch ? 'desync' : 'not_played';
+          for (const t of ['A', 'B']) this.send(this.players[t], { type: 'prizeResult', amountNim: null, reason });
         }
       }
     }
