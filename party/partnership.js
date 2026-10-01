@@ -46,11 +46,15 @@ const DEFAULT_NIMIQ_RPC_URL = 'https://rpc.nimiqwatch.com';
 
 // How many blocks must confirm a transaction before it's trusted enough to
 // finalize a booking. Albatross blocks land roughly every ~1s (observed:
-// see conversation), so this is roughly a 20s wait — a confirmation-COUNT
+// see conversation), so this is roughly a 10s wait — a confirmation-COUNT
 // safety margin against the RPC node's own view of the chain reorganizing,
 // not a claim about Albatross's macro-block finality proofs specifically.
-// Tune up if a deeper margin is wanted; this is not a protocol constant.
-const REQUIRED_CONFIRMATIONS = 20;
+// Lowered from 20 on purpose (see conversation, same reasoning
+// party/aliases.js's own REQUIRED_CONFIRMATIONS documents for dropping to 3):
+// a sponsor week is a few dollars, not a sum worth mounting a reorg attack
+// over, so the UX cost of a 20s wait wasn't worth the extra margin. Tune up
+// if a deeper margin is wanted; this is not a protocol constant.
+const REQUIRED_CONFIRMATIONS = 10;
 
 const RPC_TIMEOUT_MS = 10_000;
 

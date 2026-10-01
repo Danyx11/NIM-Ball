@@ -1256,7 +1256,6 @@ function renderClaimStep(step, ctx) {
     return;
   }
   if (step === 'confirmFailed') {
-    const waitingOnChain = ctx.error === 'pending';
     // Fatal: an explicit allowlist of party/aliases.js's own confirmPayment
     // error strings that mean the tx that was sent can NEVER satisfy this
     // reservation no matter how many times it's re-checked (wrong amount/
@@ -2711,7 +2710,13 @@ function renderPartnershipWeekList(weeks) {
   });
 }
 
+// Separate from src/main.js's claimAutoRetryTimer (the alias dialog's own
+// equivalent) — two independent dialogs, each clearing only its own timer on
+// every one of its own render calls, same reasoning as that one's comment.
+let partnershipAutoRetryTimer = null;
 function renderPartnershipBook(step, ctx = {}) {
+  clearTimeout(partnershipAutoRetryTimer);
+  partnershipAutoRetryTimer = null;
   if (step === 'walletGate') {
     partnershipBookContent.innerHTML = `
       <h2>Partnership requires a Nimiq wallet</h2>
@@ -2765,17 +2770,8 @@ function renderPartnershipBook(step, ctx = {}) {
       audio.play('button');
       renderPartnershipBook('paying');
       sendNimPayment({ recipient: PARTNERSHIP_PAYMENT_ADDRESS, valueLuna: ctx.amountLuna })
-        .then((tx) => {
-          renderPartnershipBook('confirming', { weekIds: ctx.weekIds });
-          return confirmPartnershipPayment({ weekIds: ctx.weekIds, wallet: hubAddress, paymentTx: tx.hash });
-        })
-        .then((res) => {
-          if (res.ok) { partnershipActiveReservation = null; renderPartnershipBook('booked', { weekIds: ctx.weekIds }); return; }
-          renderPartnershipBook('confirmFailed', { ...ctx, error: res.error, confirmations: res.confirmations, required: res.required });
-        })
-        .catch((err) => {
-          renderPartnershipBook(err.cancelled ? 'confirmPay' : 'payError', { ...ctx, message: err.message });
-        });
+        .then((tx) => renderPartnershipBook('confirming', { ...ctx, paymentTx: tx.hash }))
+        .catch((err) => renderPartnershipBook(err.cancelled ? 'confirmPay' : 'payError', { ...ctx, message: err.message }));
     });
     return;
   }
@@ -2785,16 +2781,56 @@ function renderPartnershipBook(step, ctx = {}) {
   }
   if (step === 'confirming') {
     partnershipBookContent.innerHTML = '<p>Confirming with the server…</p>';
+    // Re-entrant on purpose (same paymentTx every time, see 'confirmFailed'
+    // below) — this used to only ever run once, chained directly off
+    // sendNimPayment() above, with "Check again" looping back through
+    // 'confirmPay' instead: that re-showed "Pay in wallet" and would have
+    // signed a SECOND real transaction on top of a payment already sent (see
+    // src/alias.js's savePendingClaim comment / CLAUDE.md's "Alias registry"
+    // section for the identical bug, found and fixed there first).
+    confirmPartnershipPayment({ weekIds: ctx.weekIds, wallet: hubAddress, paymentTx: ctx.paymentTx }).then((res) => {
+      if (res.ok) { partnershipActiveReservation = null; renderPartnershipBook('booked', { weekIds: ctx.weekIds }); return; }
+      renderPartnershipBook('confirmFailed', { ...ctx, error: res.error, confirmations: res.confirmations, required: res.required });
+    }).catch(() => renderPartnershipBook('confirmFailed', { ...ctx, error: 'network error' }));
     return;
   }
   if (step === 'confirmFailed') {
-    const waitingOnChain = ctx.error === 'pending';
+    // Same fatal allowlist as src/alias.js's own 'confirmFailed' — these
+    // error strings mean the tx that was sent can never satisfy this
+    // reservation no matter how many times it's re-checked (see
+    // party/partnership.js's confirmPayment for each), so offering a retry
+    // here would mean a second real payment, same mistake this whole fix is
+    // for.
+    const FATAL_ERRORS = ['transaction execution failed', 'sender mismatch', 'recipient mismatch', 'amount mismatch', 'transaction already used', 'not your pending reservation'];
+    const fatal = FATAL_ERRORS.includes(ctx.error);
+    if (fatal) {
+      partnershipBookContent.innerHTML = `
+        <h2>Couldn't confirm</h2>
+        <p>${escapeHtml(partnershipErrorMessage(ctx.error))}</p>
+        <p>Your payment was sent but could not be matched to this booking automatically. Don't send another payment — reach out so it can be checked manually.</p>
+        <button class="bigbtn" id="partnershipCloseFailedBtn">Close</button>
+      `;
+      document.getElementById('partnershipCloseFailedBtn').addEventListener('click', () => {
+        audio.play('button');
+        releasePartnershipReservationIfAny();
+        partnershipBookOverlay.classList.add('hidden');
+        partnershipOverlay.classList.remove('hidden');
+      });
+      return;
+    }
+    // No raw "x/y confirmations" counter and an automatic retry, same
+    // reasoning as src/alias.js's own 'confirmFailed' — see CLAUDE.md's
+    // "Alias registry" section's "Speed" paragraph.
     partnershipBookContent.innerHTML = `
-      <h2>${waitingOnChain ? 'Waiting for confirmations' : "Couldn't confirm"}</h2>
-      <p>${waitingOnChain ? `${ctx.confirmations}/${ctx.required} confirmations so far — try again in a bit.` : escapeHtml(partnershipErrorMessage(ctx.error))}</p>
+      <h2>Confirming your payment…</h2>
+      <p>Waiting for the transaction to complete. This should only take a few seconds.</p>
       <button class="bigbtn" id="partnershipRetryConfirmBtn">Check again</button>
     `;
-    document.getElementById('partnershipRetryConfirmBtn').addEventListener('click', () => renderPartnershipBook('confirmPay', ctx));
+    document.getElementById('partnershipRetryConfirmBtn').addEventListener('click', () => {
+      audio.play('button');
+      renderPartnershipBook('confirming', ctx);
+    });
+    partnershipAutoRetryTimer = setTimeout(() => renderPartnershipBook('confirming', ctx), 2000);
     return;
   }
   if (step === 'payError') {
