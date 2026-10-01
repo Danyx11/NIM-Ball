@@ -1483,11 +1483,13 @@
        right — matching the board's own fixed left/right layout, never
        mirrored), opened/closed by the chat rock (desktop) or #tbtn-chat
        (mobile), or by #chatExitBtn dead-center on the seam between the two
-       columns. The compose bar is pinned to the very bottom of the panel —
-       nothing sits below it, so it's always clear of wherever a phone's own
-       keyboard docks (see main.js's --stable-vh / visualViewport pin for
-       why that keyboard doesn't otherwise shove the whole panel around).
-       Sends are unlimited in count but rate-limited (see CHAT_COOLDOWN_MS
+       columns. The compose bar is pinned to the very bottom of the panel,
+       which fills #game-card edge-to-edge — #game-card is sized off
+       --stable-vh (main.js), deliberately keyboard-immune, so the panel
+       itself never shrinks for the keyboard and the bar can end up
+       physically covered; src/game.js's own chatComposeInput wiring
+       translates it clear via keyboardAvoidTranslate (src/keyboardAvoidance.js)
+       instead. Sends are unlimited in count but rate-limited (see CHAT_COOLDOWN_MS
        in game.js) — the small ring next to the emoji button fills back up
        as that cooldown clears; composing/emoji-picking is never blocked by
        it, only the actual send. Reparented into #game-card by main.js,
