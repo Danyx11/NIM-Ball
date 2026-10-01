@@ -12,7 +12,7 @@ import '@fontsource/fira-mono/500.css';
 import { startGame, preloadCoreAssets, DEFAULT_IDENTICON_ADDRESS } from './game.js';
 import { preloadTicketAssets, renderTicket } from './ticket.js';
 import { playSingleShot, playReveal } from './weekController.js';
-import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendNimPayment, getGuestCode } from './nimiq.js';
+import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendNimPayment, getGuestCode, setStoredAddress } from './nimiq.js';
 import { resolveIdentity, isValidAlias, reserveAlias, releaseAlias, confirmAliasPayment, savePendingClaim, loadPendingClaim, clearPendingClaim, FAKE_MODE as FAKE_ALIAS } from './alias.js';
 // Real recipient address (src/partnership.js) — the actual $/week -> NIM
 // quote/price locking now happens server-side (party/partnership.js's
@@ -700,6 +700,30 @@ window.addEventListener('pageshow', onPageResume);
 connectNimiq()
   .catch((err) => console.log('[nimiq] not running inside Nimiq Pay:', err.message));
 
+// Manual recovery path: `?setIdentity=<address>` overwrites the stored
+// identity outright, for the one case nothing else here can self-correct —
+// a player whose connected identity (accounts[0] from Nimiq Pay, see
+// sendNimPayment's own comment on why that can be the wrong account) was
+// already wrong *before* this session's own self-correcting fix shipped
+// (the alias 'confirmed' step adopting the real payer going forward — this
+// only ever fixes it looking forward from a NEW successful payment, not a
+// stuck identity from an old one). No in-game UI for this on purpose: it's a
+// one-off fix for a known-wrong address the player already has independent
+// proof of (e.g. the wallet that actually sent a real payment), not a
+// general "switch accounts" feature — same trust level `hubAddress` already
+// has everywhere else (a plain, unverified client-reported string, see
+// CLAUDE.md's Radar trust-model note), so accepting it from a URL param
+// changes nothing about what the server already trusts. Stripped from the
+// URL immediately so a reload/share doesn't keep re-applying it.
+{
+  const forcedIdentity = new URLSearchParams(location.search).get('setIdentity');
+  if (forcedIdentity) {
+    setStoredAddress(forcedIdentity);
+    const url = new URL(location.href);
+    url.searchParams.delete('setIdentity');
+    history.replaceState(null, '', url);
+  }
+}
 // ---- Player identity (see src/nimiq.js's getIdentity/connectIdentity) —
 // resolved once via the #connectGateOverlay gate below (Connect or Play as
 // guest), right after the home screen. A connected address is remembered and
@@ -1248,17 +1272,23 @@ function renderClaimStep(step, ctx) {
     // ctx.wallet is whichever account actually signed the payment (see
     // party/aliases.js's confirmPayment comment — Nimiq Pay can't be told
     // which of a player's accounts to pay from) — almost always hubAddress,
-    // but caching/showing it as "yours" against a DIFFERENT connected
-    // identity would be wrong, so this only updates the pill when they match.
-    const paidFromCurrentIdentity = ctx.wallet === hubAddress;
-    if (paidFromCurrentIdentity) {
-      aliasCache.set(hubAddress, { address: hubAddress, alias: ctx.value });
-      syncIdentityPill();
+    // but when it isn't, a successful real payment is strong, chain-verified
+    // proof of an address this player actually controls, more trustworthy
+    // than connectPayAccount()'s original accounts[0] guess. Adopted outright
+    // (not just noted) so every other address-keyed screen (League, My
+    // Matches, the ranking ticker, the pill itself) picks it up too, instead
+    // of staying pointed at an identity that can never show this alias.
+    const identityUpdated = !!ctx.wallet && ctx.wallet !== hubAddress;
+    if (identityUpdated) {
+      hubAddress = ctx.wallet;
+      setStoredAddress(ctx.wallet);
     }
+    aliasCache.set(hubAddress, { address: hubAddress, alias: ctx.value });
+    syncIdentityPill();
     showClaimLobby(`
       <h2>Alias confirmed ✓</h2>
       <p>@${ctx.value} is now yours, visible everywhere in NimiCurl.</p>
-      ${paidFromCurrentIdentity ? '' : `<p>Paid from a different account than the one currently connected (${shortenAddressCompact(ctx.wallet)}) — switch to it to see @${ctx.value} on your pill.</p>`}
+      ${identityUpdated ? `<p>Paid from a different account than the one shown before — switched your connected identity to it (${shortenAddressCompact(hubAddress)}).</p>` : ''}
       <button class="bigbtn" id="aliasDoneBtn">Close</button>
     `);
     document.getElementById('aliasDoneBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };

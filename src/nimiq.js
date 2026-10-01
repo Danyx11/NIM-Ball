@@ -43,6 +43,20 @@ export function getStoredAddress() {
   return localStorage.getItem(HUB_ADDRESS_KEY);
 }
 
+// Overwrites the stored/connected identity outright — for the one place that
+// needs to (src/main.js's alias-confirmed step, see conversation): inside
+// Nimiq Pay, connectPayAccount()'s accounts[0] guess can differ from
+// whichever account actually signs a payment (sendBasicTransaction() has no
+// sender param to pin it — see sendNimPayment's own comment), so a
+// successful real payment is strong, chain-verified proof of which address
+// this player actually controls — more trustworthy than the original guess,
+// worth adopting as the identity going forward rather than just noting the
+// mismatch and leaving every other address-keyed screen (League, My
+// Matches, the ranking ticker, …) still looking at the wrong one.
+export function setStoredAddress(address) {
+  localStorage.setItem(HUB_ADDRESS_KEY, address);
+}
+
 // Opens the Hub's account-picker popup and resolves with the chosen
 // address. Works in any desktop browser (no Nimiq Pay required).
 export function chooseAddress() {
