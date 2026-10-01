@@ -1288,9 +1288,15 @@ function renderClaimStep(step, ctx) {
       document.getElementById('aliasCloseBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
       return;
     }
+    // No raw confirmation counter shown here on purpose (see conversation) —
+    // a number like "2/3 confirmations" reads as "something is wrong and
+    // it's stuck", not as the few-seconds-normal wait it actually is. One
+    // plain waiting message covers both the on-chain and the transient-
+    // network case identically; there's nothing actionable to tell them apart
+    // from the player's side anyway.
     showClaimLobby(`
-      <h2>${waitingOnChain ? 'Waiting for confirmations' : "Couldn't confirm"}</h2>
-      <p>${waitingOnChain ? `${ctx.confirmations}/${ctx.required} confirmations so far — checking again automatically.` : 'Having trouble reaching the server — checking again automatically.'}</p>
+      <h2>Confirming your payment…</h2>
+      <p>Waiting for the transaction to complete. This should only take a few seconds.</p>
       <button class="bigbtn" id="aliasRetryConfirmBtn">Check again</button>
     `);
     document.getElementById('aliasRetryConfirmBtn').onclick = () => {
@@ -1303,7 +1309,11 @@ function renderClaimStep(step, ctx) {
     // a player who doesn't come back to click it sees a NIM payment that
     // visibly left their wallet with no visible path to the alias ever
     // landing, which is exactly what happened in practice (see conversation).
-    claimAutoRetryTimer = setTimeout(() => renderClaimStep('confirming', ctx), 5000);
+    // 2s, not longer — REQUIRED_CONFIRMATIONS dropped to 3 (party/aliases.js)
+    // specifically so the whole reserve->pay->confirm round trip lands in
+    // single-digit seconds; polling slower than that would just reintroduce
+    // the wait this was meant to remove.
+    claimAutoRetryTimer = setTimeout(() => renderClaimStep('confirming', ctx), 2000);
     return;
   }
   if (step === 'payError') {

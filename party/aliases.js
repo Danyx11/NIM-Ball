@@ -35,10 +35,17 @@ const ALIAS_PRICE_LUNA = 30 * LUNA_PER_NIM;
 // specific env var per feature.
 const DEFAULT_NIMIQ_RPC_URL = 'https://rpc.nimiqwatch.com';
 
-// Same confirmation depth as party/partnership.js's own REQUIRED_CONFIRMATIONS
-// — see that file's comment for why this is a confirmation-COUNT margin
-// against reorg risk, not a protocol finality constant.
-const REQUIRED_CONFIRMATIONS = 20;
+// Deliberately much shallower than party/partnership.js's own
+// REQUIRED_CONFIRMATIONS (20) — this gates a flat 30 NIM claim, not a
+// sponsor-week payment, so the cost of a successful reorg attack here is
+// nowhere near worth mounting one; the UX cost of waiting ~20 real seconds
+// for that same margin was not (see conversation — a slow, manual-click-only
+// confirm flow is what let real payments sit unattributed in the first
+// place). Still a confirmation-COUNT margin against the RPC node's own view
+// of the chain reorganizing, not a protocol finality constant — just a much
+// smaller one, matched to this feature's actual stakes. Albatross blocks
+// land roughly every ~1s, so this is a ~3s wait, not a 20s one.
+const REQUIRED_CONFIRMATIONS = 3;
 
 const RPC_TIMEOUT_MS = 10_000;
 const FETCH_USER_AGENT = 'NimiCurl-Alias-Worker/1.0';
