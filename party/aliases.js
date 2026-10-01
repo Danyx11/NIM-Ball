@@ -43,10 +43,15 @@ const REQUIRED_CONFIRMATIONS = 20;
 const RPC_TIMEOUT_MS = 10_000;
 const FETCH_USER_AGENT = 'NimiCurl-Alias-Worker/1.0';
 
-// Same reasoning as party/partnership.js's PENDING_TTL_MS: long enough to
-// actually complete a wallet confirmation, short enough that an abandoned
-// claim dialog doesn't squat a name forever.
-const PENDING_TTL_MS = 15 * 60 * 1000;
+// Same reasoning as party/partnership.js's PENDING_TTL_MS, but considerably
+// longer than that one: a real claim seen in practice took >15 minutes from
+// reserve() to a successful confirmPayment() (REQUIRED_CONFIRMATIONS plus
+// RPC lag, compounded by the claim dialog's "Check again" originally being a
+// manual click — see conversation), and sweepExpired() deleting the row out
+// from under an already-paid-for claim is just as much an orphaning bug as
+// reserve()'s own fix above. Matches src/alias.js's MAX_AGE_MS, so the
+// client-side resume window and the server-side row lifetime agree.
+const PENDING_TTL_MS = 60 * 60 * 1000;
 
 // How long reserve() refuses to let a wallet start a SECOND claim attempt
 // while its first one is still pending — see that method's own comment.

@@ -1102,7 +1102,14 @@ function openClaimAliasDialog() {
   if (pending) { renderClaimStep('confirming', { value: pending.alias, amountLuna: pending.amountLuna, paymentTx: pending.paymentTx }); return; }
   renderClaimStep('form', { value: '' });
 }
+// Auto-retries the 'confirming' step while waiting on confirmations (see
+// that step's own comment below) — cleared on every renderClaimStep() call
+// so switching to any other step (closing the dialog, a fatal failure, a
+// fresh claim) can never leave a stale retry firing into the wrong state.
+let claimAutoRetryTimer = null;
 function renderClaimStep(step, ctx) {
+  clearTimeout(claimAutoRetryTimer);
+  claimAutoRetryTimer = null;
   if (step === 'form') {
     showClaimLobby(`
       <h2>Claim an alias</h2>
@@ -1283,13 +1290,20 @@ function renderClaimStep(step, ctx) {
     }
     showClaimLobby(`
       <h2>${waitingOnChain ? 'Waiting for confirmations' : "Couldn't confirm"}</h2>
-      <p>${waitingOnChain ? `${ctx.confirmations}/${ctx.required} confirmations so far — try again in a bit.` : 'Having trouble reaching the server — try again in a bit.'}</p>
+      <p>${waitingOnChain ? `${ctx.confirmations}/${ctx.required} confirmations so far — checking again automatically.` : 'Having trouble reaching the server — checking again automatically.'}</p>
       <button class="bigbtn" id="aliasRetryConfirmBtn">Check again</button>
     `);
     document.getElementById('aliasRetryConfirmBtn').onclick = () => {
       audio.play('button');
       renderClaimStep('confirming', ctx);
     };
+    // Confirmations and the server round trip both just happen with time —
+    // nothing here needs a human to keep tapping "Check again" (the button
+    // stays, for anyone who wants to force an immediate check). Without this,
+    // a player who doesn't come back to click it sees a NIM payment that
+    // visibly left their wallet with no visible path to the alias ever
+    // landing, which is exactly what happened in practice (see conversation).
+    claimAutoRetryTimer = setTimeout(() => renderClaimStep('confirming', ctx), 5000);
     return;
   }
   if (step === 'payError') {
