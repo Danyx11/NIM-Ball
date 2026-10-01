@@ -117,6 +117,7 @@ export class AliasRegistry extends Server {
       // reuse guard as party/partnership.js's usedTxHashes, same race-safety
       // (checked and written inside the same serialized() call).
       this.usedTxHashes = (await this.ctx.storage.get('usedTxHashes')) || {};
+      await this.migrateWalletNormalization();
     })();
     // Same single-writer-queue pattern as party/partnership.js/radar.js —
     // this is also THE double-claim guard: reserve() only ever runs inside
@@ -138,6 +139,40 @@ export class AliasRegistry extends Server {
     await Promise.all([this.ctx.storage.put('aliases', this.aliases), this.ctx.storage.put('byWallet', this.byWallet)]);
   }
   async persistUsedTxHashes() { await this.ctx.storage.put('usedTxHashes', this.usedTxHashes); }
+
+  // One-time self-heal, run once per cold start (cheap even then — this
+  // whole registry is tiny): rows reserved before confirmPayment() started
+  // normalizing wallets (see that method's own comment) can have `row.wallet`
+  // and `byWallet` keys in whatever raw, possibly space-grouped format the
+  // client happened to send, which no longer matches what reserve()/
+  // release()/lookupByWallet() compute today — found live as a reservation
+  // that genuinely belonged to the caller still reporting 'already taken'
+  // (the stale pending row was invisible to the wallet-keyed checks that
+  // would otherwise have recognized and freed/reused it) while that same
+  // wallet's own lookup showed no alias at all. Rebuilds `byWallet` from
+  // `aliases` from scratch rather than patching it in place — `aliases` is
+  // the source of truth, `byWallet` is just a derived index, so throwing it
+  // away and recomputing is simpler than trying to reconcile two documents
+  // that may have already drifted from each other. A wallet with more than
+  // one row pointing at it (should never happen going forward, but historic
+  // data predates several of the guards that now prevent it) keeps its
+  // confirmed row over a pending one, and otherwise its most recent.
+  async migrateWalletNormalization() {
+    const rebuilt = {};
+    let changed = false;
+    for (const row of Object.values(this.aliases)) {
+      const normalized = normalizeAddress(row.wallet);
+      if (normalized !== row.wallet) { row.wallet = normalized; changed = true; }
+      const current = rebuilt[normalized] ? this.aliases[rebuilt[normalized]] : null;
+      if (!current || (current.status !== 'confirmed' && (row.status === 'confirmed' || row.createdAt > current.createdAt))) {
+        rebuilt[normalized] = row.alias;
+      }
+    }
+    if (changed || JSON.stringify(rebuilt) !== JSON.stringify(this.byWallet)) {
+      this.byWallet = rebuilt;
+      await this.persist();
+    }
+  }
 
   // Releases any pending reservation whose hold has lapsed — called at the
   // top of every read/write path below, not on a timer, same lazy-sweep
