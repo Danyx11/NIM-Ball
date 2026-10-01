@@ -60,3 +60,58 @@ export async function confirmAliasPayment(ctx) {
   }
   return confirmAliasPaymentReal(ctx);
 }
+
+// ---------------------------------------------------------------------
+// Pending-claim persistence — the actual fix for "NIM left the wallet but
+// the alias never got attributed" (see conversation). Once sendNimPayment()
+// resolves with a real tx hash, that hash only ever lived in main.js's
+// in-memory `ctx` until now — closing the tab, refreshing, or the claim
+// dialog getting dismissed for any reason between then and confirmPayment()
+// succeeding meant the hash was simply gone, with no way back to it even
+// though party/aliases.js's own pending reservation was (before its matching
+// fix) still sitting there waiting to be confirmed. main.js saves one of
+// these the moment a real payment is sent, resumes straight into the
+// 'confirming' step from it on the next openClaimAliasDialog() instead of
+// starting a fresh (and, pre-fix, destructive) reserve(), and clears it once
+// the claim is confirmed or definitively dead. A single slot, not keyed per
+// wallet — this device can only ever be mid-claim for whichever wallet is
+// currently connected, same single-identity assumption the rest of this
+// file already makes.
+const PENDING_CLAIM_KEY = 'nimball-alias-pending-claim';
+
+// Never persisted in FAKE_MODE — a fake tx hash can never resolve against
+// the real server, so saving one here would permanently "stick" the next,
+// real session into resuming a claim that will fail forever (see
+// loadPendingClaim's MAX_AGE_MS below for the other half of that guard).
+export function savePendingClaim({ wallet, alias, paymentTx, amountLuna }) {
+  if (FAKE_MODE) return;
+  try {
+    localStorage.setItem(PENDING_CLAIM_KEY, JSON.stringify({ wallet, alias, paymentTx, amountLuna, savedAt: Date.now() }));
+  } catch { /* private-browsing localStorage throw — worst case, no resume on reload */ }
+}
+
+// A real claim should never take anywhere near this long to confirm or to
+// be declared a dead end (REQUIRED_CONFIRMATIONS is a matter of minutes at
+// most) — this is just a backstop against resuming into a permanently
+// stuck/forgotten record forever (an RPC outage, a tx that never confirms)
+// with no way out short of clearing site data.
+const MAX_AGE_MS = 60 * 60 * 1000;
+
+// Returns null if there's nothing saved, it belongs to a different wallet
+// than the one asking (e.g. the identity was switched since), or it's past
+// MAX_AGE_MS — never hands back another wallet's in-flight claim or a
+// hopelessly stale one.
+export function loadPendingClaim(wallet) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PENDING_CLAIM_KEY) || 'null');
+    if (!saved || saved.wallet !== wallet) return null;
+    if (Date.now() - saved.savedAt > MAX_AGE_MS) { clearPendingClaim(); return null; }
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingClaim() {
+  try { localStorage.removeItem(PENDING_CLAIM_KEY); } catch { /* nothing to clear anyway */ }
+}

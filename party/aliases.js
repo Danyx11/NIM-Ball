@@ -48,6 +48,16 @@ const FETCH_USER_AGENT = 'NimiCurl-Alias-Worker/1.0';
 // claim dialog doesn't squat a name forever.
 const PENDING_TTL_MS = 15 * 60 * 1000;
 
+// How long reserve() refuses to let a wallet start a SECOND claim attempt
+// while its first one is still pending — see that method's own comment.
+// Deliberately much shorter than PENDING_TTL_MS: this isn't about freeing
+// the name back up (PENDING_TTL_MS still governs that), it's about giving a
+// payment that's actually in flight enough time to pick up its
+// REQUIRED_CONFIRMATIONS before the client is allowed to retry and silently
+// orphan it (see conversation: a real claim's NIM left the wallet but the
+// alias never got attributed, traced to exactly this race).
+const CLAIM_LOCK_MS = 2 * 60 * 1000;
+
 // 3-31 chars, a-z 0-9 _ only — same shape the old @nimconnect/profile-client
 // validated client-side; src/alias.js keeps its own copy of this regex for
 // instant client-side feedback, this is the copy that actually gates storage.
@@ -145,8 +155,16 @@ export class AliasRegistry extends Server {
   // Locks the alias to this wallet as `pending` — the availability check
   // IS the reservation attempt, same as party/partnership.js's reserve()
   // doubles as its own week-availability check. A wallet that already holds
-  // a pending or confirmed alias can't start a second one; its previous
-  // still-pending (abandoned) attempt is freed to make room for a new try.
+  // a CONFIRMED alias can't start a second one. A wallet with a still-
+  // PENDING one is refused outright (`error: 'claim_in_progress'`) while
+  // CLAIM_LOCK_MS hasn't elapsed since that reservation was created — this
+  // used to silently delete-and-replace the old pending row instead, which
+  // is exactly what let a real in-flight payment get orphaned: the money
+  // was already on its way to confirmation, then a retry (same wallet,
+  // same or different alias) wiped the only row confirmPayment() could ever
+  // attribute it to. Past the lock window the attempt is presumed genuinely
+  // abandoned (never paid) and is freed to make room for a new try, same as
+  // before.
   reserve({ alias, wallet }) {
     return this.serialized(async () => {
       await this.ready();
@@ -157,11 +175,26 @@ export class AliasRegistry extends Server {
       const existingAlias = this.byWallet[wallet];
       const existingRow = existingAlias ? this.aliases[existingAlias] : null;
       if (existingRow?.status === 'confirmed') return { ok: false, error: 'wallet already has an alias' };
-      if (this.aliases[clean]) return { ok: false, error: 'already taken' };
-      if (existingRow?.status === 'pending') delete this.aliases[existingAlias];
       const now = Date.now();
+      if (existingRow?.status === 'pending') {
+        const lockExpiresAt = existingRow.createdAt + CLAIM_LOCK_MS;
+        if (lockExpiresAt > now) {
+          return { ok: false, error: 'claim_in_progress', alias: existingAlias, amountLuna: existingRow.expectedAmountLuna, lockExpiresAt };
+        }
+        delete this.aliases[existingAlias];
+      }
+      if (this.aliases[clean]) return { ok: false, error: 'already taken' };
       const pendingExpiresAt = now + PENDING_TTL_MS;
-      this.aliases[clean] = { alias: clean, status: 'pending', wallet, claimedAt: null, paymentTx: null, createdAt: now, pendingExpiresAt };
+      // expectedAmountLuna is locked in HERE, at reserve() time, and is what
+      // confirmPayment() below checks the real transaction against — never
+      // the live ALIAS_PRICE_LUNA constant, which can change (as it just
+      // did, 100 -> 30 NIM) while a reservation from before that change is
+      // still mid-confirmation. Same reasoning party/partnership.js's own
+      // reserve() already documents for its own expectedAmountLuna.
+      this.aliases[clean] = {
+        alias: clean, status: 'pending', wallet, claimedAt: null, paymentTx: null,
+        createdAt: now, pendingExpiresAt, expectedAmountLuna: ALIAS_PRICE_LUNA,
+      };
       this.byWallet[wallet] = clean;
       await this.persist();
       return { ok: true, alias: clean, amountLuna: ALIAS_PRICE_LUNA, pendingExpiresAt };
@@ -169,7 +202,11 @@ export class AliasRegistry extends Server {
   }
 
   // Lets the reserving wallet free its own still-pending alias early (quit
-  // the claim dialog before paying) instead of waiting out PENDING_TTL_MS.
+  // the claim dialog before paying) instead of waiting out CLAIM_LOCK_MS/
+  // PENDING_TTL_MS. Deliberately the ONLY way a pending reservation is ever
+  // removed before CLAIM_LOCK_MS elapses — main.js only ever calls this from
+  // the 'confirmPay' step's Cancel button, i.e. strictly before sendNimPayment
+  // has fired, so there's never real money behind the row being released.
   release({ alias, wallet }) {
     return this.serialized(async () => {
       await this.ready();
@@ -196,7 +233,9 @@ export class AliasRegistry extends Server {
   //   5. it executed successfully
   //   6. sender == the reservation's own wallet, recipient == the configured
   //      payment address — never the client's say-so for either
-  //   7. value == the fixed ALIAS_PRICE_LUNA
+  //   7. value == this row's own expectedAmountLuna, locked in at reserve()
+  //      time — never the live ALIAS_PRICE_LUNA constant (see reserve()'s
+  //      own comment for why that distinction matters)
   confirmPayment({ alias, wallet, paymentTx }) {
     return this.serialized(async () => {
       await this.ready();
@@ -223,7 +262,8 @@ export class AliasRegistry extends Server {
       const expectedRecipient = this.env?.PARTNERSHIP_PAYMENT_ADDRESS;
       if (!expectedRecipient) return { ok: false, error: 'server misconfigured: no payment address' };
       if (normalizeAddress(tx.to) !== normalizeAddress(expectedRecipient)) return { ok: false, error: 'recipient mismatch' };
-      if (tx.value !== ALIAS_PRICE_LUNA) return { ok: false, error: 'amount mismatch', expected: ALIAS_PRICE_LUNA, actual: tx.value };
+      const expectedAmountLuna = row.expectedAmountLuna ?? ALIAS_PRICE_LUNA; // ?? only ever for a row reserved before this field existed
+      if (tx.value !== expectedAmountLuna) return { ok: false, error: 'amount mismatch', expected: expectedAmountLuna, actual: tx.value };
 
       this.aliases[alias] = { ...row, status: 'confirmed', claimedAt: Date.now(), paymentTx: normalizedHash, pendingExpiresAt: null };
       this.usedTxHashes[normalizedHash] = { alias, wallet, confirmedAt: Date.now() };
