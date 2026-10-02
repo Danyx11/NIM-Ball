@@ -12,8 +12,8 @@ import '@fontsource/fira-mono/500.css';
 import { startGame, preloadCoreAssets, DEFAULT_IDENTICON_ADDRESS } from './game.js';
 import { preloadTicketAssets, renderTicket } from './ticket.js';
 import { playSingleShot, playReveal } from './weekController.js';
-import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendNimPayment, getGuestCode } from './nimiq.js';
-import { resolveIdentity, isValidAlias, reserveAlias, releaseAlias, confirmAliasPayment, FAKE_MODE as FAKE_ALIAS } from './alias.js';
+import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendNimPayment, getGuestCode, setStoredAddress } from './nimiq.js';
+import { resolveIdentity, isValidAlias, reserveAlias, releaseAlias, confirmAliasPayment, savePendingClaim, loadPendingClaim, clearPendingClaim, FAKE_MODE as FAKE_ALIAS } from './alias.js';
 // Real recipient address (src/partnership.js) — the actual $/week -> NIM
 // quote/price locking now happens server-side (party/partnership.js's
 // reserve(), see conversation), not via that file's own quotePartnership,
@@ -700,6 +700,26 @@ window.addEventListener('pageshow', onPageResume);
 connectNimiq()
   .catch((err) => console.log('[nimiq] not running inside Nimiq Pay:', err.message));
 
+// Manual recovery path: `?setIdentity=<address>` overwrites the stored
+// identity outright. No in-game UI for this on purpose — it's a one-off fix
+// for a player whose connected identity (accounts[0] from connectPayAccount(),
+// see src/nimiq.js) turns out to be genuinely wrong, for whatever reason,
+// when they already have independent proof of their real address (e.g. a
+// wallet explorer). Not a general "switch accounts" feature — same trust
+// level `hubAddress` already has everywhere else in this codebase (a plain,
+// unverified client-reported string, see CLAUDE.md's Radar trust-model
+// note), so accepting it from a URL param changes nothing about what the
+// server already trusts. Stripped from the URL immediately so a reload/share
+// doesn't keep re-applying it.
+{
+  const forcedIdentity = new URLSearchParams(location.search).get('setIdentity');
+  if (forcedIdentity) {
+    setStoredAddress(forcedIdentity);
+    const url = new URL(location.href);
+    url.searchParams.delete('setIdentity');
+    history.replaceState(null, '', url);
+  }
+}
 // ---- Player identity (see src/nimiq.js's getIdentity/connectIdentity) —
 // resolved once via the #connectGateOverlay gate below (Connect or Play as
 // guest), right after the home screen. A connected address is remembered and
@@ -1094,9 +1114,22 @@ function openClaimAliasDialog() {
   // whichever of those was open stayed showing underneath (same stuck-panel
   // bug class as Home's/the identity pill's own gate, same fix).
   hideSidebarPanels();
+  // Resume a real payment already sent on a previous visit (see
+  // src/alias.js's savePendingClaim comment) instead of starting a fresh
+  // 'form' — jumping straight to 'confirming' re-checks the SAME paymentTx,
+  // never sends a second one.
+  const pending = loadPendingClaim(hubAddress);
+  if (pending) { renderClaimStep('confirming', { value: pending.alias, amountLuna: pending.amountLuna, paymentTx: pending.paymentTx }); return; }
   renderClaimStep('form', { value: '' });
 }
+// Auto-retries the 'confirming' step while waiting on confirmations (see
+// that step's own comment below) — cleared on every renderClaimStep() call
+// so switching to any other step (closing the dialog, a fatal failure, a
+// fresh claim) can never leave a stale retry firing into the wrong state.
+let claimAutoRetryTimer = null;
 function renderClaimStep(step, ctx) {
+  clearTimeout(claimAutoRetryTimer);
+  claimAutoRetryTimer = null;
   if (step === 'form') {
     showClaimLobby(`
       <h2>Claim an alias</h2>
@@ -1136,11 +1169,29 @@ function renderClaimStep(step, ctx) {
     showClaimLobby(`<h2>Checking…</h2><p>Making sure nobody already has @${ctx.value}.</p>`);
     reserveAlias(ctx.value, hubAddress).then((res) => {
       if (!res.ok) {
+        // claim_in_progress: this wallet already has a payment in flight
+        // (party/aliases.js's CLAIM_LOCK_MS) — normally caught earlier by
+        // openClaimAliasDialog()'s own loadPendingClaim() resume, this is
+        // only reached when that local record is missing (a different
+        // browser/device, or localStorage was cleared) but the server-side
+        // lock is still live. Nothing to resume from here, so just explain
+        // the wait instead of offering a Retry that would only fail again.
+        if (res.error === 'claim_in_progress') { renderClaimStep('claimInProgress', { ...ctx, alias: res.alias, lockExpiresAt: res.lockExpiresAt }); return; }
         renderClaimStep(res.error === 'already taken' ? 'taken' : 'reserveFailed', { ...ctx, error: res.error });
         return;
       }
       renderClaimStep('confirmPay', { value: ctx.value, amountLuna: res.amountLuna });
     }).catch(() => renderClaimStep('reserveFailed', { ...ctx, error: 'network error' }));
+    return;
+  }
+  if (step === 'claimInProgress') {
+    const waitMin = Math.max(1, Math.ceil((ctx.lockExpiresAt - Date.now()) / 60_000));
+    showClaimLobby(`
+      <h2>Claim already in progress</h2>
+      <p>A payment for @${ctx.alias} is still being confirmed from this wallet. Try again in about ${waitMin} minute${waitMin > 1 ? 's' : ''}.</p>
+      <button class="bigbtn" id="aliasCloseBtn">Close</button>
+    `);
+    document.getElementById('aliasCloseBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
     return;
   }
   if (step === 'taken') {
@@ -1188,7 +1239,14 @@ function renderClaimStep(step, ctx) {
       audio.play('button');
       renderClaimStep('paying', ctx);
       (FAKE_ALIAS ? Promise.resolve({ hash: 'fake-tx' }) : sendNimPayment({ recipient: PARTNERSHIP_PAYMENT_ADDRESS, valueLuna: ctx.amountLuna }))
-        .then((tx) => renderClaimStep('confirming', { ...ctx, paymentTx: tx.hash }))
+        .then((tx) => {
+          // Persisted BEFORE moving on — from this instant real NIM is in
+          // flight, so the hash must survive a reload/closed tab even if
+          // confirmAliasPayment below never gets to run (see
+          // src/alias.js's savePendingClaim comment for the bug this fixes).
+          savePendingClaim({ wallet: hubAddress, alias: ctx.value, paymentTx: tx.hash, amountLuna: ctx.amountLuna });
+          renderClaimStep('confirming', { ...ctx, paymentTx: tx.hash });
+        })
         .catch((err) => renderClaimStep(err.cancelled ? 'confirmPay' : 'payError', { ...ctx, message: err.message }));
     };
     return;
@@ -1206,6 +1264,7 @@ function renderClaimStep(step, ctx) {
     return;
   }
   if (step === 'confirmed') {
+    clearPendingClaim();
     aliasCache.set(hubAddress, { address: hubAddress, alias: ctx.value });
     syncIdentityPill();
     showClaimLobby(`
@@ -1217,20 +1276,65 @@ function renderClaimStep(step, ctx) {
     return;
   }
   if (step === 'confirmFailed') {
-    const waitingOnChain = ctx.error === 'pending';
+    // Fatal: an explicit allowlist of party/aliases.js's own confirmPayment
+    // error strings that mean the tx that was sent can NEVER satisfy this
+    // reservation no matter how many times it's re-checked (wrong amount/
+    // sender/recipient, already used elsewhere, failed on-chain, or the
+    // reservation itself is gone — see that method's own comment for each;
+    // 'sender mismatch' checks `wallet` against the tx's relatedAddresses,
+    // not just tx.from, specifically so it doesn't misfire for Nimiq Pay's
+    // own HTLC-routed payments — see conversation). Deliberately an
+    // ALLOWLIST, not a denylist of "known transient" errors: a network
+    // hiccup, an RPC timeout, or any other error surfaces as some arbitrary
+    // fetch-failure string here (net.js's postAliasRegistry catches and
+    // returns err.message, it never throws a fixed "network error" string)
+    // — treating everything NOT on this list as retryable fails safe, since
+    // the alternative (treating anything unrecognized as fatal) is exactly
+    // what clearPendingClaim()'d a real in-flight payment during testing.
+    const FATAL_ERRORS = ['transaction execution failed', 'sender mismatch', 'recipient mismatch', 'amount mismatch', 'transaction already used', 'not your pending reservation'];
+    const fatal = FATAL_ERRORS.includes(ctx.error);
+    // Offering a one-click retry on a fatal error would mean "Pay in wallet"
+    // again, i.e. signing a SECOND real transaction on top of money that's
+    // already unaccounted for — exactly the mistake this whole fix is for,
+    // so this is a dead end instead: clear the local record and point at
+    // asking for help.
+    if (fatal) {
+      clearPendingClaim();
+      showClaimLobby(`
+        <h2>Couldn't confirm</h2>
+        <p>${escapeHtml(typeof ctx.error === 'string' ? ctx.error : 'Unknown error.')}</p>
+        <p>Your payment was sent but could not be matched to this claim automatically. Don't send another payment — reach out so it can be checked manually.</p>
+        <button class="bigbtn" id="aliasCloseBtn">Close</button>
+      `);
+      document.getElementById('aliasCloseBtn').onclick = () => { audio.play('button'); closeClaimDialog(); };
+      return;
+    }
+    // No raw confirmation counter shown here on purpose (see conversation) —
+    // a number like "2/3 confirmations" reads as "something is wrong and
+    // it's stuck", not as the few-seconds-normal wait it actually is. One
+    // plain waiting message covers both the on-chain and the transient-
+    // network case identically; there's nothing actionable to tell them apart
+    // from the player's side anyway.
     showClaimLobby(`
-      <h2>${waitingOnChain ? 'Waiting for confirmations' : "Couldn't confirm"}</h2>
-      <p>${waitingOnChain ? `${ctx.confirmations}/${ctx.required} confirmations so far — try again in a bit.` : escapeHtml(typeof ctx.error === 'string' ? ctx.error : 'Unknown error.')}</p>
+      <h2>Confirming your payment…</h2>
+      <p>Waiting for the transaction to complete. This should only take a few seconds.</p>
       <button class="bigbtn" id="aliasRetryConfirmBtn">Check again</button>
     `);
-    // On the still-confirming branch this re-polls the SAME already-broadcast
-    // paymentTx (step 'confirming') — never back through 'paying', which
-    // would send an entirely new real transaction for an alias that's
-    // already been paid for once.
     document.getElementById('aliasRetryConfirmBtn').onclick = () => {
       audio.play('button');
-      renderClaimStep(waitingOnChain ? 'confirming' : 'confirmPay', ctx);
+      renderClaimStep('confirming', ctx);
     };
+    // Confirmations and the server round trip both just happen with time —
+    // nothing here needs a human to keep tapping "Check again" (the button
+    // stays, for anyone who wants to force an immediate check). Without this,
+    // a player who doesn't come back to click it sees a NIM payment that
+    // visibly left their wallet with no visible path to the alias ever
+    // landing, which is exactly what happened in practice (see conversation).
+    // 2s, not longer — REQUIRED_CONFIRMATIONS dropped to 3 (party/aliases.js)
+    // specifically so the whole reserve->pay->confirm round trip lands in
+    // single-digit seconds; polling slower than that would just reintroduce
+    // the wait this was meant to remove.
+    claimAutoRetryTimer = setTimeout(() => renderClaimStep('confirming', ctx), 2000);
     return;
   }
   if (step === 'payError') {
@@ -2213,6 +2317,27 @@ let notifStatus = { connected: false, notifyTurnEnabled: false };
 // outside Nimiq Pay, where the flow already works) are untouched.
 if (window.nimiqPay) notifBellBtn.classList.add('hidden');
 
+// Fullscreen toggle (see conversation, index.html's #nimiqFullscreenBtn) —
+// shown only when Nimiq Pay's host bridge actually exposes
+// requestFullscreen: confirmed via on-device testing that an older Nimiq Pay
+// install still injects window.nimiqPay but WITHOUT these methods (they're
+// undefined, not a missing object), so the real feature-detect has to be on
+// the method itself, not just window.nimiqPay's presence like the check
+// above. No @nimiq/mini-app-sdk import needed — Nimiq's own docs confirm
+// window.nimiqPay works directly without it. Exiting fullscreen is
+// deliberately left to Nimiq Pay's own native control rather than a second
+// button here — on-device testing showed it stays reachable even while
+// fullscreen is active.
+const nimiqFullscreenBtn = document.getElementById('nimiqFullscreenBtn');
+if (window.nimiqPay?.requestFullscreen) {
+  nimiqFullscreenBtn.classList.remove('hidden');
+  nimiqFullscreenBtn.addEventListener('click', () => {
+    audio.play('button');
+    window.nimiqPay.requestFullscreen()
+      .catch((err) => console.log('[fullscreen] request failed:', err.message));
+  });
+}
+
 function renderNotifPanel() {
   notifSwitch.setAttribute('aria-checked', String(notifStatus.notifyTurnEnabled));
   // Both states render as a pill (per explicit request) — "Connected" is
@@ -2628,7 +2753,13 @@ function renderPartnershipWeekList(weeks) {
   });
 }
 
+// Separate from src/main.js's claimAutoRetryTimer (the alias dialog's own
+// equivalent) — two independent dialogs, each clearing only its own timer on
+// every one of its own render calls, same reasoning as that one's comment.
+let partnershipAutoRetryTimer = null;
 function renderPartnershipBook(step, ctx = {}) {
+  clearTimeout(partnershipAutoRetryTimer);
+  partnershipAutoRetryTimer = null;
   if (step === 'walletGate') {
     partnershipBookContent.innerHTML = `
       <h2>Partnership requires a Nimiq wallet</h2>
@@ -2682,17 +2813,8 @@ function renderPartnershipBook(step, ctx = {}) {
       audio.play('button');
       renderPartnershipBook('paying');
       sendNimPayment({ recipient: PARTNERSHIP_PAYMENT_ADDRESS, valueLuna: ctx.amountLuna })
-        .then((tx) => {
-          renderPartnershipBook('confirming', { weekIds: ctx.weekIds });
-          return confirmPartnershipPayment({ weekIds: ctx.weekIds, wallet: hubAddress, paymentTx: tx.hash });
-        })
-        .then((res) => {
-          if (res.ok) { partnershipActiveReservation = null; renderPartnershipBook('booked', { weekIds: ctx.weekIds }); return; }
-          renderPartnershipBook('confirmFailed', { ...ctx, error: res.error, confirmations: res.confirmations, required: res.required });
-        })
-        .catch((err) => {
-          renderPartnershipBook(err.cancelled ? 'confirmPay' : 'payError', { ...ctx, message: err.message });
-        });
+        .then((tx) => renderPartnershipBook('confirming', { ...ctx, paymentTx: tx.hash }))
+        .catch((err) => renderPartnershipBook(err.cancelled ? 'confirmPay' : 'payError', { ...ctx, message: err.message }));
     });
     return;
   }
@@ -2702,16 +2824,56 @@ function renderPartnershipBook(step, ctx = {}) {
   }
   if (step === 'confirming') {
     partnershipBookContent.innerHTML = '<p>Confirming with the server…</p>';
+    // Re-entrant on purpose (same paymentTx every time, see 'confirmFailed'
+    // below) — this used to only ever run once, chained directly off
+    // sendNimPayment() above, with "Check again" looping back through
+    // 'confirmPay' instead: that re-showed "Pay in wallet" and would have
+    // signed a SECOND real transaction on top of a payment already sent (see
+    // src/alias.js's savePendingClaim comment / CLAUDE.md's "Alias registry"
+    // section for the identical bug, found and fixed there first).
+    confirmPartnershipPayment({ weekIds: ctx.weekIds, wallet: hubAddress, paymentTx: ctx.paymentTx }).then((res) => {
+      if (res.ok) { partnershipActiveReservation = null; renderPartnershipBook('booked', { weekIds: ctx.weekIds }); return; }
+      renderPartnershipBook('confirmFailed', { ...ctx, error: res.error, confirmations: res.confirmations, required: res.required });
+    }).catch(() => renderPartnershipBook('confirmFailed', { ...ctx, error: 'network error' }));
     return;
   }
   if (step === 'confirmFailed') {
-    const waitingOnChain = ctx.error === 'pending';
+    // Same fatal allowlist as src/alias.js's own 'confirmFailed' — these
+    // error strings mean the tx that was sent can never satisfy this
+    // reservation no matter how many times it's re-checked (see
+    // party/partnership.js's confirmPayment for each), so offering a retry
+    // here would mean a second real payment, same mistake this whole fix is
+    // for.
+    const FATAL_ERRORS = ['transaction execution failed', 'sender mismatch', 'recipient mismatch', 'amount mismatch', 'transaction already used', 'not your pending reservation'];
+    const fatal = FATAL_ERRORS.includes(ctx.error);
+    if (fatal) {
+      partnershipBookContent.innerHTML = `
+        <h2>Couldn't confirm</h2>
+        <p>${escapeHtml(partnershipErrorMessage(ctx.error))}</p>
+        <p>Your payment was sent but could not be matched to this booking automatically. Don't send another payment — reach out so it can be checked manually.</p>
+        <button class="bigbtn" id="partnershipCloseFailedBtn">Close</button>
+      `;
+      document.getElementById('partnershipCloseFailedBtn').addEventListener('click', () => {
+        audio.play('button');
+        releasePartnershipReservationIfAny();
+        partnershipBookOverlay.classList.add('hidden');
+        partnershipOverlay.classList.remove('hidden');
+      });
+      return;
+    }
+    // No raw "x/y confirmations" counter and an automatic retry, same
+    // reasoning as src/alias.js's own 'confirmFailed' — see CLAUDE.md's
+    // "Alias registry" section's "Speed" paragraph.
     partnershipBookContent.innerHTML = `
-      <h2>${waitingOnChain ? 'Waiting for confirmations' : "Couldn't confirm"}</h2>
-      <p>${waitingOnChain ? `${ctx.confirmations}/${ctx.required} confirmations so far — try again in a bit.` : escapeHtml(partnershipErrorMessage(ctx.error))}</p>
+      <h2>Confirming your payment…</h2>
+      <p>Waiting for the transaction to complete. This should only take a few seconds.</p>
       <button class="bigbtn" id="partnershipRetryConfirmBtn">Check again</button>
     `;
-    document.getElementById('partnershipRetryConfirmBtn').addEventListener('click', () => renderPartnershipBook('confirmPay', ctx));
+    document.getElementById('partnershipRetryConfirmBtn').addEventListener('click', () => {
+      audio.play('button');
+      renderPartnershipBook('confirming', ctx);
+    });
+    partnershipAutoRetryTimer = setTimeout(() => renderPartnershipBook('confirming', ctx), 2000);
     return;
   }
   if (step === 'payError') {

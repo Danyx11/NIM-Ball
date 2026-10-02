@@ -229,6 +229,26 @@ html, body {
   margin-top: -5px; /* nudge up, see conversation — both platforms, mobile has no position override of its own to fight */
 }
 
+/* Fullscreen toggle, right of the wordmark (see conversation) — hidden by
+   default, revealed by main.js only when window.nimiqPay.requestFullscreen
+   exists. Small/quiet on purpose: same "passive affordance" language as
+   #helpBtn, not a primary CTA. */
+.brand-fullscreen-btn {
+  flex: none;
+  width: 26px; height: 26px;
+  margin-left: 8px;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: var(--nb-12);
+  color: var(--nb-80);
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.brand-fullscreen-btn svg { width: 15px; height: 15px; }
+.brand-fullscreen-btn:hover { background: var(--nb-16); color: var(--nb-100); }
+.brand-fullscreen-btn.hidden { display: none; }
+
 /* Help button (see conversation) — fixed to the viewport like #sidebar
    itself, sitting in the gap between the tile grid and the sidebar/
    controller column, level with the brand logo. top/right are set inline
