@@ -2324,10 +2324,7 @@ if (window.nimiqPay) notifBellBtn.classList.add('hidden');
 // undefined, not a missing object), so the real feature-detect has to be on
 // the method itself, not just window.nimiqPay's presence like the check
 // above. No @nimiq/mini-app-sdk import needed — Nimiq's own docs confirm
-// window.nimiqPay works directly without it. Exiting fullscreen is
-// deliberately left to Nimiq Pay's own native control rather than a second
-// button here — on-device testing showed it stays reachable even while
-// fullscreen is active.
+// window.nimiqPay works directly without it.
 const nimiqFullscreenBtn = document.getElementById('nimiqFullscreenBtn');
 if (window.nimiqPay?.requestFullscreen) {
   nimiqFullscreenBtn.classList.remove('hidden');
@@ -2336,6 +2333,27 @@ if (window.nimiqPay?.requestFullscreen) {
     window.nimiqPay.requestFullscreen()
       .catch((err) => console.log('[fullscreen] request failed:', err.message));
   });
+  // Two fixes from on-device testing (see conversation):
+  // 1) --stable-vh (see setStableVh's own comment near the top of this file)
+  //    only ever recomputes on orientationchange — entering/leaving Nimiq
+  //    Pay's native fullscreen changes window.innerHeight (host chrome
+  //    appearing/disappearing) without firing that event, so #game-card kept
+  //    its pre-fullscreen size and the extra height showed up as a black
+  //    band instead of the board growing into it. Same 120ms settle delay
+  //    orientationchange already uses, for the same reason (let the host's
+  //    own transition finish before reading window.innerHeight).
+  // 2) Nimiq Pay draws its own native exit-fullscreen control over the
+  //    WebView once active — outside our DOM, position not ours to control
+  //    — which visually collided with this button. Simplest fix: this
+  //    button only ever means "enter", so hide it while already fullscreen
+  //    (nothing left for it to do) and let it reappear once that native
+  //    control is gone again.
+  if (typeof window.nimiqPay.onFullscreenChange === 'function') {
+    window.nimiqPay.onFullscreenChange((enabled) => {
+      setTimeout(setStableVh, 120);
+      nimiqFullscreenBtn.classList.toggle('hidden', !!enabled);
+    });
+  }
 }
 
 function renderNotifPanel() {
