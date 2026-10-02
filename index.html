@@ -102,8 +102,17 @@
        plain CSS can't reach across sibling .nav-section boxes for that).
        Tapping an already-open title just closes it. -->
   <div id="sidebar">
+    <!-- Fullscreen toggle (see conversation): only shown when
+         window.nimiqPay.requestFullscreen exists (main.js), i.e. inside a
+         Nimiq Pay build new enough to expose it — absent/old Nimiq Pay and
+         any plain browser never see this button. Exiting fullscreen is left
+         to Nimiq Pay's own native control (confirmed to stay reachable even
+         while fullscreen, per on-device testing) — this button only enters. -->
     <div class="sidebar-brand">
       <img id="bg-logo" alt="logo">
+      <button id="nimiqFullscreenBtn" class="brand-fullscreen-btn hidden" type="button" aria-label="Go fullscreen">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9V4h5v2H6v3H4zm0 6h2v3h3v2H4v-5zm16-6h-2V6h-3V4h5v5zm0 6v5h-5v-2h3v-3h2z"/></svg>
+      </button>
     </div>
     <nav class="sidebar-nav">
       <!-- Home / League: flat, non-accordion nav actions (see conversation —

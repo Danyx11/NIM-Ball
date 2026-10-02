@@ -2317,6 +2317,27 @@ let notifStatus = { connected: false, notifyTurnEnabled: false };
 // outside Nimiq Pay, where the flow already works) are untouched.
 if (window.nimiqPay) notifBellBtn.classList.add('hidden');
 
+// Fullscreen toggle (see conversation, index.html's #nimiqFullscreenBtn) —
+// shown only when Nimiq Pay's host bridge actually exposes
+// requestFullscreen: confirmed via on-device testing that an older Nimiq Pay
+// install still injects window.nimiqPay but WITHOUT these methods (they're
+// undefined, not a missing object), so the real feature-detect has to be on
+// the method itself, not just window.nimiqPay's presence like the check
+// above. No @nimiq/mini-app-sdk import needed — Nimiq's own docs confirm
+// window.nimiqPay works directly without it. Exiting fullscreen is
+// deliberately left to Nimiq Pay's own native control rather than a second
+// button here — on-device testing showed it stays reachable even while
+// fullscreen is active.
+const nimiqFullscreenBtn = document.getElementById('nimiqFullscreenBtn');
+if (window.nimiqPay?.requestFullscreen) {
+  nimiqFullscreenBtn.classList.remove('hidden');
+  nimiqFullscreenBtn.addEventListener('click', () => {
+    audio.play('button');
+    window.nimiqPay.requestFullscreen()
+      .catch((err) => console.log('[fullscreen] request failed:', err.message));
+  });
+}
+
 function renderNotifPanel() {
   notifSwitch.setAttribute('aria-checked', String(notifStatus.notifyTurnEnabled));
   // Both states render as a pill (per explicit request) — "Connected" is
