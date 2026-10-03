@@ -706,11 +706,12 @@
          per-vibe and Classic-only; both vibes launch straight in now
          (src/ai.js for Hockey, src/aiCurling.js for Curling — the latter
          used to land on a "coming soon" panel that no longer exists). #modeWeek (see conversation — moved in from
-         under the More tile, which now only keeps Custom/Replay) is the
-         one exception to "every tile here is Classic-only": it still opens
-         the Classic/Custom fork, same as it always has, just with the vibe
-         picker step it used to need skipped now that the vibe is already
-         chosen (main.js's showVibeWeekFlow). All four tiles are re-tinted to
+         under the More tile, which now only keeps Custom/Replay) is
+         Classic-only too: it calls hostWeekMatch({...DEFAULT_MATCH_CONFIG})
+         directly. It used to open a Classic/Custom fork and this comment said
+         so long after that stopped being true — there is no reachable path to
+         a Custom WEEK match today (showClassicCustomScreen in main.js is
+         deliberately parked, see its own note). All four tiles are re-tinted to
          the ACTIVE VIBE's single color here (blue for Hockey, gold for
          Curling — #vibeSubOverlay.mode-hockey/.mode-curling in style.css),
          overriding their old fixed per-slot brand colors, since under a

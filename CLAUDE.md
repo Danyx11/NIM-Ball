@@ -11,7 +11,50 @@ npm run build            # outputs to dist/
 npm run preview          # serve the production build locally
 ```
 
-Requires Node.js 22+. There is no test suite and no lint script configured.
+Requires Node.js 22+.
+
+```bash
+npm run check   # everything CI runs: lint + tests + asset check + build
+npm run lint    # eslint (small rule set, see eslint.config.js)
+npm test        # node --test over tests/ — leagueRating + replay format
+npm run check:assets   # every referenced asset must exist in public/
+```
+
+## Where this is deployed
+
+**Production is Vercel, at `https://www.nimicurl.com/`.** The apex
+`nimicurl.com` answers with a 308 redirect to the `www` host, so anything that
+needs an absolute URL (the Open Graph/Twitter tags in `index.html`'s `<head>`)
+points at the `www` form directly rather than at a redirect.
+
+GitHub Pages (`https://danyx11.github.io/NIM-Ball/`) also deploys, from
+`.github/workflows/deploy.yml`, on every push to `main`. It is a **secondary**
+target on a subpath — not the live site.
+
+That split is the entire reason `vite.config.js`'s `base` is conditional:
+
+```js
+base: (command === 'build' || isPreview) && !process.env.VERCEL ? '/NIM-Ball/' : '/',
+```
+
+Vercel sets `VERCEL` in its own builds, so production gets the root base; a
+plain `vite build` gets the Pages subpath. **Leave this condition alone.** A
+previous attempt forced it to `/` unconditionally and added a `public/CNAME` on
+the assumption the game was *moving* to a custom domain on GitHub Pages — it had
+been live on Vercel for a long time already. A `CNAME` would have had the Pages
+deploy claim a domain pointed somewhere else entirely, and an unconditional root
+base breaks the Pages build's own subpath. Both were reverted.
+
+Before changing anything about hosting, `base`, a CNAME or a canonical URL,
+check what actually serves the site rather than inferring it from this repo:
+
+```bash
+curl -sI https://nimicurl.com
+```
+
+The Cloudflare Worker backend (`party/`, see "Production remote backend" below)
+is deployed separately via `npm run wrangler:deploy` and is unrelated to where
+the frontend is hosted.
 
 ### Testing inside Nimiq Pay
 
@@ -142,7 +185,11 @@ Sponsor weeks: $5/week, paid in NIM, buys a banner shown in-game for that week.
 
 `evaluate()` is the whole public surface, idempotent per `matchId` (the same `live:`/`week:` ids League uses). Limits: `DAILY_BUDGET_LUNA` (1000 NIM/day), `MAX_WALLET_PAYOUTS_PER_DAY` (3), `PAIR_COOLDOWN_MS` (7 days for the same pair of addresses), no self-play.
 
-**Trust model — read this before touching the eligibility path.** A LIVE prize is decided from two things the client controls: the `?address=` it connected with (see the trust note in "NIM-Curl Radar" above — never verified, never signed) and the `scoreA`/`scoreB` it puts in its own `matchOver` message. `Arbiter` runs no physics, so it cannot recompute either. The one guard it *can* apply is its own state: `this.mancheIndex` only ever increments when the arbiter itself relayed a `launch` after both teams' shots arrived, so `matchOver` with `mancheIndex === 0` is refused (`reason: 'not_played'`, still sent to both clients so `showVictory()` doesn't wait out its timeout). That raises the bar from "one forged message" to "forge a manche exchange first" — **it is a speed bump, not a fix.** Real protection needs wallet-signature auth in the connect handshake plus a server-derived score. WEEK does not share this weakness: `WeekArbiter` resolves rounds itself in `completeRound`, so its winner is server-derived.
+**Trust model — read this before touching the eligibility path.** This section used to say the LIVE winner was taken from the client's own `matchOver` score and that the only guard was a `mancheIndex === 0` refusal — "a speed bump, not a fix". **That is no longer true and has not been for a while**; it is recorded here because the stale version actively understated the protection in place and invited redoing work already done.
+
+What is true now: the LIVE winner is derived from `Arbiter`'s own `this.liveScore`, a server-side tally built manche by manche, and a manche only counts once BOTH clients have reported byte-identical settled states (`mancheResult`). `matchOver`'s client-reported `scoreA`/`scoreB` is not used to decide a winner at all. `this.hadMancheMismatch` refuses the prize outright on any match with even one desynced manche. A forged `matchOver` on a room where nothing was played yields no winner and is answered with `reason: 'not_played'` so `showVictory()` doesn't wait out its timeout.
+
+What remains true: the `?address=` a client connects with is still unsigned and unverified (see the trust note in "NIM-Curl Radar" above), so the *identity* a prize is paid to is only as trustworthy as the client reporting it. Closing that needs wallet-signature auth in the connect handshake — still out of scope. The anti-farming limits in `party/prize.js` (daily budget, 3 payouts per wallet per day, 7-day pair cooldown, no self-play) exist precisely because identity is the weak link, not the score. WEEK never shared the score weakness: `WeekArbiter` resolves rounds itself in `completeRound`.
 
 ### Alias registry
 
@@ -232,7 +279,7 @@ Because physics is fully deterministic given the same input velocities (already 
 
 The blob is at **v2**. v1 assumed the Classic preset outright — exactly 3 stones per team, and `DEFAULT_MATCH_CONFIG` for everything else — which broke Custom matches two ways: decode read a fixed 6 stones per manche whatever had been written, so a 1-/2-stone match's QR ran off the end of the buffer and the ticket printed tiles that were simply dead (the `?replay=` link resolved to `null`, an uploaded ticket reported "no points found"); and nothing carried the rules, so playback always ran Classic — a winter match replayed on the summer arena, a 3-cycle curling point resolved after 2. v2 adds one header byte packing `stonesPerTeam`/`pointsToWin`/`curlingCycles`/`skin` (each 1-3 option as a 2-bit `value - 1`, skin as one bit), drives the per-manche stone loops off the real count, and `src/recorder.js`'s `finishPoint()` takes the live `matchConfig` so every point records what it was played under. `turnTime` is deliberately not encoded (replay has no turn timer). **Decoding stays backward compatible**: a v1 blob — an already-shared link, an already-printed ticket — has no config byte, and reading one would eat the first manche's flags, so `decodePoint` branches on the version and substitutes `V1_IMPLIED_CONFIG` (3 stones / 2 points / 2 cycles / summer), which is exactly what v1 always implied. That constant must NOT be re-pointed at `DEFAULT_MATCH_CONFIG`: it describes fixed historical semantics, not today's preset.
 
-Two ways into a replay, both bypassing `#modeOverlay` (see `main.js`'s `?duel` magic link for the existing precedent this follows): clicking/scanning a single point's QR (`?replay=<point>` in the URL) jumps straight into replaying that one point; the "Replay" mode tile instead opens a file-drop/upload dialog for a saved ticket image, decodes however many of its point QR tiles are present, and replays them all in sequence.
+Two ways into a replay, both bypassing `#modeOverlay` (see `main.js`'s `?duel` magic link for the existing precedent this follows): clicking/scanning a single point's QR (`?replay=<point>` in the URL) jumps straight into replaying that one point; the Replay entry (under the **More** tile — it is no longer its own tile on the mode grid, that slot is `#modeJoinCode` now) instead opens a file-drop/upload dialog for a saved ticket image, decodes however many of its point QR tiles are present, and replays them all in sequence.
 
 Playback itself is `startGame({ replayPoints })`: `beginAimPhase()` branches to a `'replayAim'` phase (deliberately excluded from `isAimingPhase()` — no drag ever applies) that auto-fills `pendingVx/Vy` from the next recorded manche and falls through the exact same `pending`→`sim` path a human shot would, via `maybeAdvanceReplay()`. Pausing only holds back the *next* manche from auto-starting — a shot already mid-flight always finishes normally. `onGoal()` gets one small branch for replay mode: instead of the live `WIN_SCORE` check, "end of replay" is simply "we've played through the last recorded point," advancing to `showReplayEndTicket()` (same ticket visual as a live win, but "Revoir" instead of "Rejouer", no save/share action). A custom bottom playback bar (`#replayBar` — play/pause, a scrubber with a marker per point, an exit icon, plus a YouTube-style thumbnail per point) drives which point plays via `jumpToPoint()`; it's deliberately not the arcade `#toolbar`, which stays hidden throughout replay.
 
@@ -291,6 +338,8 @@ src/
   aiCurling.js    vs-AI shot picking for Pure Curling (mini-sim search, see its header)
   matchConfig.js  Classic preset, Custom rules, per-mode localStorage persistence
   howto.js        How To tutorial step lists (separate mobile/desktop orders)
+  keyboardAvoidance.js  keeps the on-screen keyboard from covering a focused
+                  text field on mobile (visualViewport-based, see its header)
   recorder.js     records manche/point shot data during a live match (see Replay)
   replay.js       replay point encode/decode, ticket QR layout, ?replay= parsing
   ticket.js       renders the shareable end-of-match Polaroid "ticket" image
@@ -321,6 +370,10 @@ public/           only assets actually loaded by the game (kept lean — this sh
   rules/          How To rules illustrations, one per vibe
   ticket/         Polaroid ticket template + banner + guest hex icons
   sfx/            SFX clips (.m4a) + background ambience loop (see src/audio.js)
+  avatars/        guest + bot marks (src/identicons.js fallbacks)
+  league/         League panel's polaroid card art
+  partnership/    Partnership panel's two usage illustrations
+  og-card.jpg     1200x630 link-preview image (see index.html's <head>)
   icons/, favicon.png, apple-touch-icon.png, manifest.json, sw.js   PWA shell
 design/           source art not wired into the game (drafts, superseded versions,
                   raw generations) — never imported by code, safe to ignore for

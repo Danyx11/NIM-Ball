@@ -1464,8 +1464,13 @@ export function startGame(opts = {}) {
   // own beginMatchIntro() call sites never hit this.
   let resumeManchesApplied = false;
   let phase = 'start';
-  // Visual-only 30s turn timer for the score panel LED bar — resets whenever aiming
-  // starts for either team, has no effect on the phase state machine (see turnTimerProgress).
+  // Turn timer for the score panel LED bar — resets whenever aiming starts for
+  // either team. NOT passive, despite what this comment used to claim: when it
+  // runs out it force-submits the current shot via onValidate() (see the
+  // turnTimerProgress() >= 1 check in the main loop), for LIVE, vs AI and
+  // Pass & Play. WEEK is the one mode it never fires in — no per-shot deadline
+  // there by design, which is also why its ring isn't drawn (see drawHexTimer's
+  // own singleShotTeam/externalManche guard).
   const TURN_TIMER_MS = matchConfig.turnTime * 1000;
   let turnTimerStart = 0;
   let turnTimerPhase = null;

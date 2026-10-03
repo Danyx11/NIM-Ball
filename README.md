@@ -2,6 +2,8 @@
 
 **A free-to-play multiplayer curling game powered by Nimiq.**
 
+**Play it: [www.nimicurl.com](https://www.nimicurl.com/)**
+
 NimiCurl is a simple 2D curling game designed to make discovering Nimiq feel natural: **invite someone, play a match, have fun, and come back.**
 
 It is built around a simple idea:
