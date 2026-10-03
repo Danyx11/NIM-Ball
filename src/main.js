@@ -10,9 +10,9 @@ import '@fontsource/mulish/800.css';
 // identity pill's address line (see style.css's #connectBtnLabel).
 import '@fontsource/fira-mono/500.css';
 import { startGame, preloadCoreAssets, DEFAULT_IDENTICON_ADDRESS } from './game.js';
-import { preloadTicketAssets, renderTicket } from './ticket.js';
+import { renderTicket } from './ticket.js';
 import { playSingleShot, playReveal } from './weekController.js';
-import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendNimPayment, getGuestCode, setStoredAddress } from './nimiq.js';
+import { connectNimiq, connectIdentity, getIdentity, setGuest, sendNimPayment, getGuestCode, setStoredAddress } from './nimiq.js';
 import { resolveIdentity, isValidAlias, reserveAlias, releaseAlias, confirmAliasPayment, savePendingClaim, loadPendingClaim, clearPendingClaim, FAKE_MODE as FAKE_ALIAS } from './alias.js';
 // Real recipient address (src/partnership.js) — the actual $/week -> NIM
 // quote/price locking now happens server-side (party/partnership.js's
@@ -87,7 +87,7 @@ const ASSET_BASE = import.meta.env.BASE_URL;
 // finished downloading — see the comment above it). Visible by default in
 // the raw HTML; stays up (see the preloadBackgroundAssets() await further
 // down) only until the home/mode-select screens' own images are ready —
-// whoever opens Nim-Curl is here to play, so match assets (preloadCoreAssets())
+// whoever opens NimiCurl is here to play, so match assets (preloadCoreAssets())
 // start downloading in the background right as the overlay lifts rather than
 // also gating it, so the menu appears sooner while the match itself is
 // already most of the way loaded by the time a player picks a mode. Reused
@@ -586,7 +586,7 @@ const fsRecommendText = document.getElementById('fsRecommendText');
 // do nothing, so the copy instead points at the one thing that actually
 // works on that browser: installing to the home screen.
 if (!FULLSCREEN_SUPPORTED && !IS_STANDALONE) {
-  fsRecommendText.textContent = 'Add Nim-Curl to your Home Screen to play fullscreen (Safari share icon)';
+  fsRecommendText.textContent = 'Add NimiCurl to your Home Screen to play fullscreen (Safari share icon)';
 }
 fsRecommendIcon.addEventListener('click', () => {
   audio.play('button');
@@ -731,7 +731,7 @@ connectNimiq()
     const clean = forcedIdentity.replace(/\s+/g, '').toUpperCase();
     if (!/^NQ[0-9A-Z]{34}$/.test(clean)) {
       console.log('[identity] ?setIdentity= ignored: not a Nimiq address');
-    } else if (window.confirm(`Set this device's Nim-Curl identity to\n\n${clean}\n\nOnly do this if you opened this link yourself. Your ranking, matches and any NIM prize will go to this address.`)) {
+    } else if (window.confirm(`Set this device's NimiCurl identity to\n\n${clean}\n\nOnly do this if you opened this link yourself. Your ranking, matches and any NIM prize will go to this address.`)) {
       setStoredAddress(clean);
     }
     const url = new URL(location.href);
@@ -1873,6 +1873,10 @@ let onConfigBack = null;
 // showMatchHostWaitingScreen's onDisconnect/onLost) — this screen doubles
 // as the connection-failure retry point now that there's no separate
 // Create/Join screen to show it on.
+// Parked, not forgotten: the per-mode Classic/Custom fork is currently
+// unreachable (every tile launches Classic directly) but is kept deliberately
+// rather than deleted.
+// eslint-disable-next-line no-unused-vars
 function showClassicCustomScreen(mode, launch, goBack, errorMsg) {
   onConfigReady = launch;
   onConfigBack = goBack;
@@ -3087,7 +3091,6 @@ function renderLeagueMeStats() {
 // alive on arrival rather than gated behind ever opening the League panel.
 // Independent fetch from leagueMainRows above: that cache may still be empty
 // if League was never opened this session. PROTOTYPE (see conversation).
-let rankTickerRows = [];
 // Plain `npm run dev` has no Cloudflare backend on localhost:1999 (see
 // CLAUDE.md's "Production remote backend" — that needs `npm run wrangler:dev`
 // separately), so fetchLeagueLeaderboard always comes back empty in the most
@@ -3138,7 +3141,6 @@ function initHomeRankingTicker() {
   fetchLeagueLeaderboard(20).then((data) => {
     const rows = data?.leaderboard?.length ? data.leaderboard : DEV_FAKE_TICKER_ROWS;
     if (!rows.length) return; // nothing to show yet — leave the ticker empty/invisible
-    rankTickerRows = rows;
     paintRankTicker(track, rows);
     // Roughly constant scroll speed regardless of row count (~20px/s), floored
     // so a short list (11 players today) doesn't zip past unreadably fast.
@@ -4081,7 +4083,8 @@ async function joinWithCode(code, joinBtn, retryScreen) {
       if (err.reason !== 'notFound') { retryScreen(err.message); return; }
       // fall through to LIVE below
     }
-    return joinMatch(code, joinBtn, retryScreen);
+    await joinMatch(code, joinBtn, retryScreen);
+    return;
   }
   // Not connected — WEEK has no guest concept (see party/weekArbiter.js's
   // own header comment), so we can't just try WEEK-then-LIVE the way the
@@ -4102,7 +4105,7 @@ async function joinWithCode(code, joinBtn, retryScreen) {
     showWeekConnectToJoinPanel(code, joinBtn, retryScreen);
     return;
   }
-  return joinMatch(code, joinBtn, retryScreen);
+  await joinMatch(code, joinBtn, retryScreen);
 }
 
 // Shown instead of routing into LIVE when a not-yet-connected player enters
@@ -4310,7 +4313,7 @@ async function showWeekMatchTicket(week) {
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
     </button>
     <div class="ticket-row">
-      <div class="ticket-wrap"><img class="ticket-img" id="weekTicketImg" alt="Nim-Curl WEEK match ticket"></div>
+      <div class="ticket-wrap"><img class="ticket-img" id="weekTicketImg" alt="NimiCurl WEEK match ticket"></div>
       <div class="goal-actions">
         ${week.rematch?.opponent ? '<p id="weekTicketRematchNote">Your opponent wants a rematch!</p>' : ''}
         <button class="bigbtn" id="weekTicketPlayAgainBtn">▶ Play Again</button>
@@ -4376,11 +4379,11 @@ async function showWeekMatchTicket(week) {
   document.getElementById('weekTicketShareBtn').addEventListener('click', async () => {
     audio.play('button');
     const shareBtn = document.getElementById('weekTicketShareBtn');
-    const resultText = `Score final sur Nim-Curl : ${week.scoreA}–${week.scoreB}`;
+    const resultText = `Final score on NimiCurl: ${week.scoreA}–${week.scoreB}`;
     const blob = await new Promise((resolve) => ticketCanvas.toBlob(resolve, 'image/png'));
     const file = blob && new File([blob], 'nimcurl-ticket.png', { type: 'image/png' });
     if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: 'Nim-Curl', text: resultText }); }
+      try { await navigator.share({ files: [file], title: 'NimiCurl', text: resultText }); }
       catch { /* user cancelled the native share sheet — nothing to do */ }
     } else if (blob) {
       const url = URL.createObjectURL(blob);

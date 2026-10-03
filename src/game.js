@@ -106,7 +106,11 @@ function arenaFrameSrc(vibe, skin, mobile) {
       ? (mobile ? ARENA_FRAME_WINTER_MOBILE_SRC : ARENA_FRAME_WINTER_SRC)
       : (mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC);
 }
-const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
+// Lossless WebP rather than the original PNG: same pixels exactly, 41%
+// smaller. Deliberately NOT lossy — even at quality 100 WebP shifts hard
+// edges by up to ~45/255, and this is the one sprite the player's eye
+// tracks continuously.
+const BALL_SRC = `${ASSET_BASE}ball/ball.webp`;
 // HUD rock glow — each of the 5 rocks baked into the arena art has a
 // hand-painted "flou"/soft halo + "light"/sharp core pair (Arena V2
 // chat.xcf, see conversation), extracted as their own small sprites rather
@@ -212,7 +216,11 @@ export function preloadCoreAssets(mobile = false, howTo = false, { vibe = 'hocke
     getIdenticonCanvasStoneBust(DEFAULT_IDENTICON_ADDRESS.A),
     getIdenticonCanvasStoneBust(DEFAULT_IDENTICON_ADDRESS.B),
   ]).catch(() => {});
-  const promise = Promise.all([loadImages(urls), preloadTicketAssets(), identiconWarmup]);
+  // The ticket art (~250KB) is only drawn when a match ENDS, so it has a whole
+  // match to arrive — kick it off here to keep it warm, but do NOT hold the
+  // loading overlay on it the way the board's own sprites have to be held.
+  preloadTicketAssets();
+  const promise = Promise.all([loadImages(urls), identiconWarmup]);
   corePreloadCache.set(cacheKey, promise);
   return promise;
 }
@@ -420,7 +428,10 @@ export function startGame(opts = {}) {
   // sizing idempotent regardless of what triggers a second call.
   if (canvas.dataset.nbStarted === 'true') {
     console.warn('[game] startGame() called again on an already-started canvas — ignoring.');
-    return;
+    // Explicitly null rather than a bare `return`: every other exit hands back a
+    // teardown handle, and main.js's activeStopGame is tested with `if (...)`,
+    // so this says "no handle" in the same language instead of by accident.
+    return null;
   }
   canvas.dataset.nbStarted = 'true';
   // Teardown plumbing for returning to mode-select without a page reload (see
@@ -1240,7 +1251,7 @@ export function startGame(opts = {}) {
     ctx.fillText(label, CENTER_X, CY - 14);
     ctx.globalAlpha = alpha * 0.45;
     ctx.font = "600 24px 'Mulish', -apple-system, sans-serif";
-    ctx.fillText('Touchez pour continuer', CENTER_X, CY + 48);
+    ctx.fillText('Tap to continue', CENTER_X, CY + 48);
     ctx.restore();
   }
   function drawHandoffMask() {
@@ -1453,8 +1464,13 @@ export function startGame(opts = {}) {
   // own beginMatchIntro() call sites never hit this.
   let resumeManchesApplied = false;
   let phase = 'start';
-  // Visual-only 30s turn timer for the score panel LED bar — resets whenever aiming
-  // starts for either team, has no effect on the phase state machine (see turnTimerProgress).
+  // Turn timer for the score panel LED bar — resets whenever aiming starts for
+  // either team. NOT passive, despite what this comment used to claim: when it
+  // runs out it force-submits the current shot via onValidate() (see the
+  // turnTimerProgress() >= 1 check in the main loop), for LIVE, vs AI and
+  // Pass & Play. WEEK is the one mode it never fires in — no per-shot deadline
+  // there by design, which is also why its ring isn't drawn (see drawHexTimer's
+  // own singleShotTeam/externalManche guard).
   const TURN_TIMER_MS = matchConfig.turnTime * 1000;
   let turnTimerStart = 0;
   let turnTimerPhase = null;
@@ -4753,7 +4769,7 @@ export function startGame(opts = {}) {
       </button>
       <div class="ticket-row ticket-reveal">
         <div class="ticket-wrap" id="ticketWrap">
-          <img class="ticket-img" id="ticketImg" alt="Nim-Curl match ticket">
+          <img class="ticket-img" id="ticketImg" alt="NimiCurl match ticket">
         </div>
         <div class="goal-actions">
           <button class="bigbtn" id="goalPlayAgainBtn">▶ Play Again</button>
@@ -4782,7 +4798,7 @@ export function startGame(opts = {}) {
           // — nothing in the DOM for a screen reader to land on, so its info
           // goes on the <img>'s own alt text instead (see conversation: the
           // brief's own accessibility note).
-          ticketImg.alt = `Nim-Curl match ticket. League Beta match, +${leagueLp} points.`;
+          ticketImg.alt = `NimiCurl match ticket. League Beta match, +${leagueLp} points.`;
         }
         if (prizeNim != null) drawPrizeStamp(stampCtx, prizeNim);
         ticketImg.src = ticketCanvas.toDataURL('image/png');
@@ -4855,11 +4871,11 @@ export function startGame(opts = {}) {
     document.getElementById('goalShareBtn').onclick = async () => {
       audio.play('button');
       const shareBtn = document.getElementById('goalShareBtn');
-      const resultText = `Score final sur Nim-Curl : ${scoreA}–${scoreB}`;
+      const resultText = `Final score on NimiCurl: ${scoreA}–${scoreB}`;
       const blob = await new Promise((resolve) => ticketCanvas.toBlob(resolve, 'image/png'));
       const file = blob && new File([blob], 'nimcurl-ticket.png', { type: 'image/png' });
       if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-        try { await navigator.share({ files: [file], title: 'Nim-Curl', text: resultText }); }
+        try { await navigator.share({ files: [file], title: 'NimiCurl', text: resultText }); }
         catch { /* user cancelled the native share sheet — nothing to do */ }
       } else if (blob) {
         // Desktop browsers mostly can't share files yet — download the ticket instead.
@@ -6962,6 +6978,10 @@ export function startGame(opts = {}) {
   // replacement for it. Same non-rotating, world-space treatment: called
   // after the roll rotation is restored, so it tracks the stone's position
   // (like the contact shadow) without spinning with it.
+  // The art is baked and preloaded (LIGHT_LAYER_SRC) but this overlay is
+  // currently not drawn; kept wired for a later re-enable, same as
+  // STRAIGHTEN_ENABLED elsewhere in this file.
+  // eslint-disable-next-line no-unused-vars
   function drawStoneLightLayer(g, d) {
     if (!lightLayerSprite) return;
     ctx.save();
@@ -7949,6 +7969,7 @@ export function startGame(opts = {}) {
   // called each frame — kept defined, not deleted, in case this survives the
   // visual redesign. Re-enable by uncommenting the two call sites below (was
   // briefly wired to a #qualityBtn "high" toggle, since retired).
+  // eslint-disable-next-line no-unused-vars
   const atmosphere = createAtmosphere(W, H);
 
   function render() {

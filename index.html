@@ -25,7 +25,41 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Nim-Curl">
+<meta name="apple-mobile-web-app-title" content="NimiCurl">
+<!-- Link preview (Open Graph + Twitter card). The whole point of the ticket
+     and ?replay= links is that players share them, and without these a shared
+     link renders as a bare URL in Telegram/WhatsApp/Discord/X — no image, no
+     title, nothing to click for. og-card.jpg is a 1200x630 JPEG crop of the
+     splash art (public/home/home-screen.webp) rather than the WebP itself:
+     several scrapers still don't decode WebP, and 1200x630 is the ratio they
+     all crop to anyway.
+
+     The URLs below are ABSOLUTE and pinned to https://www.nimicurl.com/ —
+     the live production origin, served from Vercel. Note the `www`: the apex
+     nimicurl.com answers with a 308 to it, and a scraper that followed a
+     redirect for og:image would at best cost a round trip and at worst drop the
+     card, so these point straight at the final URL.
+     %BASE_URL% is not used here: it resolves to a path, and scrapers need a
+     full origin — a relative og:image is simply dropped by most of them.
+     Pinning one canonical origin also means a link shared from the GitHub Pages
+     secondary deploy still previews as the real site.
+     Change every occurrence together if the public address ever moves. -->
+<meta name="description" content="Plan your shots in secret, then watch both players' moves unfold at once. A fast game of ice, physics and precision — challenge a friend right in your browser.">
+<link rel="canonical" href="https://www.nimicurl.com/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="NimiCurl">
+<meta property="og:title" content="NimiCurl — plan your shots, then watch them collide">
+<meta property="og:description" content="Plan your shots in secret, then watch both players' moves unfold at once. A fast game of ice, physics and precision — challenge a friend right in your browser.">
+<meta property="og:url" content="https://www.nimicurl.com/">
+<meta property="og:image" content="https://www.nimicurl.com/og-card.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The NimiCurl rink: an ice sheet in a pine forest at dusk.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="NimiCurl — plan your shots, then watch them collide">
+<meta name="twitter:description" content="Plan your shots in secret, then watch both players' moves unfold at once. A fast game of ice, physics and precision — challenge a friend right in your browser.">
+<meta name="twitter:image" content="https://www.nimicurl.com/og-card.jpg">
 <!-- Branded loading screen: shown by default so a slow first paint (before
      this page's real CSS/JS — imported via src/main.js — finishes
      downloading) never flashes raw unstyled HTML (white background, default
@@ -672,11 +706,12 @@
          per-vibe and Classic-only; both vibes launch straight in now
          (src/ai.js for Hockey, src/aiCurling.js for Curling — the latter
          used to land on a "coming soon" panel that no longer exists). #modeWeek (see conversation — moved in from
-         under the More tile, which now only keeps Custom/Replay) is the
-         one exception to "every tile here is Classic-only": it still opens
-         the Classic/Custom fork, same as it always has, just with the vibe
-         picker step it used to need skipped now that the vibe is already
-         chosen (main.js's showVibeWeekFlow). All four tiles are re-tinted to
+         under the More tile, which now only keeps Custom/Replay) is
+         Classic-only too: it calls hostWeekMatch({...DEFAULT_MATCH_CONFIG})
+         directly. It used to open a Classic/Custom fork and this comment said
+         so long after that stopped being true — there is no reachable path to
+         a Custom WEEK match today (showClassicCustomScreen in main.js is
+         deliberately parked, see its own note). All four tiles are re-tinted to
          the ACTIVE VIBE's single color here (blue for Hockey, gold for
          Curling — #vibeSubOverlay.mode-hockey/.mode-curling in style.css),
          overriding their old fixed per-slot brand colors, since under a
@@ -1232,7 +1267,7 @@
            viewport math needed since it isn't nested inside the scrolling
            element itself. -->
       <div class="rules-scroll" id="ncrScroll">
-        <img class="rules-arena-slot" id="ncrArenaSlot" src="%BASE_URL%rules/nimicurl-tuto.webp" alt="NimiCurl arena diagram">
+        <img class="rules-arena-slot" id="ncrArenaSlot" loading="lazy" decoding="async" src="%BASE_URL%rules/nimicurl-tuto.webp" alt="NimiCurl arena diagram">
 
         <div class="rules-sentences">
           <p class="rules-sentence"><strong>Objective —</strong> slide your stones to score in the goal.</p>
@@ -1254,7 +1289,7 @@
         <span class="config-mode-title">Pure Curling Rules</span>
       </div>
       <div class="rules-scroll" id="pcrScroll">
-        <img class="rules-arena-slot" id="pcrArenaSlot" src="%BASE_URL%rules/pure-curling-tuto.webp" alt="Pure Curling arena diagram">
+        <img class="rules-arena-slot" id="pcrArenaSlot" loading="lazy" decoding="async" src="%BASE_URL%rules/pure-curling-tuto.webp" alt="Pure Curling arena diagram">
 
         <div class="rules-sentences">
           <p class="rules-sentence"><strong>Objective —</strong> after two shots, whoever's closest to the center wins the point.</p>
@@ -1302,7 +1337,7 @@
         <p>Nimiq is a blockchain built to make crypto simple and accessible to everyone.</p>
         <p>Its biggest strength is its user-friendly approach: no technical knowledge is required to get started. Creating a wallet takes just a few seconds, directly in your browser, with a simple and intuitive experience.</p>
         <p>Nimiq makes sending, receiving and using digital money feel as easy as using a regular app — without the usual complexity of crypto.</p>
-        <p>Nimicurl is one of the ways we want to make that experience even more accessible: by letting people discover Nimiq simply by playing a game with their friends.</p>
+        <p>NimiCurl is one of the ways we want to make that experience even more accessible: by letting people discover Nimiq simply by playing a game with their friends.</p>
       </div>
       <!-- Plain external link (new tab); main.js's #nimiqWebsiteBtn handler
            swaps in the #tgLinkPill URL card inside Nimiq Pay, where
@@ -1418,6 +1453,10 @@
       <div class="config-header">
         <span class="config-mode-title">League rules</span>
       </div>
+      <!-- loading="lazy": both diagrams live inside a hidden overlay reached
+           only from How To, but the browser fetches an <img src> at parse
+           time regardless — that was ~500KB downloaded on every single page
+           load for a screen most players never open. -->
       <div class="rules-scroll">
         <div class="rules-sentences">
           <p class="rules-sentence"><strong>An ongoing ranking —</strong> the League never resets or ends, so you can join and start climbing at any time.</p>

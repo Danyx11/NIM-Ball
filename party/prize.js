@@ -20,7 +20,7 @@
 // re-evaluating or double-paying.
 import { Server } from 'partyserver';
 import {
-  buildAndSignBasicTransaction, getBlockNumber, sendRawTransaction,
+  buildAndSignBasicTransaction, getBlockNumber, sendRawTransaction, getBalance,
   fromUserFriendlyAddress, MAIN_ALBATROSS_NETWORK_ID,
 } from './nimiqTx.js';
 
@@ -37,6 +37,19 @@ const MAX_WALLET_PAYOUTS_PER_DAY = 3;
 const PAIR_COOLDOWN_MS = 7 * DAY_MS;
 // Anti-farming (A2 — see evaluate()'s own comment on this constant).
 const MIN_REFLECTION_MS_TOTAL = 2000;
+
+// ---- Low-balance alert (see maybeAlertLowBalance) ----
+// The prize wallet is the one thing in this Worker that silently stops working
+// when it empties: sendPrize() throws, evaluate() records 'eligible', and that
+// is NEVER retried — so the winner gets nothing and the only trace is a line in
+// `wrangler tail`. Watching the balance turns that into a push notification
+// before it happens rather than after.
+// First warning at 500 NIM, then one per 100 NIM step down (400, 300, 200, 100,
+// 0). Alerts go to the OPS bot (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID — the same
+// pair Radar's report and the desync alert already use), never the player-facing
+// notification bot.
+const BALANCE_ALERT_FIRST_NIM = 500;
+const BALANCE_ALERT_STEP_NIM = 100;
 
 const DEFAULT_NIMIQ_RPC_URL = 'https://rpc.nimiqwatch.com';
 
@@ -81,6 +94,10 @@ export class PrizeVault extends Server {
       // "persist forever" shape as party/radar.js's own `wallets` map.
       this.pairCooldowns = (await this.ctx.storage.get('pairCooldowns')) || {};
       this.cumulative = (await this.ctx.storage.get('cumulative')) || { totalPaidLuna: 0, totalPaidCount: 0 };
+      // Highest 100-NIM step already warned about, so a run of payouts doesn't
+      // re-send the same warning. Reset upward when the wallet is topped back
+      // up (see maybeAlertLowBalance), so the next drain warns again.
+      this.lastBalanceAlertNim = (await this.ctx.storage.get('lastBalanceAlertNim')) ?? null;
     })();
     // Single-writer queue — see party/radar.js's onStart for the exact same
     // reasoning, doubly important here: two matches completing close
@@ -102,6 +119,53 @@ export class PrizeVault extends Server {
   async persistCumulative() { await this.ctx.storage.put('cumulative', this.cumulative); }
   async loadDay(date) { return (await this.ctx.storage.get(`day:${date}`)) || emptyDay(date); }
   async saveDay(day) { await this.ctx.storage.put(`day:${day.date}`, day); }
+
+  // Telegram ops alert when the prize wallet runs low. Called after each
+  // successful payout (naturally rate-limited — at most one RPC per real
+  // payout, and payouts are already capped per day) rather than on a timer,
+  // so there is no extra scheduled work to own.
+  //
+  // Never throws into the payout path: the money has already moved by the time
+  // this runs, and a Telegram or RPC hiccup must not turn a successful payout
+  // into a failed one. Everything here is wrapped and swallowed.
+  async maybeAlertLowBalance() {
+    const token = this.env?.TELEGRAM_BOT_TOKEN, chatId = this.env?.TELEGRAM_CHAT_ID;
+    const address = this.env?.PRIZE_WALLET_ADDRESS;
+    if (!token || !chatId || !address) return;
+    try {
+      const rpcUrl = this.env?.NIMIQ_RPC_URL || DEFAULT_NIMIQ_RPC_URL;
+      const balanceNim = (await getBalance(rpcUrl, address)) / LUNA_PER_NIM;
+      // The threshold just CROSSED, not the floor: 437 NIM has crossed 500 but
+      // not yet 400, so it belongs to 500. Using the floor instead would fire a
+      // second alert at 490 — 10 NIM after the first — rather than at 400.
+      const step = Math.min(BALANCE_ALERT_FIRST_NIM, Math.ceil(balanceNim / BALANCE_ALERT_STEP_NIM) * BALANCE_ALERT_STEP_NIM);
+      if (balanceNim > BALANCE_ALERT_FIRST_NIM) {
+        // Topped back up above the first threshold — arm the warnings again so
+        // the next drain is reported from 500 down, not silently skipped
+        // because a months-old alert is still the "last" one.
+        if (this.lastBalanceAlertNim !== null) {
+          this.lastBalanceAlertNim = null;
+          await this.ctx.storage.put('lastBalanceAlertNim', null);
+        }
+        return;
+      }
+      // Only ever alert on a NEW, lower step.
+      if (this.lastBalanceAlertNim !== null && step >= this.lastBalanceAlertNim) return;
+      this.lastBalanceAlertNim = step;
+      await this.ctx.storage.put('lastBalanceAlertNim', step);
+      const payoutsLeft = Math.floor(balanceNim / PRIZE_AMOUNT_NIM);
+      const text = balanceNim <= 0
+        ? `\u{1F6D1} NimiCurl \u2014 prize wallet is EMPTY\nNo further prize can be paid. Winners are being recorded as 'eligible' and are NOT retried.\n${address}`
+        : `\u26A0\uFE0F NimiCurl \u2014 prize wallet low\nBalance: ${balanceNim.toFixed(0)} NIM (~${payoutsLeft} payout${payoutsLeft === 1 ? '' : 's'} left)\n${address}`;
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+    } catch (err) {
+      console.error('[prize] low-balance check failed:', err);
+    }
+  }
 
   // Builds, signs and broadcasts the actual payout — see party/nimiqTx.js's
   // header for how this format was derived/verified. Throws on any failure
@@ -253,6 +317,11 @@ export class PrizeVault extends Server {
       this.cumulative.totalPaidLuna += PRIZE_AMOUNT_LUNA;
       this.cumulative.totalPaidCount += 1;
       await this.persistCumulative();
+
+      // After the books are committed, never before: the alert is ops
+      // information, and it must not be able to affect whether this payout is
+      // recorded. It swallows its own failures (see its own comment).
+      await this.maybeAlertLowBalance();
 
       return finalize({ status: 'paid', winnerAddress, amountNim: PRIZE_AMOUNT_NIM, txId: payment.txId });
     });

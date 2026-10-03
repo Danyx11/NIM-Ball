@@ -758,6 +758,12 @@ export class WeekArbiter extends Server {
         this.match.turnDeadlineTeam = null;
         await this.ctx.storage.deleteAlarm();
         this.radarNotify('recordMatchCompleted', { matchId: this.name, mode: 'week', timestampMs: Date.now() });
+        // Declared out here, not inside the League block below: the prize block
+        // is a SIBLING `if` and reads this too. It used to be a `const` scoped
+        // to the League block, so the prize block threw ReferenceError on every
+        // eligible match — which also meant the `await this.persist()` after
+        // both blocks was never reached, leaving the completed match unsaved.
+        const winner = this.match.scoreA >= target ? 'A' : 'B';
         // League Beta (party/leagueSeason.js) — WEEK already structurally
         // guarantees "both players actually connected" right here: scoreA/
         // scoreB can only ever move inside the `bothIn` branch above, which
@@ -773,7 +779,6 @@ export class WeekArbiter extends Server {
         // same trust model as every other client-sent field this file
         // already treats as opaque.
         if (this.match.playerA && this.match.playerB && isClassicMatchConfig(this.match.config)) {
-          const winner = this.match.scoreA >= target ? 'A' : 'B';
           // Awaited (not fire-and-forget like radarNotify above) — WEEK has
           // no live push the way LIVE's arbiter does (see this file's own
           // header comment), so the ticket's league stamp (main.js's

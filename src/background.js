@@ -56,5 +56,12 @@ export function setModeSelectVibeBackground(vibe) {
 // Awaited by main.js before the branded #loadingOverlay lifts, so the
 // home/mode-select screens it reveals never flash without their backgrounds.
 export function preloadBackgroundAssets() {
-  return loadImages([LOGO_SRC, HOME_SRC, MODE_SELECT_BG_SRC, MODE_SELECT_BG_NIMICURL_SRC, MODE_SELECT_BG_CURLING_SRC]);
+  // Only the three images actually on screen when the loading overlay lifts are
+  // awaited. The two vibe backdrops (~650KB together) don't paint until the
+  // player picks Hockey or Curling, which is at minimum one more tap away — so
+  // they're still fetched right now, just not held in front of the first paint.
+  // Fire-and-forget rather than dropped: by the time the vibe drawer opens they
+  // are in the HTTP cache, so the swap stays instant.
+  loadImages([MODE_SELECT_BG_NIMICURL_SRC, MODE_SELECT_BG_CURLING_SRC]).catch(() => {});
+  return loadImages([LOGO_SRC, HOME_SRC, MODE_SELECT_BG_SRC]);
 }

@@ -1,6 +1,6 @@
 {
-  "name": "Nim-Curl",
-  "short_name": "Nim-Curl",
+  "name": "NimiCurl",
+  "short_name": "NimiCurl",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

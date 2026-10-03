@@ -11,6 +11,10 @@ import { defineConfig } from 'vite';
 // serves from the domain root instead, so it needs plain '/' — hardcoding
 // '/NIM-Ball/' unconditionally 404'd every asset there. Plain dev stays at
 // '/' so LAN testing on a phone is unaffected.
+//
+// Vercel IS production: www.nimicurl.com is served from it, which is why the
+// root branch is the one that matters. GitHub Pages remains as a secondary
+// deploy on its own subpath; leave the condition alone unless that changes.
 // index.html is heavily commented on purpose — roughly 45% of the file is
 // developer commentary explaining the markup. Vite does not strip HTML
 // comments, so every one of those bytes was being served to every player on

@@ -1,6 +1,6 @@
 // League Beta — pure Rating/LP/streak math, kept isolated from any Durable
 // Object plumbing (party/leagueSeason.js) or storage concerns so it's easy
-// to read, unit-sanity-check (see scripts/league-rating-check.mjs) and
+// to read, unit-test (see tests/leagueRating.test.mjs) and
 // review on its own. Nothing here touches `this`, `ctx.storage`, or any
 // Worker-only API — it would run identically under plain `node`.
 //
@@ -100,7 +100,7 @@ function clampRound(n, lo, hi) {
 // plugging in one representative `expected` value per bucket
 // (0.9/0.7/0.5/0.3/0.1, evenly spanning "much weaker" through "much
 // stronger" opponent) lands inside every one of the spec's stated ranges —
-// see scripts/league-rating-check.mjs for that exact check.
+// see tests/leagueRating.test.mjs for that exact check.
 //
 // Win: 20 LP at expected=0.5 (baseline, "similar" opponent per spec),
 // sliding down to 10 as expected -> 1 (beating a much weaker opponent is

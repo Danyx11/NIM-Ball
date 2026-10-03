@@ -1,0 +1,84 @@
+# The automated safety net.
+#
+# Runs on every push and PR, and — importantly — BEFORE the deploy workflows,
+# which trigger on the same push to main. It cannot block them (GitHub runs
+# workflows independently), but a red check here lands at the same time as the
+# deploy, so a broken push is visible immediately rather than discovered weeks
+# later by a player.
+#
+# Everything here is already runnable locally with `npm run check`.
+name: Checks
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # Catches dead code left behind by removed features, undeclared
+      # identifiers, and functions whose exits disagree. See eslint.config.js's
+      # header for the one bug class it provably does NOT catch.
+      - name: Lint
+        run: npm run lint
+
+      # party/leagueRating.js (the whole LP/forfeit/streak reward model) and
+      # src/replay.js (the ticket QR format, including backward compatibility
+      # with already-printed tickets). Node's built-in runner — no test
+      # framework dependency to keep up to date.
+      - name: Tests
+        run: npm test
+
+      # Every asset the code points at must exist. Three SFX entries pointed at
+      # files that had never existed; nothing crashed, the sounds were just
+      # silently absent.
+      - name: Assets
+        run: npm run check:assets
+
+      # Last, because it is the slowest and the least likely to be the thing
+      # that broke.
+      - name: Build
+        run: npm run build
+
+      # Pushed to the ops Telegram bot (the same one Radar's daily report and
+      # the desync alert already use) so a failure reaches you where you already
+      # look, instead of waiting on GitHub's own email. Only ever fires on
+      # failure — a green run says nothing at all.
+      #
+      # Needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID as repository secrets
+      # (Settings > Secrets and variables > Actions). They are the same values
+      # already set as wrangler secrets. Without them this step is skipped, so
+      # the workflow still works — it just stays silent.
+      # The `secrets` context is not available in a step-level `if`, so the
+      # "are the secrets configured?" check lives in the script itself: with no
+      # token this exits 0 and the workflow still reports red on GitHub, just
+      # without the push notification.
+      - name: Notify on failure
+        if: failure()
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SUBJECT: ${{ github.event.head_commit.message }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$CHAT_ID" ]; then
+            echo "No Telegram secrets configured — skipping the notification."
+            exit 0
+          fi
+          TEXT=$(printf '%s\n%s\n%s\n%s' \
+            "🔴 NimiCurl — checks failed" \
+            "branch: ${GITHUB_REF_NAME}" \
+            "commit: ${GITHUB_SHA:0:7} — ${SUBJECT%%$'\n'*}" \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
+          curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" > /dev/null
