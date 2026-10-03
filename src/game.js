@@ -428,7 +428,10 @@ export function startGame(opts = {}) {
   // sizing idempotent regardless of what triggers a second call.
   if (canvas.dataset.nbStarted === 'true') {
     console.warn('[game] startGame() called again on an already-started canvas — ignoring.');
-    return;
+    // Explicitly null rather than a bare `return`: every other exit hands back a
+    // teardown handle, and main.js's activeStopGame is tested with `if (...)`,
+    // so this says "no handle" in the same language instead of by accident.
+    return null;
   }
   canvas.dataset.nbStarted = 'true';
   // Teardown plumbing for returning to mode-select without a page reload (see
@@ -6970,6 +6973,10 @@ export function startGame(opts = {}) {
   // replacement for it. Same non-rotating, world-space treatment: called
   // after the roll rotation is restored, so it tracks the stone's position
   // (like the contact shadow) without spinning with it.
+  // The art is baked and preloaded (LIGHT_LAYER_SRC) but this overlay is
+  // currently not drawn; kept wired for a later re-enable, same as
+  // STRAIGHTEN_ENABLED elsewhere in this file.
+  // eslint-disable-next-line no-unused-vars
   function drawStoneLightLayer(g, d) {
     if (!lightLayerSprite) return;
     ctx.save();
@@ -7957,6 +7964,7 @@ export function startGame(opts = {}) {
   // called each frame — kept defined, not deleted, in case this survives the
   // visual redesign. Re-enable by uncommenting the two call sites below (was
   // briefly wired to a #qualityBtn "high" toggle, since retired).
+  // eslint-disable-next-line no-unused-vars
   const atmosphere = createAtmosphere(W, H);
 
   function render() {

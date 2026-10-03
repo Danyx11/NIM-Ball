@@ -10,9 +10,9 @@ import '@fontsource/mulish/800.css';
 // identity pill's address line (see style.css's #connectBtnLabel).
 import '@fontsource/fira-mono/500.css';
 import { startGame, preloadCoreAssets, DEFAULT_IDENTICON_ADDRESS } from './game.js';
-import { preloadTicketAssets, renderTicket } from './ticket.js';
+import { renderTicket } from './ticket.js';
 import { playSingleShot, playReveal } from './weekController.js';
-import { connectNimiq, connectIdentity, getIdentity, setGuest, clearIdentity, sendNimPayment, getGuestCode, setStoredAddress } from './nimiq.js';
+import { connectNimiq, connectIdentity, getIdentity, setGuest, sendNimPayment, getGuestCode, setStoredAddress } from './nimiq.js';
 import { resolveIdentity, isValidAlias, reserveAlias, releaseAlias, confirmAliasPayment, savePendingClaim, loadPendingClaim, clearPendingClaim, FAKE_MODE as FAKE_ALIAS } from './alias.js';
 // Real recipient address (src/partnership.js) — the actual $/week -> NIM
 // quote/price locking now happens server-side (party/partnership.js's
@@ -1873,6 +1873,10 @@ let onConfigBack = null;
 // showMatchHostWaitingScreen's onDisconnect/onLost) — this screen doubles
 // as the connection-failure retry point now that there's no separate
 // Create/Join screen to show it on.
+// Parked, not forgotten: the per-mode Classic/Custom fork is currently
+// unreachable (every tile launches Classic directly) but is kept deliberately
+// rather than deleted.
+// eslint-disable-next-line no-unused-vars
 function showClassicCustomScreen(mode, launch, goBack, errorMsg) {
   onConfigReady = launch;
   onConfigBack = goBack;
@@ -3087,7 +3091,6 @@ function renderLeagueMeStats() {
 // alive on arrival rather than gated behind ever opening the League panel.
 // Independent fetch from leagueMainRows above: that cache may still be empty
 // if League was never opened this session. PROTOTYPE (see conversation).
-let rankTickerRows = [];
 // Plain `npm run dev` has no Cloudflare backend on localhost:1999 (see
 // CLAUDE.md's "Production remote backend" — that needs `npm run wrangler:dev`
 // separately), so fetchLeagueLeaderboard always comes back empty in the most
@@ -3138,7 +3141,6 @@ function initHomeRankingTicker() {
   fetchLeagueLeaderboard(20).then((data) => {
     const rows = data?.leaderboard?.length ? data.leaderboard : DEV_FAKE_TICKER_ROWS;
     if (!rows.length) return; // nothing to show yet — leave the ticker empty/invisible
-    rankTickerRows = rows;
     paintRankTicker(track, rows);
     // Roughly constant scroll speed regardless of row count (~20px/s), floored
     // so a short list (11 players today) doesn't zip past unreadably fast.
@@ -4081,7 +4083,8 @@ async function joinWithCode(code, joinBtn, retryScreen) {
       if (err.reason !== 'notFound') { retryScreen(err.message); return; }
       // fall through to LIVE below
     }
-    return joinMatch(code, joinBtn, retryScreen);
+    await joinMatch(code, joinBtn, retryScreen);
+    return;
   }
   // Not connected — WEEK has no guest concept (see party/weekArbiter.js's
   // own header comment), so we can't just try WEEK-then-LIVE the way the
@@ -4102,7 +4105,7 @@ async function joinWithCode(code, joinBtn, retryScreen) {
     showWeekConnectToJoinPanel(code, joinBtn, retryScreen);
     return;
   }
-  return joinMatch(code, joinBtn, retryScreen);
+  await joinMatch(code, joinBtn, retryScreen);
 }
 
 // Shown instead of routing into LIVE when a not-yet-connected player enters
