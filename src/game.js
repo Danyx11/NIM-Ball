@@ -4320,8 +4320,27 @@ export function startGame(opts = {}) {
     // (early) wipeout, resolve who's closest instead of continuing to the
     // next manche. See CURLING_CYCLES_PER_POINT/curlingCycle above.
     if (vibe === 'curling') {
+      // Same cursor bump the classic path does further down, and for the same
+      // reason — it has to happen HERE too, because this branch returns before
+      // ever reaching that line. Without it the cursor stayed pinned at manche
+      // 0 for a whole curling point, so maybeAdvanceReplay() re-fed the point's
+      // FIRST manche in place of every later one: a 2-manche point replayed its
+      // opening throw twice and never showed the throw that actually decided it
+      // (bug report: "une manche en trop a la fin", reproduced off the reporter's
+      // own ticket). Hockey was never affected — it takes the path below.
+      if (isReplay) replayCursor.mancheIdx++;
       curlingCycle++;
-      if (curlingCycle >= CURLING_CYCLES_PER_POINT) { resolveCurlingPoint(); return; }
+      // A replay's point is exactly as long as the manches it RECORDED, which
+      // is not always CURLING_CYCLES_PER_POINT: a team wiped out before the
+      // last cycle ends the point early (see resolveCurlingPoint's own note on
+      // physicsStep's wipeout early-exit still applying here), so such a point
+      // carries fewer manches than the config implies. Driving the end off the
+      // config alone replayed manches that were never thrown — faithfully
+      // reproducing the recorded wipeout should end the point before this line
+      // is even reached, so this is the backstop for when it doesn't.
+      const replayPoint = isReplay ? replayAllPoints[replayCursor.pointIdx] : null;
+      const outOfRecordedManches = !!replayPoint && replayCursor.mancheIdx >= replayPoint.manches.length;
+      if (outOfRecordedManches || curlingCycle >= CURLING_CYCLES_PER_POINT) { resolveCurlingPoint(); return; }
       tryAdvanceAfterManche(beginAimPhase);
       return;
     }
