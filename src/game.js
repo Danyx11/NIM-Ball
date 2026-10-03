@@ -1240,7 +1240,7 @@ export function startGame(opts = {}) {
     ctx.fillText(label, CENTER_X, CY - 14);
     ctx.globalAlpha = alpha * 0.45;
     ctx.font = "600 24px 'Mulish', -apple-system, sans-serif";
-    ctx.fillText('Touchez pour continuer', CENTER_X, CY + 48);
+    ctx.fillText('Tap to continue', CENTER_X, CY + 48);
     ctx.restore();
   }
   function drawHandoffMask() {
@@ -4753,7 +4753,7 @@ export function startGame(opts = {}) {
       </button>
       <div class="ticket-row ticket-reveal">
         <div class="ticket-wrap" id="ticketWrap">
-          <img class="ticket-img" id="ticketImg" alt="Nim-Curl match ticket">
+          <img class="ticket-img" id="ticketImg" alt="NimiCurl match ticket">
         </div>
         <div class="goal-actions">
           <button class="bigbtn" id="goalPlayAgainBtn">▶ Play Again</button>
@@ -4782,7 +4782,7 @@ export function startGame(opts = {}) {
           // — nothing in the DOM for a screen reader to land on, so its info
           // goes on the <img>'s own alt text instead (see conversation: the
           // brief's own accessibility note).
-          ticketImg.alt = `Nim-Curl match ticket. League Beta match, +${leagueLp} points.`;
+          ticketImg.alt = `NimiCurl match ticket. League Beta match, +${leagueLp} points.`;
         }
         if (prizeNim != null) drawPrizeStamp(stampCtx, prizeNim);
         ticketImg.src = ticketCanvas.toDataURL('image/png');
@@ -4855,11 +4855,11 @@ export function startGame(opts = {}) {
     document.getElementById('goalShareBtn').onclick = async () => {
       audio.play('button');
       const shareBtn = document.getElementById('goalShareBtn');
-      const resultText = `Score final sur Nim-Curl : ${scoreA}–${scoreB}`;
+      const resultText = `Final score on NimiCurl: ${scoreA}–${scoreB}`;
       const blob = await new Promise((resolve) => ticketCanvas.toBlob(resolve, 'image/png'));
       const file = blob && new File([blob], 'nimcurl-ticket.png', { type: 'image/png' });
       if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-        try { await navigator.share({ files: [file], title: 'Nim-Curl', text: resultText }); }
+        try { await navigator.share({ files: [file], title: 'NimiCurl', text: resultText }); }
         catch { /* user cancelled the native share sheet — nothing to do */ }
       } else if (blob) {
         // Desktop browsers mostly can't share files yet — download the ticket instead.
