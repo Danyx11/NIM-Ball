@@ -90,6 +90,22 @@ const ARENA_FRAME_CURLING_SRC = `${ASSET_BASE}arena/frame-curling.webp`;
 const ARENA_FRAME_CURLING_MOBILE_SRC = `${ASSET_BASE}arena/frame-curling-mobile.webp`;
 const ARENA_FRAME_CURLING_WINTER_SRC = `${ASSET_BASE}arena/frame-curling-winter.webp`;
 const ARENA_FRAME_CURLING_WINTER_MOBILE_SRC = `${ASSET_BASE}arena/frame-curling-winter-mobile.webp`;
+// One resolver for all 8 frames, shared by preloadCoreAssets() and
+// startGame()'s own arenaFrameImage below — they used to pick independently
+// and the preload's copy was hardcoded to the hockey/summer pair, so on 3 of
+// the 4 vibe x skin combinations the loading overlay lifted having warmed a
+// frame the match would never draw, and the real one (up to 1.6MB) then
+// downloaded *after* play had already started. That is exactly the stall this
+// preload exists to prevent.
+function arenaFrameSrc(vibe, skin, mobile) {
+  return vibe === 'curling'
+    ? (skin === 'winter'
+      ? (mobile ? ARENA_FRAME_CURLING_WINTER_MOBILE_SRC : ARENA_FRAME_CURLING_WINTER_SRC)
+      : (mobile ? ARENA_FRAME_CURLING_MOBILE_SRC : ARENA_FRAME_CURLING_SRC))
+    : skin === 'winter'
+      ? (mobile ? ARENA_FRAME_WINTER_MOBILE_SRC : ARENA_FRAME_WINTER_SRC)
+      : (mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC);
+}
 const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
 // HUD rock glow — each of the 5 rocks baked into the arena art has a
 // hand-painted "flou"/soft halo + "light"/sharp core pair (Arena V2
@@ -145,23 +161,36 @@ const ICON_SOUND_OFF = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="
 // restarting from scratch. Reusing the same (already-resolved, once the
 // boot call finished) promise makes every later call a no-op.
 const corePreloadCache = new Map();
-export function preloadCoreAssets(mobile = false, howTo = false) {
+// `vibe`/`skin`: which of the 8 arena frames (and which score-digit set) the
+// match about to start will actually draw — see arenaFrameSrc above. Both
+// default to what the page's very first, pre-mode-select warm-up call can
+// legitimately assume (hockey/summer, the Classic default), and every mode
+// entry point that already knows better passes the real pair so its own frame
+// is the one warmed. Part of the cache key, so switching vibe mid-session
+// warms the new frame instead of reusing the previous one's resolved promise.
+export function preloadCoreAssets(mobile = false, howTo = false, { vibe = 'hockey', skin = 'summer' } = {}) {
   // Sponsor banner (Partnership) — fired here rather than at module load so
   // it costs nothing until a match is actually being set up. Its own promise
   // is cached and shared with src/ticket.js, so this only ever hits the
   // network once per page load however often preloadCoreAssets is called.
   loadSponsorBanner().then((img) => { goalSponsorBannerSrc = img ? img.src : null; });
-  const cacheKey = `${mobile}|${howTo}`;
+  const cacheKey = `${mobile}|${howTo}|${vibe}|${skin}`;
   if (corePreloadCache.has(cacheKey)) return corePreloadCache.get(cacheKey);
+  const curling = vibe === 'curling';
   const urls = [
     LIGHT_LAYER_SRC,
-    mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC,
-    BALL_SRC,
+    arenaFrameSrc(vibe, skin, mobile),
+    // Hockey only — curling has no ball at all, so this was ~520KB of dead
+    // download on every curling match.
+    ...(curling ? [] : [BALL_SRC]),
     ...Object.keys(ROCK_GLOW).flatMap((id) => [`${ASSET_BASE}rocks/${id}-flou.webp`, `${ASSET_BASE}rocks/${id}-light.webp`]),
     `${ASSET_BASE}rocks/chat-badge.webp`,
-    ...(howTo ? [] : ['A', 'B'].flatMap((team) => ['0', '1', '2', '3'].map((d) => `${ASSET_BASE}score-digits/${team}-${d}.png`))),
-    `${ASSET_BASE}hex-timer/ring-full.png`,
-    `${ASSET_BASE}hex-timer/ring-full-red.png`,
+    // Curling has its own baked digit set (scripts/bake_curling_arena.py) and
+    // was warming the hockey one instead, so neither ended up ready in time.
+    ...(howTo ? [] : ['A', 'B'].flatMap((team) => ['0', '1', '2', '3'].map((d) => `${ASSET_BASE}score-digits/${curling ? `curling-${team}` : team}-${d}.png`))),
+    // The hex ring is the hockey turn timer; curling draws its own arc timer
+    // live (drawCircleTimer), no art involved.
+    ...(curling ? [] : [`${ASSET_BASE}hex-timer/ring-full.png`, `${ASSET_BASE}hex-timer/ring-full-red.png`]),
     `${ASSET_BASE}waiting-label/word.png`,
     ...[0, 1, 2].map((i) => `${ASSET_BASE}waiting-label/dot-${i}.png`),
     `${ASSET_BASE}handoff/ice-mask.webp`,
@@ -716,13 +745,7 @@ export function startGame(opts = {}) {
   // arena art (see its comment above and MOBILE_CROP below) — same pixels,
   // ~57% less to download/decode for the sub-rect mobile ever shows.
   const arenaFrameImage = new Image();
-  arenaFrameImage.src = vibe === 'curling'
-    ? (matchConfig.skin === 'winter'
-      ? (mobile ? ARENA_FRAME_CURLING_WINTER_MOBILE_SRC : ARENA_FRAME_CURLING_WINTER_SRC)
-      : (mobile ? ARENA_FRAME_CURLING_MOBILE_SRC : ARENA_FRAME_CURLING_SRC))
-    : matchConfig.skin === 'winter'
-      ? (mobile ? ARENA_FRAME_WINTER_MOBILE_SRC : ARENA_FRAME_WINTER_SRC)
-      : (mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC);
+  arenaFrameImage.src = arenaFrameSrc(vibe, matchConfig.skin, mobile);
 
   // Ball sprite, baked at 2x its on-screen diameter: the ball rotates every
   // frame so it never sits on a 1:1 pixel grid anyway, and downsampling a 2x

@@ -1501,7 +1501,7 @@ modeAi.addEventListener('click', async () => {
   showToolbar();
   activeMatchMode = 'solo';
   showLoadingOverlay();
-  await preloadCoreAssets(IS_MOBILE);
+  await preloadCoreAssets(IS_MOBILE, false, { vibe: activeVibe, skin: DEFAULT_MATCH_CONFIG.skin });
   await new Promise((resolve) => {
     // Hockey (the default vibe) is passed nothing extra, exactly as before.
     const curlingOpts = activeVibe === 'curling' ? { vibe: 'curling', matchConfig: { ...DEFAULT_MATCH_CONFIG } } : {};
@@ -2169,7 +2169,7 @@ async function launchPassPlayMatch(config) {
   // loading overlay until assets are actually baked, so neither player can
   // tap ready onto a board still showing flat fallback bubble colors.
   showLoadingOverlay();
-  await preloadCoreAssets(IS_MOBILE);
+  await preloadCoreAssets(IS_MOBILE, false, { vibe: activeVibe, skin: config?.skin });
   await new Promise((resolve) => {
     activeStopGame = startGame({
       ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config, vibe: activeVibe,
@@ -3821,7 +3821,7 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig, reconnect = n
     // introducing a second visual, one show/hide pair covering both the
     // asset warm-up and the identicon bake before either side's board appears.
     showLoadingOverlay();
-    await preloadCoreAssets(IS_MOBILE);
+    await preloadCoreAssets(IS_MOBILE, false, { vibe: activeVibe, skin: matchConfig?.skin });
     // net.opponentAddress is already known by this point — onBothReady only
     // ever fires after onOpponentJoined has set it (see showWaitingScreen/
     // showMatchHostWaitingScreen above and net.js's 'joined'/'opponentJoined'
@@ -4531,7 +4531,7 @@ async function showWeekAimScreen(week, chained = false, liveSession = null) {
   // moment nothing has actually happened in this match yet.
   pendingWeekCancel = week.status === 'pending' ? week : null;
   activeWeekWaiting = null; // defensive — this window's own flag, not this one's
-  await preloadCoreAssets(IS_MOBILE);
+  await preloadCoreAssets(IS_MOBILE, false, { vibe: week.game, skin: week.config?.skin });
   // Gates game.js's own entry (beginMatchIntro() for a fresh point, see
   // startGame's own weekEntryReady comment) behind this screen's Play tap
   // instead of firing the instant the session starts — the entry card below
@@ -4757,7 +4757,7 @@ async function playWeekReveal(week, chained = false, liveSession = null) {
     hideWeekSpinner();
     revealPromise = liveSession.watchReveal(week);
   } else {
-    await preloadCoreAssets(IS_MOBILE);
+    await preloadCoreAssets(IS_MOBILE, false, { vibe: week.game, skin: week.config?.skin });
     let resolveWeekEntry = null;
     const weekEntryReady = chained ? null : new Promise((res) => { resolveWeekEntry = res; });
     // activeStopGame — see showWeekAimScreen's own comment on the identical
