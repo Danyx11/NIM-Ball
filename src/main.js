@@ -801,13 +801,32 @@ const connectPillStreakValue = document.getElementById('pillStreakValue');
 // the same League Beta calendar-day streak renderLeagueMeStats shows in the
 // League panel.
 const streakCache = new Map();
+// Addresses whose cached streak is known to be out of date and must be
+// re-fetched on the next render — invalidateStreakCache() below adds to this
+// rather than deleting the cache entry outright, so the badge keeps painting
+// the last known number for the length of the round trip instead of blanking
+// out and flickering back in.
+const streakRefetch = new Set();
 function refreshStreakCache(address) {
-  if (streakCache.has(address)) return;
-  streakCache.set(address, null);
+  if (streakCache.has(address) && !streakRefetch.has(address)) return;
+  streakRefetch.delete(address);
+  // Only seed the "fetch in flight" null on a genuinely cold entry; a forced
+  // re-fetch deliberately leaves the previous value in place to paint.
+  if (!streakCache.has(address)) streakCache.set(address, null);
   fetchLeagueStats(address).then((data) => {
     streakCache.set(address, data?.player?.streak ?? 0);
     syncIdentityPill();
   }).catch(() => streakCache.delete(address));
+}
+// Called from hideMatchChrome() below, which every match exit funnels through.
+// A League match that just completed may have moved this player's calendar-day
+// streak, and refreshStreakCache() above is a fetch-once-per-page-load cache:
+// without this the pill's "+N" badge kept whatever it read at load time for
+// the whole session, so a streak that had since gone 2 -> 3 still showed +2
+// until a full reload (reported). renderLeagueMeStats() re-fetched on every
+// open and so was always right, which is how the two readouts could disagree.
+function invalidateStreakCache() {
+  if (hubAddress) streakRefetch.add(hubAddress);
 }
 const connectText = document.querySelector('.connect-text');
 const sidebar = document.getElementById('sidebar');
@@ -1737,6 +1756,7 @@ function showToolbar() {
 function hideMatchChrome() {
   activeStopGame = null;
   activeMatchMode = null;
+  invalidateStreakCache(); // the match that just ended may have moved the streak
   syncIdentityPill();
   toolbarTop.classList.add('hidden');
   toolbarBottom.classList.add('hidden');
@@ -3123,12 +3143,20 @@ function renderLeagueMeStats() {
     return;
   }
   getIdenticonPngDataUrl(hubAddress).then((url) => { avatarEl.style.backgroundImage = `url(${url})`; });
-  fetchLeagueStats(hubAddress).then((data) => {
+  // Captured rather than read inside the .then: this is a fresh network round
+  // trip, and the identity can change (connect/disconnect) while it's open.
+  const forAddress = hubAddress;
+  fetchLeagueStats(forAddress).then((data) => {
     const p = data?.player;
     if (!p) return;
     ptsEl.textContent = `+${p.lp} pts`;
     winLossEl.innerHTML = `<span class="league-me-num">${p.wins}</span> wins · <span class="league-me-num">${p.losses}</span> losses`;
     streakEl.innerHTML = `<span class="league-me-num">${p.streak}</span> day streak`;
+    // Same figure the pill's badge shows, and this is the fresher of the two
+    // reads — hand it over so the panel and the pill can never disagree.
+    streakCache.set(forAddress, p.streak);
+    streakRefetch.delete(forAddress);
+    syncIdentityPill();
   });
 }
 // Home-screen live ranking ticker (#modeOverlay, above .mode-drawer — see
