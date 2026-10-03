@@ -201,7 +201,7 @@ if (IS_MOBILE) document.body.classList.add('mobile-layout');
   // running) stays with #game-card above, same as #overlay/#syncToast — it's
   // gameplay chrome, not a menu screen, so this change doesn't touch it.
   const menuHost = document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'weekMatchDialogOverlay', 'claimAliasOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'partnershipOverlay', 'partnershipBookOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'joinCodeOverlay', 'weekMatchDialogOverlay', 'claimAliasOverlay', 'replayUploadOverlay', 'aboutOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'partnershipOverlay', 'partnershipBookOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -708,13 +708,32 @@ connectNimiq()
 // wallet explorer). Not a general "switch accounts" feature — same trust
 // level `hubAddress` already has everywhere else in this codebase (a plain,
 // unverified client-reported string, see CLAUDE.md's Radar trust-model
-// note), so accepting it from a URL param changes nothing about what the
-// server already trusts. Stripped from the URL immediately so a reload/share
-// doesn't keep re-applying it.
+// note). Stripped from the URL immediately so a reload/share doesn't keep
+// re-applying it.
+//
+// Two guards, both load-bearing — this used to apply silently:
+//  - shape check, so this can't write a value that isn't an address at all
+//    into the one field League/Radar/PrizeVault all key off;
+//  - a blocking confirm(), because everything downstream of hubAddress is
+//    client-reported and therefore trusted as-is: without it, `?setIdentity=`
+//    was a one-click link that silently rewrote a player's identity (and so
+//    redirected their League LP and any 10 NIM prize to whoever sent the
+//    link), with the param stripped afterwards so they'd never see why. A
+//    native confirm() rather than this file's own dialog markup on purpose:
+//    this runs at module load, before any overlay exists and before
+//    hubAddress is first read below, and it has to be synchronous to stay
+//    ahead of that read. Recovery is a deliberate, typed-in-the-URL-bar act,
+//    so one extra tap costs the real use case nothing.
 {
-  const forcedIdentity = new URLSearchParams(location.search).get('setIdentity');
+  const params = new URLSearchParams(location.search);
+  const forcedIdentity = params.get('setIdentity');
   if (forcedIdentity) {
-    setStoredAddress(forcedIdentity);
+    const clean = forcedIdentity.replace(/\s+/g, '').toUpperCase();
+    if (!/^NQ[0-9A-Z]{34}$/.test(clean)) {
+      console.log('[identity] ?setIdentity= ignored: not a Nimiq address');
+    } else if (window.confirm(`Set this device's Nim-Curl identity to\n\n${clean}\n\nOnly do this if you opened this link yourself. Your ranking, matches and any NIM prize will go to this address.`)) {
+      setStoredAddress(clean);
+    }
     const url = new URL(location.href);
     url.searchParams.delete('setIdentity');
     history.replaceState(null, '', url);
@@ -1482,7 +1501,7 @@ modeAi.addEventListener('click', async () => {
   showToolbar();
   activeMatchMode = 'solo';
   showLoadingOverlay();
-  await preloadCoreAssets(IS_MOBILE);
+  await preloadCoreAssets(IS_MOBILE, false, { vibe: activeVibe, skin: DEFAULT_MATCH_CONFIG.skin });
   await new Promise((resolve) => {
     // Hockey (the default vibe) is passed nothing extra, exactly as before.
     const curlingOpts = activeVibe === 'curling' ? { vibe: 'curling', matchConfig: { ...DEFAULT_MATCH_CONFIG } } : {};
@@ -1608,35 +1627,6 @@ moreLaunchBackBtn.addEventListener('click', (e) => {
 moreLaunchLocal.addEventListener('click', () => { audio.play('button'); moreLaunchOverlay.classList.add('hidden'); launchPassPlayMatch(moreLaunchConfig); });
 moreLaunchRemote.addEventListener('click', () => { audio.play('button'); moreLaunchOverlay.classList.add('hidden'); hostMatch(moreLaunchConfig); });
 
-// ---- Curling: tiles/menus are live (see conversation), the actual match
-// engine isn't plugged in yet — every path that would otherwise call
-// startGame()/hostMatch() lands here instead. Its own small .config-panel
-// (see index.html's #comingSoonOverlay comment) rather than showLobby/
-// #overlay, which desktop's menuHost move keeps behind #menuStage — this
-// needs to sit on top of #modeOverlay's still-visible backdrop like every
-// other pre-match menu panel.
-const comingSoonOverlay = document.getElementById('comingSoonOverlay');
-const csoIcon = document.getElementById('csoIcon');
-const csoOkBtn = document.getElementById('csoOkBtn');
-function showComingSoonScreen() {
-  // Defensive: reached from more than one screen (Classic/Custom's own
-  // launch callback, which already hides itself first — but also straight
-  // off Match réseau's "Rejoindre", which hasn't hidden matchNetworkOverlay
-  // yet) — hiding both here regardless of which path called in keeps
-  // returnToModeSelect() below from leaving a stale panel behind it.
-  classicCustomOverlay.classList.add('hidden');
-  hideNetPanel();
-  csoIcon.replaceChildren(VIBE_TILES[activeVibe].querySelector('.mode-icon').cloneNode(true));
-  csoIcon.setAttribute('aria-label', VIBE_LABELS[activeVibe]);
-  comingSoonOverlay.classList.remove('mode-hockey', 'mode-curling');
-  comingSoonOverlay.classList.add(vibeTintClass());
-  comingSoonOverlay.classList.remove('hidden');
-}
-csoOkBtn.addEventListener('click', () => {
-  audio.play('button');
-  comingSoonOverlay.classList.add('hidden');
-  returnToModeSelect();
-});
 
 const OVERLAY_TINT_CLASSES = ['mode-hockey', 'mode-curling', 'mode-solo', 'mode-replay'];
 // mode: 'passplay'/'remote' (tint follows activeVibe — hockey/curling), or
@@ -2179,7 +2169,7 @@ async function launchPassPlayMatch(config) {
   // loading overlay until assets are actually baked, so neither player can
   // tap ready onto a board still showing flat fallback bubble colors.
   showLoadingOverlay();
-  await preloadCoreAssets(IS_MOBILE);
+  await preloadCoreAssets(IS_MOBILE, false, { vibe: activeVibe, skin: config?.skin });
   await new Promise((resolve) => {
     activeStopGame = startGame({
       ...rockHandlers, identiconAddress: identiconOverride('A'), identiconLabel: identityLabelOverride('A'), mobile: IS_MOBILE, matchConfig: config, vibe: activeVibe,
@@ -2482,44 +2472,6 @@ navAbout.addEventListener('click', () => {
   else hideAboutScreen();
 });
 aboutBackBtn.addEventListener('click', hideAboutScreen);
-// Partnership (index.html's #navPartnership) — no real destination yet, so
-// it gets the shared "Under construction" panel (#constructionOverlay),
-// same toggle-on-reclick principle as #aboutOverlay above. (League's own
-// "Rules" pill used to reuse this panel too — it has its own dedicated one
-// now, #leagueRulesOverlay, see showLeagueRulesScreen below.) Tracks which
-// label is currently showing so re-clicking a DIFFERENT caller while this
-// panel is open switches topic instead of closing.
-const constructionOverlay = document.getElementById('constructionOverlay');
-const constructionBackBtn = document.getElementById('constructionBackBtn');
-const constructionTitle = document.getElementById('constructionTitle');
-let activeConstructionLabel = null;
-function showConstructionScreen(label) {
-  audio.play('button');
-  hideSidebarPanels();
-  modeOverlay.classList.remove('hidden');
-  modeDrawer.classList.add('hidden');
-  hideRemoteMatchStack(); // see that function's own comment
-  constructionTitle.textContent = label;
-  constructionOverlay.classList.remove('hidden');
-  activeConstructionLabel = label;
-}
-function hideConstructionScreen() {
-  audio.play('button');
-  constructionOverlay.classList.add('hidden');
-  activeConstructionLabel = null;
-  returnToModeSelect();
-}
-constructionBackBtn.addEventListener('click', hideConstructionScreen);
-function wireConstructionNav(id, label) {
-  document.getElementById(id).addEventListener('click', () => {
-    if (activeStopGame) return;
-    if (constructionOverlay.classList.contains('hidden') || activeConstructionLabel !== label) {
-      showConstructionScreen(label);
-    } else {
-      hideConstructionScreen();
-    }
-  });
-}
 // Partnership (index.html's #navPartnership/#partnershipOverlay +
 // #partnershipBookOverlay) — its own two-panel flow, same show/hide shape as
 // About/Nimiq/League above. "Book a week" now shows the real week list from
@@ -3049,10 +3001,18 @@ function renderLeagueRankPill(el, rows, emptyText) {
     const label = cached?.alias ? `@${cached.alias}` : shortenLeagueAddress(row.address);
     const isAddr = !cached?.alias;
     const isMe = !!myAddress && row.address === myAddress;
+    // escapeHtml on both the address and the label: `row.address` is whatever
+    // string the opponent's client reported as its own `?address=` (see
+    // party/arbiter.js's onConnect and CLAUDE.md's trust-model note — never
+    // signed, never verified), so it reaches this template from a hostile
+    // source. The arbiters now reject anything that isn't a real NQ… address
+    // before it can ever be stored, but this is the render that actually has
+    // to be safe — same escaping My Matches already does for its own
+    // opponent-supplied label.
     return `<div class="league-rank-row${isMe ? ' me' : ''}">
       <span class="league-rank-num">${row.rank}</span>
-      <span class="league-rank-avatar" data-address="${row.address}"></span>
-      <span class="league-rank-name${isAddr ? ' addr' : ''}">${label}</span>
+      <span class="league-rank-avatar" data-address="${escapeHtml(row.address)}"></span>
+      <span class="league-rank-name${isAddr ? ' addr' : ''}">${escapeHtml(label)}</span>
       <span class="league-rank-pts">+${row.lp}<span class="league-rank-pts-suffix"> pts</span></span>
     </div>`;
   }).join('');
@@ -3151,11 +3111,14 @@ function paintRankTicker(track, rows) {
   const itemsHtml = rows.map((row) => {
     const cached = aliasCache.get(row.address);
     const label = cached?.alias ? `@${cached.alias}` : shortenLeagueAddress(row.address);
+    // Same hostile-source escaping as renderLeagueRankPill above — and it
+    // matters more here: this ticker paints on the mode-select screen every
+    // visitor lands on, not a panel they have to open.
     return `
-      <span class="mode-rank-item" data-address="${row.address}">
+      <span class="mode-rank-item" data-address="${escapeHtml(row.address)}">
         <span class="mode-rank-item-num">${row.rank}</span>
-        <span class="mode-rank-item-avatar" data-address="${row.address}"></span>
-        <span class="mode-rank-item-addr">${label}</span>
+        <span class="mode-rank-item-avatar" data-address="${escapeHtml(row.address)}"></span>
+        <span class="mode-rank-item-addr">${escapeHtml(label)}</span>
         <span class="mode-rank-item-pts">${row.lp} pts</span>
       </span>`;
   }).join('');
@@ -3213,7 +3176,7 @@ async function onRankTickerLap() {
     <span>Your ranking:</span>
     <span class="mode-rank-item-num">${rank}</span>
     <span class="mode-rank-item-avatar" style="background-image:url(${avatarUrl})"></span>
-    <span class="mode-rank-item-addr">${label}</span>
+    <span class="mode-rank-item-addr">${escapeHtml(label)}</span>
     <span class="mode-rank-item-pts">${lp} pts</span>`;
   track.classList.add('paused');
   meEl.classList.add('visible');
@@ -3310,8 +3273,8 @@ const htCurlingBtn = document.getElementById('htCurlingBtn');
 // hideMatchChrome pairing elsewhere in this file.
 const OTHER_MENU_OVERLAY_IDS = [
   'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay',
-  'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay',
-  'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay',
+  'joinCodeOverlay', 'replayUploadOverlay',
+  'aboutOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay',
   'partnershipOverlay', 'partnershipBookOverlay', 'howToHubOverlay',
   'nimicurlRulesOverlay', 'pureCurlingRulesOverlay',
 ];
@@ -3733,9 +3696,14 @@ async function handleReplayFile(file) {
     // Loading overlay stays up (already showing from the decode above) through
     // the same asset-warm/bubble-bake wait every other mode now gets — a
     // replay leans just as hard on the identicon bubbles as a live match.
-    await preloadCoreAssets(IS_MOBILE);
+    await preloadCoreAssets(IS_MOBILE, false, { vibe: points[0]?.vibe, skin: points[0]?.matchConfig?.skin });
     await new Promise((resolve) => {
-      activeStopGame = startGame({ ...rockHandlers, replayPoints: points, vibe: points[0]?.vibe || 'hockey', originalTicketDataUrl, mobile: IS_MOBILE, onMatchReady: resolve });
+      // matchConfig comes off the point itself (src/replay.js v2) so a Custom
+      // match replays under its own rules — skin, stone count, points to win,
+      // curling cycles — instead of silently falling back to Classic. A v1
+      // point decodes to the Classic values it always implied, so this is a
+      // no-op for every already-shared ticket.
+      activeStopGame = startGame({ ...rockHandlers, replayPoints: points, vibe: points[0]?.vibe || 'hockey', matchConfig: points[0]?.matchConfig || null, originalTicketDataUrl, mobile: IS_MOBILE, onMatchReady: resolve });
     });
     hideLoadingOverlay();
     syncIdentityPill();
@@ -3858,7 +3826,7 @@ function showReadyScreen(net, teamLabel, cls, onLost, matchConfig, reconnect = n
     // introducing a second visual, one show/hide pair covering both the
     // asset warm-up and the identicon bake before either side's board appears.
     showLoadingOverlay();
-    await preloadCoreAssets(IS_MOBILE);
+    await preloadCoreAssets(IS_MOBILE, false, { vibe: activeVibe, skin: matchConfig?.skin });
     // net.opponentAddress is already known by this point — onBothReady only
     // ever fires after onOpponentJoined has set it (see showWaitingScreen/
     // showMatchHostWaitingScreen above and net.js's 'joined'/'opponentJoined'
@@ -4568,7 +4536,7 @@ async function showWeekAimScreen(week, chained = false, liveSession = null) {
   // moment nothing has actually happened in this match yet.
   pendingWeekCancel = week.status === 'pending' ? week : null;
   activeWeekWaiting = null; // defensive — this window's own flag, not this one's
-  await preloadCoreAssets(IS_MOBILE);
+  await preloadCoreAssets(IS_MOBILE, false, { vibe: week.game, skin: week.config?.skin });
   // Gates game.js's own entry (beginMatchIntro() for a fresh point, see
   // startGame's own weekEntryReady comment) behind this screen's Play tap
   // instead of firing the instant the session starts — the entry card below
@@ -4794,7 +4762,7 @@ async function playWeekReveal(week, chained = false, liveSession = null) {
     hideWeekSpinner();
     revealPromise = liveSession.watchReveal(week);
   } else {
-    await preloadCoreAssets(IS_MOBILE);
+    await preloadCoreAssets(IS_MOBILE, false, { vibe: week.game, skin: week.config?.skin });
     let resolveWeekEntry = null;
     const weekEntryReady = chained ? null : new Promise((res) => { resolveWeekEntry = res; });
     // activeStopGame — see showWeekAimScreen's own comment on the identical
@@ -5144,9 +5112,9 @@ if (replayFromLink) {
   beginAmbience();
   activeMatchMode = 'replay';
   (async () => {
-    await preloadCoreAssets(IS_MOBILE);
+    await preloadCoreAssets(IS_MOBILE, false, { vibe: replayFromLink.vibe, skin: replayFromLink.matchConfig?.skin });
     await new Promise((resolve) => {
-      activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], vibe: replayFromLink.vibe || 'hockey', mobile: IS_MOBILE, onMatchReady: resolve });
+      activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], vibe: replayFromLink.vibe || 'hockey', matchConfig: replayFromLink.matchConfig || null, mobile: IS_MOBILE, onMatchReady: resolve });
     });
     hideLoadingOverlay();
     syncIdentityPill();

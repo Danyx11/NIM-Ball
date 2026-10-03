@@ -615,6 +615,7 @@ function connectSocket(url) {
     let mancheInvalidCb = null;
     let leagueResultCb = null;
     let prizeResultCb = null;
+    let forfeitWinCb = null;
 
     const net = {
       myTeam: null,
@@ -732,6 +733,14 @@ function connectSocket(url) {
       // 'paid' status) — callers must not assume it always arrives, same as
       // onLeagueResult above.
       onPrizeResult(cb) { prizeResultCb = cb; },
+      // Forfeit (party/arbiter.js's awardForfeit) — the opponent left an
+      // underway match and didn't come back inside the server's grace window,
+      // so it has been handed to this side. Arrives only for the player who
+      // stayed, roughly a minute AFTER the 'opponentLeft' that onDisconnect
+      // already reported, and only for a League-eligible match — so callers
+      // must treat it as an optional upgrade to the "opponent left" state they
+      // are already showing, never as the thing that tells them someone left.
+      onForfeitWin(cb) { forfeitWinCb = cb; },
       close() { clearInterval(keepaliveId); ws.close(); },
     };
 
@@ -792,6 +801,8 @@ function connectSocket(url) {
         if (leagueResultCb) leagueResultCb({ lpAwarded: msg.lpAwarded, reason: msg.reason });
       } else if (msg.type === 'prizeResult') {
         if (prizeResultCb) prizeResultCb({ amountNim: msg.amountNim, reason: msg.reason });
+      } else if (msg.type === 'forfeitWin') {
+        if (forfeitWinCb) forfeitWinCb({ lpAwarded: msg.lpAwarded ?? null });
       }
     });
   });

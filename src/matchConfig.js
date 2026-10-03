@@ -4,9 +4,13 @@
 // preset; Custom is the exact same shape with different values (see
 // conversation — Pass & Play / Remote Match "Classic / Custom" flow).
 //
-// Deliberately NOT involved in the replay/ticket system (src/recorder.js,
-// src/replay.js, src/ticket.js) — that binary format is still hardcoded to
-// 3+3 stones and is explicitly out of scope for this feature (separate task).
+// Carried through the replay/ticket system since src/replay.js's v2 format:
+// a point's QR encodes stonesPerTeam/pointsToWin/curlingCycles/skin in one
+// header byte, so a Custom match's replay plays under its own rules. Before
+// that the format assumed 3+3 stones outright, which both corrupted a 1-/2-
+// stone match's QR and silently replayed everything as Classic — see that
+// file's own v1/v2 note. turnTime is the one field deliberately left out:
+// replay has no turn timer to drive with it.
 
 export const DEFAULT_MATCH_CONFIG = Object.freeze({
   skin: 'summer',
