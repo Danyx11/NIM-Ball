@@ -235,6 +235,19 @@ export async function getBlockNumber(rpcUrl) {
   return height;
 }
 
+// Current balance of an account, in luna. Used by party/prize.js's low-balance
+// alert — the prize wallet paying out is the one thing here that silently stops
+// working when it runs dry, and a failed payout is NOT retried (see evaluate()'s
+// own comment), so the balance has to be watched rather than discovered.
+// `getAccountByAddress` returns the full account object; a never-used address
+// has no account on chain yet, which surfaces as a missing/zero balance rather
+// than an error, so this normalizes that to 0 instead of throwing.
+export async function getBalance(rpcUrl, userFriendlyAddress) {
+  const account = await rpcCall(rpcUrl, 'getAccountByAddress', [userFriendlyAddress]);
+  const balance = account?.balance;
+  return typeof balance === 'number' ? balance : 0;
+}
+
 // Broadcasts a fully signed raw transaction (hex, no 0x prefix). Returns the
 // txid the node computed on decode — should match buildAndSignBasicTransaction's
 // own locally-computed txId; party/prize.js doesn't hard-fail on a mismatch
