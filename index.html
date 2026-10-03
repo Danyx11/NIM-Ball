@@ -25,7 +25,39 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Nim-Curl">
+<meta name="apple-mobile-web-app-title" content="NimiCurl">
+<!-- Link preview (Open Graph + Twitter card). The whole point of the ticket
+     and ?replay= links is that players share them, and without these a shared
+     link renders as a bare URL in Telegram/WhatsApp/Discord/X — no image, no
+     title, nothing to click for. og-card.jpg is a 1200x630 JPEG crop of the
+     splash art (public/home/home-screen.webp) rather than the WebP itself:
+     several scrapers still don't decode WebP, and 1200x630 is the ratio they
+     all crop to anyway.
+
+     The URLs below are ABSOLUTE and deliberately pinned to the GitHub Pages
+     origin, which is this game's canonical public address (see
+     vite.config.js's own `base` comment). %BASE_URL% is not used here: it
+     resolves to a path, and scrapers need a full origin — a relative og:image
+     is simply dropped by most of them. A Vercel deploy serves the same build
+     from a different domain; pinning the canonical origin means a link shared
+     from either one previews identically, which is what you want. Change both
+     origins together if the public address ever moves. -->
+<meta name="description" content="Plan your shots in secret, then watch both players' moves unfold at once. A fast game of ice, physics and precision — challenge a friend right in your browser.">
+<link rel="canonical" href="https://danyx11.github.io/NIM-Ball/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="NimiCurl">
+<meta property="og:title" content="NimiCurl — plan your shots, then watch them collide">
+<meta property="og:description" content="Plan your shots in secret, then watch both players' moves unfold at once. A fast game of ice, physics and precision — challenge a friend right in your browser.">
+<meta property="og:url" content="https://danyx11.github.io/NIM-Ball/">
+<meta property="og:image" content="https://danyx11.github.io/NIM-Ball/og-card.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The NimiCurl rink: an ice sheet in a pine forest at dusk.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="NimiCurl — plan your shots, then watch them collide">
+<meta name="twitter:description" content="Plan your shots in secret, then watch both players' moves unfold at once. A fast game of ice, physics and precision — challenge a friend right in your browser.">
+<meta name="twitter:image" content="https://danyx11.github.io/NIM-Ball/og-card.jpg">
 <!-- Branded loading screen: shown by default so a slow first paint (before
      this page's real CSS/JS — imported via src/main.js — finishes
      downloading) never flashes raw unstyled HTML (white background, default
