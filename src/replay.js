@@ -13,9 +13,53 @@
 
 import jsQR from 'jsqr';
 
-const VERSION = 1;
+// v1 assumed the Classic preset outright: exactly 3 stones per team, and
+// whatever DEFAULT_MATCH_CONFIG happened to say for everything else. Both
+// assumptions were wrong for a Custom match (see src/matchConfig.js) and broke
+// in two different ways:
+//  - decode read a fixed 6 stones per manche whatever had been written, so a
+//    1- or 2-stone Custom match's QR ran straight off the end of the buffer
+//    ("Offset is outside the bounds of the DataView"). The ticket printed
+//    those QR tiles regardless, so they were dead codes: the ?replay= link
+//    resolved to null and an uploaded ticket reported "no points found";
+//  - nothing carried the rules, so playback always ran Classic — a winter
+//    match replayed on the summer arena, a 3-cycle curling point resolved
+//    after 2.
+// v2 fixes both: one extra header byte holds the rules, and the per-manche
+// stone loops are driven by the real counts. Decoding stays backward
+// compatible — a v1 blob (an already-shared link or a printed ticket) decodes
+// exactly as it always did, since v1 only ever existed for 3-stone Classic
+// matches, which is precisely what the v1 defaults below describe.
+const VERSION = 2;
 const SCALE_V = 1000;
 const SCALE_POS = 10;
+// What a v1 blob implied without ever saying it. Not imported from
+// matchConfig.js on purpose: these are the fixed historical v1 semantics, so
+// they must NOT follow a future change to the Classic preset.
+const V1_IMPLIED_CONFIG = Object.freeze({ stonesPerTeam: 3, pointsToWin: 2, curlingCycles: 2, skin: 'summer' });
+// `flags`' per-stone "used" bits are unchanged from v1 (0-2 team A, 3-5 team
+// B, 6/7 the two sweeps), which is why the stone count can only ever be 1-3 —
+// the same STONES_OPTIONS ceiling src/matchConfig.js already enforces. The
+// config byte packs each 1-3 option as a 2-bit (value - 1).
+const MAX_STONES_PER_TEAM = 3;
+function clampOption(value, fallback) {
+  return value >= 1 && value <= 3 ? value : fallback;
+}
+function packConfigByte(config) {
+  const c = config || V1_IMPLIED_CONFIG;
+  const stones = clampOption(c.stonesPerTeam, V1_IMPLIED_CONFIG.stonesPerTeam);
+  const points = clampOption(c.pointsToWin, V1_IMPLIED_CONFIG.pointsToWin);
+  const cycles = clampOption(c.curlingCycles, V1_IMPLIED_CONFIG.curlingCycles);
+  return (stones - 1) | ((points - 1) << 2) | ((cycles - 1) << 4) | (c.skin === 'winter' ? (1 << 6) : 0);
+}
+function unpackConfigByte(byte) {
+  return {
+    stonesPerTeam: (byte & 0b11) + 1,
+    pointsToWin: ((byte >> 2) & 0b11) + 1,
+    curlingCycles: ((byte >> 4) & 0b11) + 1,
+    skin: (byte & (1 << 6)) ? 'winter' : 'summer',
+  };
+}
 
 // ---------- Ticket layout (also used by ticket.js to draw QR tiles) ----------
 // public/ticket/polaroid.webp (baked from design/Polaroid ticket 4.png, a
@@ -207,11 +251,19 @@ function base64UrlToBytes(str) {
 }
 
 // ---------- point <-> bytes ----------
-function packManche(bytes, manche) {
-  const { stonesA, stonesB, sweepA, sweepB } = manche;
+// `stonesPerTeam` comes from the point's own config byte, not from
+// stonesA.length: the two must agree for decode to find the right offsets, so
+// the header is the single source of truth and anything longer/shorter than it
+// is padded/trimmed here rather than silently writing a differently-sized
+// manche than the header promised.
+function packManche(bytes, manche, stonesPerTeam) {
+  const { sweepA, sweepB } = manche;
+  const fit = (stones) => Array.from({ length: stonesPerTeam }, (_, i) => stones?.[i] || { vx: 0, vy: 0, used: false });
+  const stonesA = fit(manche.stonesA);
+  const stonesB = fit(manche.stonesB);
   let flags = 0;
   stonesA.forEach((s, i) => { if (s.used) flags |= (1 << i); });
-  stonesB.forEach((s, i) => { if (s.used) flags |= (1 << (3 + i)); });
+  stonesB.forEach((s, i) => { if (s.used) flags |= (1 << (MAX_STONES_PER_TEAM + i)); });
   if (sweepA) flags |= (1 << 6);
   if (sweepB) flags |= (1 << 7);
   bytes.push(flags);
@@ -252,7 +304,12 @@ export function encodePoint(point) {
   // resolveCurlingPoint, a ball that shouldn't exist — see CLAUDE.md).
   if (point.vibe === 'curling') outcome |= 4;
   bytes.push(outcome, point.manches.length & 0xff);
-  for (const manche of point.manches) packManche(bytes, manche);
+  // v2's one added header byte — the match rules playback has to reproduce
+  // (see V1_IMPLIED_CONFIG above).
+  const configByte = packConfigByte(point.matchConfig);
+  bytes.push(configByte);
+  const { stonesPerTeam } = unpackConfigByte(configByte);
+  for (const manche of point.manches) packManche(bytes, manche, stonesPerTeam);
   return bytesToBase64Url(Uint8Array.from(bytes));
 }
 
@@ -260,13 +317,17 @@ export function decodePoint(base64url) {
   const raw = base64UrlToBytes(base64url);
   const view = new DataView(raw.buffer);
   let offset = 0;
-  const version = raw[offset++]; // eslint-disable-line no-unused-vars
+  const version = raw[offset++];
   const index = raw[offset++];
   const outcome = raw[offset++];
   const mancheCount = raw[offset++];
   const scoringTeam = (outcome & 1) ? 'B' : 'A';
   const isWipeout = !!(outcome & 2);
   const vibe = (outcome & 4) ? 'curling' : 'hockey';
+  // v1 blobs have no config byte at all — their rules are implied, not stored
+  // (see V1_IMPLIED_CONFIG). Reading one would eat the first manche's flags.
+  const matchConfig = version >= 2 ? unpackConfigByte(raw[offset++]) : { ...V1_IMPLIED_CONFIG };
+  const { stonesPerTeam } = matchConfig;
   const manches = [];
   for (let m = 0; m < mancheCount; m++) {
     const flags = raw[offset++];
@@ -275,8 +336,8 @@ export function decodePoint(base64url) {
       const vy = readInt16(view, offset) / SCALE_V; offset += 2;
       return { vx, vy, used: !!(flags & (1 << bit)) };
     };
-    const stonesA = [readStone(0), readStone(1), readStone(2)];
-    const stonesB = [readStone(3), readStone(4), readStone(5)];
+    const stonesA = Array.from({ length: stonesPerTeam }, (_, i) => readStone(i));
+    const stonesB = Array.from({ length: stonesPerTeam }, (_, i) => readStone(MAX_STONES_PER_TEAM + i));
     const readSweep = () => {
       const x = readInt16(view, offset) / SCALE_POS; offset += 2;
       const y = readInt16(view, offset) / SCALE_POS; offset += 2;
@@ -287,7 +348,7 @@ export function decodePoint(base64url) {
     const sweepB = (flags & (1 << 7)) ? readSweep() : null;
     manches.push({ stonesA, stonesB, sweepA, sweepB });
   }
-  return { index, scoringTeam, isWipeout, vibe, manches };
+  return { index, scoringTeam, isWipeout, vibe, matchConfig, manches };
 }
 
 // ---------- URL / magic link ----------

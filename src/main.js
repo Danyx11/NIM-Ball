@@ -3696,9 +3696,14 @@ async function handleReplayFile(file) {
     // Loading overlay stays up (already showing from the decode above) through
     // the same asset-warm/bubble-bake wait every other mode now gets — a
     // replay leans just as hard on the identicon bubbles as a live match.
-    await preloadCoreAssets(IS_MOBILE);
+    await preloadCoreAssets(IS_MOBILE, false, { vibe: points[0]?.vibe, skin: points[0]?.matchConfig?.skin });
     await new Promise((resolve) => {
-      activeStopGame = startGame({ ...rockHandlers, replayPoints: points, vibe: points[0]?.vibe || 'hockey', originalTicketDataUrl, mobile: IS_MOBILE, onMatchReady: resolve });
+      // matchConfig comes off the point itself (src/replay.js v2) so a Custom
+      // match replays under its own rules — skin, stone count, points to win,
+      // curling cycles — instead of silently falling back to Classic. A v1
+      // point decodes to the Classic values it always implied, so this is a
+      // no-op for every already-shared ticket.
+      activeStopGame = startGame({ ...rockHandlers, replayPoints: points, vibe: points[0]?.vibe || 'hockey', matchConfig: points[0]?.matchConfig || null, originalTicketDataUrl, mobile: IS_MOBILE, onMatchReady: resolve });
     });
     hideLoadingOverlay();
     syncIdentityPill();
@@ -5107,9 +5112,9 @@ if (replayFromLink) {
   beginAmbience();
   activeMatchMode = 'replay';
   (async () => {
-    await preloadCoreAssets(IS_MOBILE);
+    await preloadCoreAssets(IS_MOBILE, false, { vibe: replayFromLink.vibe, skin: replayFromLink.matchConfig?.skin });
     await new Promise((resolve) => {
-      activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], vibe: replayFromLink.vibe || 'hockey', mobile: IS_MOBILE, onMatchReady: resolve });
+      activeStopGame = startGame({ ...rockHandlers, replayPoints: [replayFromLink], vibe: replayFromLink.vibe || 'hockey', matchConfig: replayFromLink.matchConfig || null, mobile: IS_MOBILE, onMatchReady: resolve });
     });
     hideLoadingOverlay();
     syncIdentityPill();

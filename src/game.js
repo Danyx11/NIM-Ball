@@ -4426,7 +4426,7 @@ export function startGame(opts = {}) {
       devHeadlessExpected = null;
     }
     barGlowSide = null; // bar stays lit through the whole pause/settle wait, cut right as the point is actually displayed below
-    if (!isReplay) recorder.finishPoint(scoringTeam, isWipeout, vibe);
+    if (!isReplay) recorder.finishPoint(scoringTeam, isWipeout, vibe, matchConfig);
     if (scoringTeam === 'A') scoreA++; else scoreB++;
     lastMancheScoringTeam = scoringTeam; // see its own declaration — WEEK's onMancheSettled reads this back out
     if (isReplay) {
