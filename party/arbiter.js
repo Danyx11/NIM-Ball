@@ -22,6 +22,23 @@ import { PRIZE_ROOM_NAME } from './prize.js';
 
 const CHAT_COOLDOWN_MS = 30000;
 
+// A Nimiq user-friendly address, spaces already stripped by src/net.js's
+// connectMatch: "NQ" + 2 check digits + 32 base32 characters = 36 chars.
+// Deliberately NOT a trust upgrade — this address is still just a string the
+// client reported about itself, with no signature behind it (see this.addresses
+// below and CLAUDE.md's trust-model note). It is a *shape* check, so that a
+// value which could never be a wallet at all can't travel on into
+// party/leagueSeason.js's player keys and from there into the League panel and
+// the home-screen ranking ticker, which render it for every other player.
+// Anything that fails this is treated exactly like a guest (null) rather than
+// rejected, so a malformed param can't lock someone out of LIVE itself.
+const NIMIQ_ADDRESS_RE = /^NQ[0-9A-Z]{34}$/;
+function sanitizeAddress(raw) {
+  if (typeof raw !== 'string') return null;
+  const clean = raw.replace(/\s+/g, '').toUpperCase();
+  return NIMIQ_ADDRESS_RE.test(clean) ? clean : null;
+}
+
 function otherTeam(team) {
   return team === 'A' ? 'B' : 'A';
 }
@@ -296,7 +313,7 @@ export class Arbiter extends Server {
     // Optional, Radar-only (see this.addresses' own comment above) — src/net.js's
     // connectMatch() appends this when the local player has a connected
     // wallet, omits it entirely for a guest.
-    this.addresses[team] = url.searchParams.get('address') || null;
+    this.addresses[team] = sanitizeAddress(url.searchParams.get('address'));
     this.deviceIds[team] = url.searchParams.get('device') || null;
     // Baseline for this team's reflection-time tally (A2 — see onStart's own
     // comment) — a reconnect (rejoinTeam) re-baselines here too, which is

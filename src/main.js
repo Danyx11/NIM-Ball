@@ -708,13 +708,32 @@ connectNimiq()
 // wallet explorer). Not a general "switch accounts" feature — same trust
 // level `hubAddress` already has everywhere else in this codebase (a plain,
 // unverified client-reported string, see CLAUDE.md's Radar trust-model
-// note), so accepting it from a URL param changes nothing about what the
-// server already trusts. Stripped from the URL immediately so a reload/share
-// doesn't keep re-applying it.
+// note). Stripped from the URL immediately so a reload/share doesn't keep
+// re-applying it.
+//
+// Two guards, both load-bearing — this used to apply silently:
+//  - shape check, so this can't write a value that isn't an address at all
+//    into the one field League/Radar/PrizeVault all key off;
+//  - a blocking confirm(), because everything downstream of hubAddress is
+//    client-reported and therefore trusted as-is: without it, `?setIdentity=`
+//    was a one-click link that silently rewrote a player's identity (and so
+//    redirected their League LP and any 10 NIM prize to whoever sent the
+//    link), with the param stripped afterwards so they'd never see why. A
+//    native confirm() rather than this file's own dialog markup on purpose:
+//    this runs at module load, before any overlay exists and before
+//    hubAddress is first read below, and it has to be synchronous to stay
+//    ahead of that read. Recovery is a deliberate, typed-in-the-URL-bar act,
+//    so one extra tap costs the real use case nothing.
 {
-  const forcedIdentity = new URLSearchParams(location.search).get('setIdentity');
+  const params = new URLSearchParams(location.search);
+  const forcedIdentity = params.get('setIdentity');
   if (forcedIdentity) {
-    setStoredAddress(forcedIdentity);
+    const clean = forcedIdentity.replace(/\s+/g, '').toUpperCase();
+    if (!/^NQ[0-9A-Z]{34}$/.test(clean)) {
+      console.log('[identity] ?setIdentity= ignored: not a Nimiq address');
+    } else if (window.confirm(`Set this device's Nim-Curl identity to\n\n${clean}\n\nOnly do this if you opened this link yourself. Your ranking, matches and any NIM prize will go to this address.`)) {
+      setStoredAddress(clean);
+    }
     const url = new URL(location.href);
     url.searchParams.delete('setIdentity');
     history.replaceState(null, '', url);
@@ -3049,10 +3068,18 @@ function renderLeagueRankPill(el, rows, emptyText) {
     const label = cached?.alias ? `@${cached.alias}` : shortenLeagueAddress(row.address);
     const isAddr = !cached?.alias;
     const isMe = !!myAddress && row.address === myAddress;
+    // escapeHtml on both the address and the label: `row.address` is whatever
+    // string the opponent's client reported as its own `?address=` (see
+    // party/arbiter.js's onConnect and CLAUDE.md's trust-model note — never
+    // signed, never verified), so it reaches this template from a hostile
+    // source. The arbiters now reject anything that isn't a real NQ… address
+    // before it can ever be stored, but this is the render that actually has
+    // to be safe — same escaping My Matches already does for its own
+    // opponent-supplied label.
     return `<div class="league-rank-row${isMe ? ' me' : ''}">
       <span class="league-rank-num">${row.rank}</span>
-      <span class="league-rank-avatar" data-address="${row.address}"></span>
-      <span class="league-rank-name${isAddr ? ' addr' : ''}">${label}</span>
+      <span class="league-rank-avatar" data-address="${escapeHtml(row.address)}"></span>
+      <span class="league-rank-name${isAddr ? ' addr' : ''}">${escapeHtml(label)}</span>
       <span class="league-rank-pts">+${row.lp}<span class="league-rank-pts-suffix"> pts</span></span>
     </div>`;
   }).join('');
@@ -3151,11 +3178,14 @@ function paintRankTicker(track, rows) {
   const itemsHtml = rows.map((row) => {
     const cached = aliasCache.get(row.address);
     const label = cached?.alias ? `@${cached.alias}` : shortenLeagueAddress(row.address);
+    // Same hostile-source escaping as renderLeagueRankPill above — and it
+    // matters more here: this ticker paints on the mode-select screen every
+    // visitor lands on, not a panel they have to open.
     return `
-      <span class="mode-rank-item" data-address="${row.address}">
+      <span class="mode-rank-item" data-address="${escapeHtml(row.address)}">
         <span class="mode-rank-item-num">${row.rank}</span>
-        <span class="mode-rank-item-avatar" data-address="${row.address}"></span>
-        <span class="mode-rank-item-addr">${label}</span>
+        <span class="mode-rank-item-avatar" data-address="${escapeHtml(row.address)}"></span>
+        <span class="mode-rank-item-addr">${escapeHtml(label)}</span>
         <span class="mode-rank-item-pts">${row.lp} pts</span>
       </span>`;
   }).join('');
@@ -3213,7 +3243,7 @@ async function onRankTickerLap() {
     <span>Your ranking:</span>
     <span class="mode-rank-item-num">${rank}</span>
     <span class="mode-rank-item-avatar" style="background-image:url(${avatarUrl})"></span>
-    <span class="mode-rank-item-addr">${label}</span>
+    <span class="mode-rank-item-addr">${escapeHtml(label)}</span>
     <span class="mode-rank-item-pts">${lp} pts</span>`;
   track.classList.add('paused');
   meEl.classList.add('visible');
