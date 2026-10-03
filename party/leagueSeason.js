@@ -75,6 +75,11 @@ export class LeagueSeason extends Server {
     return {
       address, rating: STARTING_RATING, lp: 0, matches: 0, wins: 0, losses: 0,
       streak: 0, bestStreak: 0, lastMatchDate: null, milestonesThisStreak: [],
+      // Per-day participation taper (see party/leagueRating.js's
+      // participationMultiplier) — the count and the UTC day it belongs to.
+      // Records stored before these existed read as 0/null, which is exactly
+      // "nothing played today yet", so there is nothing to migrate.
+      matchesToday: 0, matchesTodayDate: null,
     };
   }
 
@@ -86,7 +91,12 @@ export class LeagueSeason extends Server {
   // underlying match completion (arbiter.js uses `live:<room code>`,
   // weekArbiter.js uses `week:<room code>` — see those call sites) so a
   // duplicate/retried RPC can only ever apply once.
-  recordMatchCompleted({ leagueMatchId, mode, timestampMs, playerA, playerB, winner }) {
+  // `forfeit`: the loser never finished the match (left LIVE mid-play, let a
+  // WEEK turn expire, or abandoned) — the winner is credited exactly as for a
+  // real win, the forfeiting side banks no participation LP. See
+  // applyMatchResult's own comment for the full rule. Callers decide what
+  // counts as a forfeit; this class just applies it.
+  recordMatchCompleted({ leagueMatchId, mode, timestampMs, playerA, playerB, winner, forfeit = false }) {
     return this.serialized(async () => {
       await this.ready();
       if (!leagueMatchId || !playerA?.address || !playerB?.address || (winner !== 'A' && winner !== 'B')) {
@@ -97,12 +107,12 @@ export class LeagueSeason extends Server {
         A: this.players[playerA.address] || this.emptyPlayer(playerA.address),
         B: this.players[playerB.address] || this.emptyPlayer(playerB.address),
       };
-      const result = applyMatchResult({ playerA: before.A, playerB: before.B, winner, timestampMs: timestampMs || Date.now() });
+      const result = applyMatchResult({ playerA: before.A, playerB: before.B, winner, timestampMs: timestampMs || Date.now(), forfeit: !!forfeit });
       this.players[playerA.address] = { ...before.A, ...result.A, address: playerA.address };
       this.players[playerB.address] = { ...before.B, ...result.B, address: playerB.address };
       this.matches[leagueMatchId] = {
         matchId: leagueMatchId, seasonId: this.name, mode: mode || null,
-        playerA: playerA.address, playerB: playerB.address, winner,
+        playerA: playerA.address, playerB: playerB.address, winner, forfeit: !!forfeit,
         ratingBeforeA: result.A.ratingBefore, ratingAfterA: result.A.ratingAfter,
         ratingBeforeB: result.B.ratingBefore, ratingAfterB: result.B.ratingAfter,
         lpAwardedA: result.A.lpAwarded, lpAwardedB: result.B.lpAwarded,

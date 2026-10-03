@@ -111,18 +111,64 @@ export function winLpReward(expected) {
   return clampRound(30 - 20 * expected, 10, 30);
 }
 
-// Loss: 0 LP at expected=1 (losing when you were expected to crush your
-// opponent gets no consolation at all) rising to 6 as expected -> 0 (losing
-// as a heavy underdog was the expected outcome, so it stays cheap/lightly
-// consoled — spec: "should not be heavily punished in LP"). LP can never go
-// negative (spec section 2) — this formula never produces a negative
-// number by construction (clamped to [0, 6] regardless).
+// Loss ("participation" LP): 0 at expected=1 (losing when you were expected
+// to crush your opponent gets no consolation at all) rising to the ceiling as
+// expected -> 0 (losing as a heavy underdog was the expected outcome, so it
+// stays cheap/lightly consoled — spec: "should not be heavily punished in
+// LP"). LP can never go negative (spec section 2) — this formula never
+// produces a negative number by construction.
+//
+// Ceiling halved from the original 6 to 3 (and the slope with it, so the
+// shape is unchanged): at 6 an even-matched loss paid 2 LP against a win's
+// 20, which made simply showing up and losing a real way to climb a
+// lifetime-cumulative leaderboard. Losing should still register — the board
+// is deliberately kept as an activity/loyalty ranking, not a skill one — just
+// not add up to much.
+// Was `(0.7 - expected) * 10` clamped to [0, 6]; both the slope and the
+// ceiling are halved, so every bucket pays exactly half what it used to
+// (even-matched loss 2 -> 1, heavy-underdog loss 6 -> 3) with the zero point
+// still at expected = 0.7.
+const LOSS_LP_MAX = 3;
 export function lossLpReward(expected) {
-  return clampRound((0.7 - expected) * 10, 0, 6);
+  return clampRound((0.7 - expected) * 5, 0, LOSS_LP_MAX);
 }
 
+// ---- Per-day taper on participation LP ----
+// Participation LP is the one reward that needs no skill and no win, so it is
+// the one a player can farm by just queueing matches all day. These cap that
+// without touching wins (which already have their own anti-farming shape, see
+// winLpReward) or the streak bonus (showing up on consecutive DAYS is exactly
+// the assiduity the board is meant to reward — see updateStreak).
+// Read as: the first 3 completed League matches of a UTC day pay full
+// participation LP, the 4th pays half, and the 5th onwards pays none.
+export const PARTICIPATION_FULL_MATCHES_PER_DAY = 3;
+export const PARTICIPATION_ZERO_MATCHES_PER_DAY = 5;
+const PARTICIPATION_TAPER_MULTIPLIER = 0.5;
+
+// matchesAlreadyToday: this player's own count of completed League matches
+// earlier on the SAME UTC day as the match being recorded (0 for their first
+// of the day) — see matchesTodayBefore in applyMatchResult.
+export function participationMultiplier(matchesAlreadyToday) {
+  const nth = (matchesAlreadyToday || 0) + 1; // which match of the day this one is
+  if (nth <= PARTICIPATION_FULL_MATCHES_PER_DAY) return 1;
+  if (nth >= PARTICIPATION_ZERO_MATCHES_PER_DAY) return 0;
+  return PARTICIPATION_TAPER_MULTIPLIER;
+}
+
+// The raw per-outcome reward, before the per-day taper and before any
+// forfeit rule — kept as its own export because it's the piece that maps
+// directly onto the spec's reward tables.
 export function lpReward(expected, won) {
   return won ? winLpReward(expected) : lossLpReward(expected);
+}
+
+// What a LOSING player actually banks: the raw participation reward, tapered
+// by how much they've already played today, and zeroed outright if this loss
+// is a forfeit (they walked out of / timed out on the match — see
+// applyMatchResult's own `forfeit` comment).
+export function participationLp(expected, matchesAlreadyToday, forfeited) {
+  if (forfeited) return 0;
+  return Math.round(lossLpReward(expected) * participationMultiplier(matchesAlreadyToday));
 }
 
 // ---- Streaks (UTC calendar days, win-or-loss both count — spec section 6) ----
@@ -201,11 +247,23 @@ export function isClassicMatchConfig(config) {
 // losses, streak, bestStreak, lastMatchDate, milestonesThisStreak }.
 // winner: 'A' | 'B'. timestampMs: when the match actually completed.
 //
+// `forfeit`: true when the loser didn't actually lose on the board — they left
+// a LIVE match mid-play, let a WEEK turn time out, or abandoned outright (see
+// party/arbiter.js's awardForfeit and party/weekArbiter.js's own). The winner
+// is rewarded exactly as for a real win: without that, walking out was
+// strictly better than playing on, since it denied the opponent their LP
+// entirely. The forfeiting side banks no participation LP at all. Everything
+// else about them is treated as the loss it is — it counts as a match, counts
+// as a loss, and moves their rating normally, because the rating is the honest
+// skill signal and a match they chose not to finish is still a match they
+// didn't win. Their streak is deliberately left alone: the streak rewards
+// turning up across consecutive days, which they did.
+//
 // Returns the two players' fully-updated records plus enough of the
 // intermediate values (ratingBefore/After, lpAwarded) for the caller to
 // build a match-history entry (spec section 8) without recomputing
 // anything.
-export function applyMatchResult({ playerA, playerB, winner, timestampMs }) {
+export function applyMatchResult({ playerA, playerB, winner, timestampMs, forfeit = false }) {
   const today = utcDateString(timestampMs);
   const expectedA = expectedScore(playerA.rating, playerB.rating);
   const expectedB = 1 - expectedA;
@@ -217,8 +275,15 @@ export function applyMatchResult({ playerA, playerB, winner, timestampMs }) {
   const ratingAfterA = nextRating(ratingBeforeA, ratingBeforeB, wonA ? 1 : 0, playerA.matches || 0);
   const ratingAfterB = nextRating(ratingBeforeB, ratingBeforeA, wonB ? 1 : 0, playerB.matches || 0);
 
-  const lpA = lpReward(expectedA, wonA);
-  const lpB = lpReward(expectedB, wonB);
+  // How many League matches this player had already completed earlier on this
+  // same UTC day, for the participation taper above. A record from before
+  // these two fields existed (or one whose last match was on another day)
+  // correctly reads as 0 — no migration needed.
+  const playedBeforeA = playerA.matchesTodayDate === today ? (playerA.matchesToday || 0) : 0;
+  const playedBeforeB = playerB.matchesTodayDate === today ? (playerB.matchesToday || 0) : 0;
+
+  const lpA = wonA ? winLpReward(expectedA) : participationLp(expectedA, playedBeforeA, forfeit);
+  const lpB = wonB ? winLpReward(expectedB) : participationLp(expectedB, playedBeforeB, forfeit);
   const streakA = updateStreak(playerA, today);
   const streakB = updateStreak(playerB, today);
   const lpAwardedA = lpA + streakA.bonusLp;
@@ -230,14 +295,14 @@ export function applyMatchResult({ playerA, playerB, winner, timestampMs }) {
       lp: (playerA.lp || 0) + lpAwardedA, lpAwarded: lpAwardedA,
       matches: (playerA.matches || 0) + 1, wins: (playerA.wins || 0) + (wonA ? 1 : 0), losses: (playerA.losses || 0) + (wonA ? 0 : 1),
       streak: streakA.streak, bestStreak: streakA.bestStreak, milestonesThisStreak: streakA.milestonesThisStreak,
-      lastMatchDate: today,
+      lastMatchDate: today, matchesTodayDate: today, matchesToday: playedBeforeA + 1,
     },
     B: {
       rating: ratingAfterB, ratingBefore: ratingBeforeB, ratingAfter: ratingAfterB,
       lp: (playerB.lp || 0) + lpAwardedB, lpAwarded: lpAwardedB,
       matches: (playerB.matches || 0) + 1, wins: (playerB.wins || 0) + (wonB ? 1 : 0), losses: (playerB.losses || 0) + (wonB ? 0 : 1),
       streak: streakB.streak, bestStreak: streakB.bestStreak, milestonesThisStreak: streakB.milestonesThisStreak,
-      lastMatchDate: today,
+      lastMatchDate: today, matchesTodayDate: today, matchesToday: playedBeforeB + 1,
     },
   };
 }

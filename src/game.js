@@ -2976,10 +2976,15 @@ export function startGame(opts = {}) {
     selfDisconnected: { title: 'Connection lost', body: 'You lost your connection to the match.' },
     timeout: { title: 'Connection lost', body: 'No response from the opponent for 2 minutes.' },
   };
+  // Which dead-end panel is on screen right now, or null — read by the
+  // forfeit handler below, which may arrive a minute after the panel went up
+  // and must only ever rewrite the "opponent left" one.
+  let activeNetDeadEnd = null;
   function showNetDeadEnd(kind) {
     clearLanWaitWatchdog();
     audio.stopAmbience();
     audio.stopAllGlides();
+    activeNetDeadEnd = kind;
     const { title, body } = NET_DEAD_END_COPY[kind];
     // The panel itself stays a full click-anywhere target (overlay.onclick
     // below), but a visible pill gives the exit an explicit affordance too —
@@ -3359,6 +3364,21 @@ export function startGame(opts = {}) {
     // confirmed, or this client's own socket dropping with no such
     // confirmation (see net.js's onDisconnect comment for what tells the two
     // apart, and showNetDeadEnd's own comment for the copy each gets).
+    // The opponent left an underway match and never came back, so the server
+    // handed it to this side (see party/arbiter.js's awardForfeit). This lands
+    // about a minute after the 'opponentLeft' that onDisconnect below already
+    // turned into the "Match over" panel, so it rewrites that panel in place
+    // rather than opening anything new — and only that panel: a self-
+    // disconnect or timeout dead-end says something different and isn't
+    // this side's win to claim. No ticket here on purpose: there is no final
+    // board to show for a match that didn't finish.
+    net.onForfeitWin(({ lpAwarded }) => {
+      if (generation !== netGeneration) return;
+      if (activeNetDeadEnd !== 'quit') return;
+      const lpLine = lpAwarded ? `<p>+${lpAwarded} LP</p>` : '';
+      showOverlay(`<h2>You win</h2><p>Your opponent left and didn't come back.</p>${lpLine}<button class="bigbtn" id="netDeadEndMenuBtn">🏠 Menu</button>`);
+      overlay.onclick = () => { audio.play('button'); stopGame(); onExit?.(); };
+    });
     net.onDisconnect((reason) => {
       if (generation !== netGeneration) return; // this net object was already superseded by a later reconnect
       // 'self': try to quietly reconnect before concluding anything (see

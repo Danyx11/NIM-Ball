@@ -111,6 +111,13 @@ export class Arbiter extends Server {
     // Sync-check (see server/arbiter.js for the full rationale) — same
     // per-manche index + pending-results tracking, ported 1:1.
     this.mancheIndex = 0;
+    // Manches relayed in the CURRENT match only. mancheIndex itself keeps
+    // climbing across rematches in the same room (it's the sync-check's
+    // monotonic id, never reset), so it can't answer "was THIS match actually
+    // played" — which is exactly what awardForfeit needs, or a connect-then-
+    // quit in a rematch would collect a free win off the previous match's
+    // count. Reset alongside liveScore on every matchIndex bump.
+    this.manchesThisMatch = 0;
     this.pendingMancheIndex = null;
     this.mancheResults = { A: null, B: null };
     // NIM-Curl Radar (see party/radar.js) — wallet address (or null for a
@@ -173,7 +180,27 @@ export class Arbiter extends Server {
     // catches a fast human).
     this.lastShotAt = { A: null, B: null };
     this.reflectionMsTotal = 0;
+    // Forfeit (see awardForfeit): the pending grace-window timer armed in
+    // onClose and cleared by a rejoin in onConnect, so only one can ever be
+    // in flight.
+    this.forfeitTimer = null;
   }
+
+  // How long a player who vanished mid-match has to come back before the
+  // match is handed to whoever stayed. Comfortably longer than src/game.js's
+  // own silent reconnect budget (RECONNECT_ATTEMPTS x
+  // RECONNECT_RETRY_DELAY_MS, ~8s via onConnect's rejoinTeam path), so a real
+  // network blip never costs anybody a match — only actually leaving does.
+  //
+  // A plain setTimeout rather than ctx.storage.setAlarm() on purpose: this
+  // Durable Object deliberately never persists (see this file's header — it
+  // always starts blank), so an alarm would wake it with no match state to
+  // act on. The timer is safe here because the player who STAYED still has an
+  // open WebSocket, which is what keeps this instance alive long enough to
+  // fire. If they close too, the instance can be evicted and no forfeit is
+  // recorded — the same nothing-happens outcome as before this existed, and
+  // there is nobody left waiting on an answer either way.
+  static FORFEIT_GRACE_MS = 60000;
 
   // Tells both clients there's no League/prize result coming, and why. Sent
   // instead of silence so showVictory() stops waiting (it used to sit out
@@ -306,6 +333,13 @@ export class Arbiter extends Server {
       }
     }
     this.players[team] = connection;
+    // Somebody is back in a slot — cancel any pending forfeit (see onClose).
+    // Cleared for ANY team filling ANY slot, not just the one that left: the
+    // only timer that can be in flight is the one armed by the most recent
+    // departure, and a fresh connection to this room means the match is live
+    // again either way. The timer also re-checks the slot at fire time, so a
+    // rejoin that races this clear is still safe.
+    if (this.forfeitTimer) { clearTimeout(this.forfeitTimer); this.forfeitTimer = null; }
     // Connection state survives for the life of this connection (see
     // partyserver's connection.setState) — used in onMessage/onClose below
     // instead of re-deriving team from the raw ws connection identity.
@@ -378,6 +412,7 @@ export class Arbiter extends Server {
       this.sweeps[team] = msg.sweep || null;
       if (this.shots.A && this.shots.B) {
         this.mancheIndex++;
+        this.manchesThisMatch++;
         const payload = { type: 'launch', shotsA: this.shots.A, shotsB: this.shots.B, sweepA: this.sweeps.A, sweepB: this.sweeps.B, mancheIndex: this.mancheIndex };
         this.send(this.players.A, payload);
         this.send(this.players.B, payload);
@@ -466,6 +501,7 @@ export class Arbiter extends Server {
         // per-room — a rematch starts every one of these fresh exactly like
         // mancheIndex/shots/etc already reset elsewhere.
         this.liveScore = { A: 0, B: 0 };
+        this.manchesThisMatch = 0;
         this.hadMancheMismatch = false;
         this.reflectionMsTotal = 0;
         this.lastShotAt = { A: Date.now(), B: Date.now() };
@@ -597,6 +633,55 @@ export class Arbiter extends Server {
     }
   }
 
+  // Hands the match to the player who stayed, once the grace window above has
+  // passed with no rejoin. Why this exists at all: without it, a match that
+  // never reached 'matchOver' produced nothing — no winner, no LP — so a
+  // player about to lose was always better off closing the tab than playing
+  // on, since quitting denied their opponent the win entirely. Now leaving
+  // costs them the match.
+  //
+  // Eligibility is the SAME bar the 'matchOver' League block uses (both
+  // actually connected, both a real wallet, exact Classic ruleset), plus one
+  // more: at least one manche must have been relayed through this room, so an
+  // immediate connect-then-close can't manufacture a free win out of a match
+  // that was never played. Deliberately does NOT touch party/prize.js: a
+  // forfeit is the single cheapest thing in this whole system to fabricate
+  // (two tabs, one closes), and the prize path pays real NIM, so prizes stay
+  // on genuinely completed matches only.
+  awardForfeit(winnerTeam) {
+    const loserTeam = otherTeam(winnerTeam);
+    if (this.leagueCompletedNotified) return;      // this match already has a real result
+    if (this.manchesThisMatch < 1) return;         // nothing was ever actually played in THIS match
+    if (!this.addresses.A || !this.addresses.B) return;
+    if (!isClassicMatchConfig(this.matchConfig)) return;
+    if (this.addresses[winnerTeam] === this.addresses[loserTeam]) return; // same wallet on both sides (sanitizeAddress already normalized both)
+    this.leagueCompletedNotified = true;
+    const roomMatchId = this.matchIndex > 0 ? `live:${this.name}:${this.matchIndex}` : `live:${this.name}`;
+    // Radar counts this as a completed match — its "active now" gauge is
+    // incremented on recordMatchStarted and only ever decremented here or on
+    // a real completion, so an abandoned LIVE room used to stay counted as
+    // active forever (see party/radar.js's own note on that gauge).
+    if (!this.radarCompletedNotified) {
+      this.radarCompletedNotified = true;
+      this.radarNotify('recordMatchCompleted', { matchId: this.name, mode: 'live', timestampMs: Date.now() });
+    }
+    this.leagueNotify('recordMatchCompleted', {
+      leagueMatchId: roomMatchId, mode: 'live', timestampMs: Date.now(),
+      playerA: { address: this.addresses.A }, playerB: { address: this.addresses.B },
+      winner: winnerTeam, forfeit: true,
+    }).then((result) => {
+      // Only the player who stayed is still connected, so there's nobody to
+      // tell on the other side. Its own message type rather than reusing
+      // 'leagueResult': the client is already sitting on the "opponent left"
+      // dead-end panel by now and has to rewrite it into a win, which is a
+      // different thing from filling in a ticket's LP stamp.
+      const lpAwarded = result?.ok && !result.duplicate
+        ? (winnerTeam === 'A' ? result.lpAwardedA : result.lpAwardedB)
+        : null;
+      this.send(this.players[winnerTeam], { type: 'forfeitWin', lpAwarded });
+    });
+  }
+
   onClose(connection, code, reason, wasClean) {
     const team = connection.state?.team;
     if (team !== 'A' && team !== 'B') return;
@@ -607,11 +692,27 @@ export class Arbiter extends Server {
     // must not reset the round or tell the other player anyone left.
     if (this.players[team] !== connection) return;
     this.players[team] = null;
+    // Read at the moment of the departure (resetRound/resetManche below don't
+    // touch it today, but the forfeit decision belongs to this instant).
+    const playedSomething = this.manchesThisMatch >= 1;
     this.resetRound();
     this.resetManche();
     this.lastChatAt[team] = 0; // a fresh reconnect shouldn't inherit a stale cooldown
     this.ready[team] = false; // ditto for a stale "already tapped ready" from a dropped connection
     const remaining = this.players[otherTeam(team)];
     this.send(remaining, { type: 'opponentLeft' });
+    // Arm the forfeit only when there is somebody to award it to and a real
+    // match to award — otherwise this is just an empty room going quiet.
+    if (remaining && playedSomething && !this.leagueCompletedNotified) {
+      if (this.forfeitTimer) clearTimeout(this.forfeitTimer);
+      this.forfeitTimer = setTimeout(() => {
+        this.forfeitTimer = null;
+        // Re-checked at fire time, not just at arm time: the slot may have
+        // been refilled by a rejoin that raced the clear below, and the match
+        // may have been decided for real in the meantime.
+        if (this.players[team]) return;
+        this.awardForfeit(otherTeam(team));
+      }, Arbiter.FORFEIT_GRACE_MS);
+    }
   }
 }

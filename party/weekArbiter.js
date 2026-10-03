@@ -39,8 +39,30 @@ import { PRIZE_ROOM_NAME } from './prize.js';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const JOIN_WINDOW_MS = DAY_MS;        // A's code stays open for B to join
 const MATCH_LIFETIME_MS = 7 * DAY_MS; // fixed from the moment B joins, not sliding — see conversation
+// How long a player has to take their turn once it actually becomes theirs.
+// Before this existed, WEEK had no per-turn deadline at all — only the 7-day
+// MATCH_LIFETIME_MS above — so a player who was behind could simply stop
+// playing and let the whole match die with no result, which denied their
+// opponent the win. Since the turn-ready moment is already the seam that
+// fires the Telegram DM (see notifyTurnReady), a player always knows their
+// clock started; 48h is generous for an asynchronous mode on that basis.
+const TURN_DEADLINE_MS = 2 * DAY_MS;
 
 function otherTeam(team) { return team === 'A' ? 'B' : 'A'; }
+
+// Same shape-only check party/arbiter.js documents at length (duplicated
+// rather than shared, per this directory's own one-file-one-class convention):
+// "NQ" + 2 check digits + 32 base32 characters, spaces already stripped by
+// src/net.js. WEEK has no guest path at all — this address IS the
+// reconnection credential and the PlayerIndex room name — so an unusable
+// value is rejected outright here rather than downgraded to null the way
+// LIVE's optional, Radar-only address is. Validated WITHOUT rewriting the
+// string: it's already a storage key for live matches, so normalizing case
+// here would orphan any match created before this check existed.
+const NIMIQ_ADDRESS_RE = /^NQ[0-9A-Z]{34}$/;
+function isUsableAddress(raw) {
+  return typeof raw === 'string' && NIMIQ_ADDRESS_RE.test(raw.replace(/\s+/g, '').toUpperCase());
+}
 
 export class WeekArbiter extends Server {
   onStart() {
@@ -123,6 +145,15 @@ export class WeekArbiter extends Server {
       // leagueLp just above, persisted the same way so a later reconnect
       // still shows it.
       prizeNim: m.prizeResult ? m.prizeResult[team] : null,
+      // Forfeit (see awardWeekForfeit) — null for every match that ended on
+      // the board, which is every match persisted before this existed. When
+      // set, `won` says whether THIS team is the one it was handed to, so the
+      // client never has to know about A/B to word it.
+      forfeit: m.forfeit ? { won: m.forfeit.winner === team, reason: m.forfeit.reason } : null,
+      // Per-turn deadline (see TURN_DEADLINE_MS) — when it's this team's clock
+      // running, so a client can show how long they have left. null when it's
+      // the opponent's turn, or for a match from before this existed.
+      turnDeadline: m.turnDeadlineTeam === team ? (m.turnDeadline || null) : null,
       // "Play Again" (see onMessage's own 'rematch' comment) — only
       // meaningful once status is 'completed'; mine/opponent both false the
       // rest of the time.
@@ -302,12 +333,84 @@ export class WeekArbiter extends Server {
       .catch((err) => console.error('[week] notifyTurnReady failed:', err));
   }
 
+  // ---- Deadlines ----
+  // A Durable Object has exactly ONE alarm slot, and this class now has three
+  // things that need waking up for: the join window, the whole-match lifetime,
+  // and (new) the per-turn deadline. So every arming goes through here, always
+  // setting the EARLIEST live deadline, and onAlarm works out which one
+  // actually came due by comparing against the stored timestamps. Every former
+  // direct setAlarm(...) call is replaced by this — adding a second setAlarm
+  // anywhere would silently cancel whichever deadline was already armed.
+  async armAlarm() {
+    if (!this.match) return;
+    const due = [];
+    if (this.match.status === 'pending') due.push(this.match.joinDeadline);
+    if (this.match.status === 'active') {
+      if (this.match.expiresAt) due.push(this.match.expiresAt);
+      if (this.match.turnDeadline) due.push(this.match.turnDeadline);
+    }
+    const next = due.filter((t) => typeof t === 'number').sort((a, b) => a - b)[0];
+    if (next) await this.ctx.storage.setAlarm(next);
+    else await this.ctx.storage.deleteAlarm();
+  }
+
+  // Starts (or restarts) the turn clock for whichever team now owes a move.
+  // Called from the same two places notifyTurnReady is — the turn becoming
+  // actionable and the clock starting are the same event by definition. Does
+  // NOT persist or arm on its own: both call sites already persist right
+  // after, and armAlarm is called there too, so this stays a plain state edit.
+  startTurnClock(team) {
+    if (!this.match) return;
+    this.match.turnDeadlineTeam = team;
+    this.match.turnDeadline = Date.now() + TURN_DEADLINE_MS;
+  }
+
+  // The other half of the forfeit rule (see party/arbiter.js's awardForfeit
+  // for LIVE's own, and party/leagueRating.js's applyMatchResult for what a
+  // forfeit does to each side's LP). Reached three ways: a turn deadline
+  // running out, an explicit 'abandon', and nothing else — a plain 7-day
+  // MATCH_LIFETIME_MS expiry is deliberately NOT a forfeit, since by then
+  // there is no way to say who stopped playing first.
+  //
+  // Unlike LIVE, no "was this actually played" guard is needed beyond `round`:
+  // WEEK structurally requires both players to have a real wallet and B to
+  // have actually joined before any of this is reachable. Prizes are skipped
+  // here for the same reason LIVE skips them — a forfeit is the cheapest
+  // possible thing to fabricate and prizes pay real NIM.
+  async awardWeekForfeit(winnerTeam, reason) {
+    if (!this.match || this.match.status !== 'active') return;
+    const winnerAddress = winnerTeam === 'A' ? this.match.playerA : this.match.playerB;
+    const loserAddress = winnerTeam === 'A' ? this.match.playerB : this.match.playerA;
+    this.match.status = 'completed';
+    this.match.completedAt = Date.now();
+    this.match.forfeit = { winner: winnerTeam, reason };
+    this.match.turnDeadline = null;
+    this.match.turnDeadlineTeam = null;
+    await this.ctx.storage.deleteAlarm();
+    this.radarNotify('recordMatchCompleted', { matchId: this.name, mode: 'week', timestampMs: Date.now() });
+    if (winnerAddress && loserAddress && winnerAddress !== loserAddress && isClassicMatchConfig(this.match.config)) {
+      const result = await this.leagueNotify('recordMatchCompleted', {
+        leagueMatchId: `week:${this.name}`, mode: 'week', timestampMs: Date.now(),
+        playerA: { address: this.match.playerA }, playerB: { address: this.match.playerB },
+        winner: winnerTeam, forfeit: true,
+      });
+      // Persisted the same way a real completion's is (see completeRound), so
+      // whenever the winner next opens the match they still see what it paid —
+      // there is no live socket to push it down in an asynchronous mode.
+      if (result?.ok && !result.duplicate) {
+        this.match.leagueResult = { A: result.lpAwardedA, B: result.lpAwardedB };
+      }
+    }
+    await this.persist();
+    await Promise.all([this.pushIndexUpdate('A'), this.pushIndexUpdate('B')]);
+  }
+
   async onConnect(connection, ctx) {
     await this.ready();
     const url = new URL(ctx.request.url);
     const address = url.searchParams.get('address');
     const intent = url.searchParams.get('intent');
-    if (!address) { this.send(connection, { type: 'error', reason: 'addressRequired' }); connection.close(); return; }
+    if (!address || !isUsableAddress(address)) { this.send(connection, { type: 'error', reason: 'addressRequired' }); connection.close(); return; }
 
     if (intent === 'create') {
       if (this.match && (this.match.status === 'pending' || this.match.status === 'active')) {
@@ -351,9 +454,15 @@ export class WeekArbiter extends Server {
         // another round with the same opponent/config. Reset back to this
         // once both actually agree (see 'rematch' below).
         rematch: { A: false, B: false },
+        // Per-turn deadline (see TURN_DEADLINE_MS/startTurnClock) — null until
+        // there is actually a turn to be on the clock for, i.e. until B joins.
+        turnDeadline: null, turnDeadlineTeam: null,
+        // Set by awardWeekForfeit when the match ended because somebody
+        // stopped playing rather than on the board.
+        forfeit: null,
       };
       await this.persist();
-      await this.ctx.storage.setAlarm(this.match.joinDeadline);
+      await this.armAlarm();
       connection.setState({ team: 'A' });
       await idx.upsert(this.name, {
         game, opponentAddress: null, myTeam: 'A', status: 'pending', turnLabel: 'pending',
@@ -387,7 +496,15 @@ export class WeekArbiter extends Server {
       // gets the normal terminal response.
       const team = address === this.match.playerA ? 'A' : address === this.match.playerB ? 'B' : null;
       const lm = this.match.lastManche;
-      if (!team || !lm || lm.seenBy[team]) { this.send(connection, { type: 'notFound' }); connection.close(); return; }
+      // A forfeit (see awardWeekForfeit) also lands on 'completed', but with
+      // no new manche to watch — so the unseen-lastManche test above refuses
+      // it, which locked the WINNER out of ever learning they'd won (there is
+      // no live push in WEEK; reconnecting IS the only channel). Both real
+      // participants get back in for a forfeited match, however many times:
+      // the snapshot's own `forfeit`/`leagueLp` fields are the whole payload
+      // and re-reading them is harmless, unlike a one-shot reveal.
+      const forfeited = !!this.match.forfeit;
+      if (!team || (!forfeited && (!lm || lm.seenBy[team]))) { this.send(connection, { type: 'notFound' }); connection.close(); return; }
       connection.setState({ team });
       const inboxMessage = await this.consumeInbox(team);
       this.send(connection, { type: 'connected', ...this.snapshotFor(team), inboxMessage });
@@ -418,8 +535,12 @@ export class WeekArbiter extends Server {
     this.match.status = 'active';
     this.match.joinedAt = now;
     this.match.expiresAt = now + MATCH_LIFETIME_MS;
+    // The match is live, so somebody is on the clock from this moment. A owes
+    // the first shot (B has just joined and can't act until A has), so the
+    // deadline is A's — exactly the side notifyTurnReady would address.
+    this.startTurnClock('A');
     await this.persist();
-    await this.ctx.storage.setAlarm(this.match.expiresAt);
+    await this.armAlarm();
     connection.setState({ team: 'B' });
     // "Match started" = B actually joining (status pending -> active), same
     // definition LIVE uses ("both players present" — see party/arbiter.js).
@@ -469,6 +590,14 @@ export class WeekArbiter extends Server {
       // ready (this was the second) — turnLabelFor treats both the same way
       // (see that function's own comment), and so does the notification.
       const oppTeam = otherTeam(team);
+      // The clock moves with the turn: this team just acted, so the deadline
+      // is now the other team's. Same seam as the notification right below —
+      // "their turn is actionable" and "their clock is running" are one event.
+      // persist() already ran above for pendingShots; this needs its own,
+      // since the deadline has to survive an eviction to be enforceable.
+      this.startTurnClock(oppTeam);
+      await this.persist();
+      await this.armAlarm();
       this.notifyTurnReady(oppTeam === 'A' ? this.match.playerA : this.match.playerB, this.name);
       await Promise.all([this.pushIndexUpdate('A'), this.pushIndexUpdate('B')]);
       this.send(connection, { type: 'shotAccepted', ...this.snapshotFor(team) });
@@ -530,6 +659,9 @@ export class WeekArbiter extends Server {
       // until the resolved manche is actually durable, not just mutated
       // in-memory.
       let turnReadyAddress = null;
+      // The same side, as a team id — startTurnClock needs that rather than
+      // the address (see the arming block after persist()).
+      let turnReadyTeam = null;
       if (bothIn) {
         const scoredTeam = msg.scoredTeam === 'A' || msg.scoredTeam === 'B' ? msg.scoredTeam : null;
         if (scoredTeam === 'A') this.match.scoreA += 1;
@@ -600,7 +732,8 @@ export class WeekArbiter extends Server {
         // nothing about the other team's own state. The actual notify call
         // is deferred to after this.persist() below, not fired here — see
         // that call site's own comment.
-        turnReadyAddress = team === 'A' ? this.match.playerB : this.match.playerA;
+        turnReadyTeam = otherTeam(team);
+        turnReadyAddress = turnReadyTeam === 'A' ? this.match.playerA : this.match.playerB;
       } else if (this.match.lastManche && !this.match.lastManche.seenBy[team]) {
         this.match.lastManche.seenBy[team] = true;
       } else {
@@ -618,6 +751,11 @@ export class WeekArbiter extends Server {
         // here rather than computed as `Date.now() - joinedAt` on every read
         // so a later revisit reports the exact same duration, not a growing one.
         this.match.completedAt = Date.now();
+        // Nobody is on the clock once the match is decided — cleared alongside
+        // the alarm so a later armAlarm() can't resurrect a turn deadline for
+        // a finished match.
+        this.match.turnDeadline = null;
+        this.match.turnDeadlineTeam = null;
         await this.ctx.storage.deleteAlarm();
         this.radarNotify('recordMatchCompleted', { matchId: this.name, mode: 'week', timestampMs: Date.now() });
         // League Beta (party/leagueSeason.js) — WEEK already structurally
@@ -689,6 +827,15 @@ export class WeekArbiter extends Server {
       // it can only ever happen once per real manche resolution — same
       // guarantee 'shot' above already has, restored here by matching its
       // persist-then-notify order.
+      // Mirrors the notify right below (see turnReadyAddress's own call site):
+      // whoever is being told their turn is ready is also whoever is now on
+      // the clock. Skipped once the match is over — there is no next turn, and
+      // awardWeekForfeit/completeRound have already cleared the alarm.
+      if (turnReadyTeam && !matchOver && this.match.status === 'active') {
+        this.startTurnClock(turnReadyTeam);
+        await this.persist();
+        await this.armAlarm();
+      }
       if (turnReadyAddress) this.notifyTurnReady(turnReadyAddress, this.name);
       if (matchOver) {
         // Not both at once any more: removing the row of a player who still
@@ -731,9 +878,12 @@ export class WeekArbiter extends Server {
           pendingShots: { A: null, B: null }, stats: { collisions: 0, stonesDestroyed: 0 },
           lastManche: null, pointManches: [], inbox: { A: null, B: null },
           rematch: { A: false, B: false }, completedAt: null, leagueResult: null, prizeResult: null,
-          expiresAt: now + MATCH_LIFETIME_MS,
+          expiresAt: now + MATCH_LIFETIME_MS, forfeit: null,
         });
-        await this.ctx.storage.setAlarm(this.match.expiresAt);
+        // Fresh match, fresh clock — A owes the first shot again, same as a
+        // brand-new match the moment B joins.
+        this.startTurnClock('A');
+        await this.armAlarm();
         await this.persist();
         // Back on both players' own "My Matches" list — completeRound's own
         // matchOver branch removed them from it once both had watched the
@@ -758,6 +908,18 @@ export class WeekArbiter extends Server {
     // same alarm/index cleanup either path.
     if (msg.type === 'abandon') {
       if (this.match.status !== 'pending' && this.match.status !== 'active' && this.match.status !== 'completed') return;
+      // Walking out of a match that is actually underway hands it to the
+      // opponent (see awardWeekForfeit) rather than voiding it, which is what
+      // used to make quitting strictly better than losing. Only for a LIVE
+      // 'active' match with a real opponent and at least one point played —
+      // bailing out of a match nobody ever joined, or declining a rematch on
+      // an already-'completed' one, stays the plain no-result cleanup below.
+      if (this.match.status === 'active' && this.match.playerA && this.match.playerB) {
+        await this.awardWeekForfeit(otherTeam(team), 'abandoned');
+        await this.removeFromIndex(team === 'A' ? this.match.playerA : this.match.playerB);
+        this.send(connection, { type: 'abandoned' });
+        return;
+      }
       this.match.status = 'abandoned';
       await this.ctx.storage.deleteAlarm();
       await this.persist();
@@ -776,6 +938,15 @@ export class WeekArbiter extends Server {
     }
   }
 
+  // One alarm slot, three possible deadlines (see armAlarm) — so this works
+  // out which one actually came due rather than assuming. Order matters: the
+  // whole-match lifetime is checked before the per-turn deadline, because once
+  // a match has been open 7 days there is no longer a fair claim that one
+  // particular side stalled it.
+  //
+  // Any deadline that has NOT come due yet just re-arms (armAlarm picks the
+  // next earliest), so the alarm firing for the turn clock while the match
+  // lifetime is still days away leaves that lifetime alarm intact.
   async onAlarm() {
     await this.ready();
     if (!this.match) return;
@@ -784,11 +955,28 @@ export class WeekArbiter extends Server {
       this.match.status = 'expired';
       await this.persist();
       await this.removeFromIndex(this.match.playerA);
-    } else if (this.match.status === 'active' && now >= this.match.expiresAt) {
+      return;
+    }
+    if (this.match.status !== 'active') return;
+    if (this.match.expiresAt && now >= this.match.expiresAt) {
+      // Plain expiry, deliberately NOT a forfeit — see awardWeekForfeit.
       this.match.status = 'expired';
       await this.persist();
       await Promise.all([this.removeFromIndex(this.match.playerA), this.removeFromIndex(this.match.playerB)]);
+      return;
     }
+    if (this.match.turnDeadline && now >= this.match.turnDeadline && this.match.turnDeadlineTeam) {
+      // Whoever was on the clock ran out of it: the match goes to the side
+      // that was waiting on them. Only their own slot frees — the winner keeps
+      // a row to come back and see the result, same convention as an abandon.
+      const loser = this.match.turnDeadlineTeam;
+      await this.awardWeekForfeit(otherTeam(loser), 'turnTimeout');
+      await this.removeFromIndex(loser === 'A' ? this.match.playerA : this.match.playerB);
+      return;
+    }
+    // Nothing was actually due (a stale alarm, or one armed for a deadline
+    // that has since moved) — just re-arm for whatever is next.
+    await this.armAlarm();
   }
 
   // Plain HTTP GET (no WebSocket) — lets a client find out whether a 4-char
