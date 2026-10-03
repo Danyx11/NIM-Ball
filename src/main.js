@@ -2348,6 +2348,52 @@ if (window.nimiqPay?.requestFullscreen) {
       nimiqFullscreenBtn.classList.toggle('hidden', !!enabled);
     });
   }
+} else if (IS_MOBILE && FULLSCREEN_API_AVAILABLE) {
+  // Outside Nimiq Pay, a phone browser that genuinely implements the Fullscreen
+  // API (Android Chrome/Firefox/Samsung Internet and friends) had no fullscreen
+  // control at all — the button above was only ever wired to Nimiq Pay's own
+  // host bridge, so everyone else played with the browser's address bar eating
+  // the top of the screen for no reason. Same button, same position, same
+  // "enter" meaning; only the mechanism differs.
+  //
+  // FULLSCREEN_API_AVAILABLE is a real feature-detect (requestFullscreen AND
+  // document.fullscreenEnabled), never a UA sniff, so this stays correctly
+  // hidden on iOS Safari — which implements the API for <video> only, and where
+  // the sole route to real fullscreen is installing to the Home Screen. Showing
+  // a button that silently did nothing there would be worse than showing none.
+  //
+  // Desktop is deliberately excluded (IS_MOBILE): it has no address bar eating
+  // the board, and this button sits in the brand row where the desktop layout
+  // does not expect it.
+  nimiqFullscreenBtn.classList.remove('hidden');
+  nimiqFullscreenBtn.addEventListener('click', () => {
+    audio.play('button');
+    // Guarded both ways on purpose. The spec says this returns a promise, and a
+    // REJECTION is a normal outcome (untrusted gesture, user declined). But it
+    // can also throw SYNCHRONOUSLY — an embedding that disallows fullscreen via
+    // permissions policy raises "TypeError: Permissions check failed" before any
+    // promise exists (observed in a WebView during testing). A bare
+    // Promise.resolve(call()) does not catch that: the throw happens while
+    // evaluating the argument. Either way this must stay a no-op rather than an
+    // uncaught error in a player's console.
+    try {
+      const req = document.documentElement.requestFullscreen();
+      if (req && typeof req.catch === 'function') {
+        req.catch((err) => console.log('[fullscreen] request rejected:', err?.message));
+      }
+    } catch (err) {
+      console.log('[fullscreen] request blocked:', err?.message);
+    }
+  });
+  // Exactly the two fixes documented for the Nimiq Pay path above, for the same
+  // two reasons: --stable-vh only recomputes on orientationchange, and
+  // entering/leaving fullscreen changes window.innerHeight without firing one;
+  // and the button means "enter", so it has nothing left to say once fullscreen
+  // is active (the browser supplies its own way out).
+  document.addEventListener('fullscreenchange', () => {
+    setTimeout(setStableVh, 120);
+    nimiqFullscreenBtn.classList.toggle('hidden', !!document.fullscreenElement);
+  });
 }
 
 function renderNotifPanel() {
