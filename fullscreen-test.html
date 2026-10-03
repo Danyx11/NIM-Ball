@@ -1,0 +1,365 @@
+<!doctype html>
+<!--
+  Standalone, isolated test harness for Nimiq Pay's fullscreen host API
+  (window.nimiqPay.requestFullscreen/exitFullscreen/getFullscreen/
+  onFullscreenChange — see https://nimiq.dev/mini-apps/features/fullscreen).
+
+  Deliberately NOT wired into index.html, main.js or game.js, and NOT added
+  to vite.config.js's build input — `npm run dev` serves it at this path,
+  but `npm run build` never touches it (Vite's default build only bundles
+  index.html unless another entry is explicitly configured), so this never
+  ships to production.
+
+  Launch: `npm run dev -- --host`, then open
+  http://<printed-network-ip>:5173/fullscreen-test.html inside Nimiq Pay
+  (Mini Apps -> Custom URL) on a phone on the same Wi-Fi.
+
+  Uses window.nimiqPay directly (no @nimiq/mini-app-sdk import) since the
+  installed SDK version (0.1.0) predates the fullscreen helpers (0.2.3+) and
+  the docs explicitly say the raw host object works without the SDK.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Fullscreen test</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #000; color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overflow: hidden;
+  }
+  #root { position: fixed; inset: 0; display: flex; flex-direction: column; }
+
+  /* ---- Status bar ---- */
+  #status {
+    flex: 0 0 auto;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    background: #111;
+    border-bottom: 1px solid #333;
+  }
+  #status b { color: #7fd1ff; }
+  .ok { color: #6adb7a; }
+  .bad { color: #ff6a6a; }
+  .warn { color: #ffd166; }
+
+  /* ---- Scenario mock (the actual UX being validated) ---- */
+  #scenario {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+    gap: 14px;
+    min-height: 0;
+  }
+  #logo {
+    font-size: 15vmin;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: #fff;
+    text-shadow: 0 0 24px rgba(127, 209, 255, 0.5);
+  }
+  #scenarioText { font-size: 16px; color: #ccc; max-width: 32em; }
+  .pill {
+    appearance: none;
+    border: none;
+    border-radius: 999px;
+    padding: 14px 26px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #001018;
+    background: #7fd1ff;
+    cursor: pointer;
+  }
+  .pill.secondary { background: #444; color: #eee; }
+  .pill:active { transform: scale(0.97); }
+  .pill-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+  /* ---- Controls / debug panel ---- */
+  #controls {
+    flex: 0 0 auto;
+    padding: 8px 10px 4px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    background: #0b0b0b;
+    border-top: 1px solid #333;
+  }
+  #controls button {
+    font-size: 11px;
+    padding: 7px 9px;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background: #1c1c1c;
+    color: #ddd;
+  }
+  #controls label {
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #aaa;
+    padding: 4px 6px;
+  }
+
+  #log {
+    flex: 0 0 34vh;
+    overflow-y: auto;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 10.5px;
+    line-height: 1.45;
+    background: #050505;
+    color: #8ec07c;
+    padding: 6px 8px;
+    border-top: 1px solid #333;
+    -webkit-overflow-scrolling: touch;
+  }
+  #log .err { color: #ff6a6a; }
+  #log .evt { color: #7fd1ff; }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="status">
+    nimiqPay: <b id="stHost">checking…</b> ·
+    fullscreen: <b id="stFs">unknown</b> ·
+    orientation: <b id="stOrient">unknown</b>
+  </div>
+
+  <div id="scenario">
+    <div id="logo">NimiCurl</div>
+    <div id="scenarioText">Loading…</div>
+    <div class="pill-row" id="scenarioActions"></div>
+  </div>
+
+  <div id="controls">
+    <button id="btnRequest">Request fullscreen</button>
+    <button id="btnExit">Exit fullscreen</button>
+    <button id="btnGet">Get fullscreen (debug)</button>
+    <button id="btnDump">Dump nimiqPay surface</button>
+    <button id="btnCopyLog">Copy log</button>
+    <button id="btnClearLog">Clear log</button>
+    <label><input type="checkbox" id="chkAutoEnter"> Auto-request on rotate to landscape (no tap)</label>
+  </div>
+
+  <div id="log"></div>
+</div>
+
+<script>
+(function () {
+  const logEl = document.getElementById('log');
+  const stHost = document.getElementById('stHost');
+  const stFs = document.getElementById('stFs');
+  const stOrient = document.getElementById('stOrient');
+  const scenarioText = document.getElementById('scenarioText');
+  const scenarioActions = document.getElementById('scenarioActions');
+
+  const logLines = [];
+  function log(msg, cls) {
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    const t = new Date().toISOString().slice(11, 23);
+    const text = `[${t}] ${msg}`;
+    line.textContent = text;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+    logLines.push(text);
+  }
+
+  // Clipboard API can be missing/rejected inside some in-app WebViews (no
+  // secure-context/permission plumbing) — fall back to a hidden textarea +
+  // execCommand('copy'), which works in effectively every WebView since it
+  // doesn't need any async permission prompt.
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch { /* fall through to the execCommand fallback below */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
+  window.addEventListener('error', (e) => log(`window.onerror: ${e.message}`, 'err'));
+  window.addEventListener('unhandledrejection', (e) => log(`unhandledrejection: ${e.reason?.message || e.reason}`, 'err'));
+
+  const host = window.nimiqPay;
+  const insideNimiqPay = !!host;
+  stHost.textContent = insideNimiqPay ? 'present' : 'ABSENT (plain browser)';
+  stHost.className = insideNimiqPay ? 'ok' : 'bad';
+  log(insideNimiqPay
+    ? 'window.nimiqPay is present — running inside Nimiq Pay.'
+    : 'window.nimiqPay is ABSENT — open this URL inside Nimiq Pay (Mini Apps -> Custom URL) to actually test the host API.');
+
+  if (insideNimiqPay) {
+    log(`typeof requestFullscreen: ${typeof host.requestFullscreen}`);
+    log(`typeof exitFullscreen: ${typeof host.exitFullscreen}`);
+    log(`typeof getFullscreen: ${typeof host.getFullscreen}`);
+    log(`typeof onFullscreenChange: ${typeof host.onFullscreenChange}`);
+  }
+
+  // ---- Cached fullscreen state (never poll getFullscreen() live — the
+  // docs say it's unreliable while the WebView is hidden; onFullscreenChange
+  // is the source of truth once subscribed) ----
+  let isFullscreen = null; // null = not yet known
+  function setFullscreenState(val, source) {
+    isFullscreen = val;
+    stFs.textContent = val === null ? 'unknown' : (val ? 'ON' : 'off');
+    stFs.className = val ? 'ok' : (val === false ? 'warn' : '');
+    log(`fullscreen state -> ${val} (via ${source})`, 'evt');
+    renderScenario();
+  }
+
+  if (insideNimiqPay && typeof host.onFullscreenChange === 'function') {
+    try {
+      host.onFullscreenChange((enabled) => setFullscreenState(!!enabled, 'onFullscreenChange'));
+      log('Subscribed to onFullscreenChange.');
+    } catch (err) {
+      log(`onFullscreenChange subscribe threw: ${err.message}`, 'err');
+    }
+  }
+  if (insideNimiqPay && typeof host.getFullscreen === 'function') {
+    host.getFullscreen()
+      .then((val) => setFullscreenState(!!val, 'getFullscreen (initial)'))
+      .catch((err) => log(`getFullscreen (initial) rejected: ${err.message}`, 'err'));
+  }
+
+  // Distinguishes "fullscreen ended because of the rotation itself" from
+  // "fullscreen ended because the app got backgrounded" (e.g. switching away
+  // to copy the log) — both are plausible causes and only this tells them
+  // apart, since onFullscreenChange alone doesn't say why it fired.
+  document.addEventListener('visibilitychange', () => log(`visibilitychange -> ${document.visibilityState}`, 'evt'));
+  window.addEventListener('blur', () => log('window blur', 'evt'));
+  window.addEventListener('focus', () => log('window focus', 'evt'));
+  window.addEventListener('pagehide', () => log('pagehide', 'evt'));
+  window.addEventListener('pageshow', () => log('pageshow', 'evt'));
+
+  function isPortrait() { return window.matchMedia('(orientation: portrait)').matches; }
+  function syncOrientationLabel() {
+    stOrient.textContent = isPortrait() ? 'portrait' : 'landscape';
+  }
+  syncOrientationLabel();
+
+  async function doRequestFullscreen(source) {
+    if (!insideNimiqPay || typeof host.requestFullscreen !== 'function') {
+      log(`requestFullscreen skipped (${source}): no host API available.`, 'warn');
+      return;
+    }
+    log(`Calling requestFullscreen() (${source})…`);
+    try {
+      await host.requestFullscreen();
+      log(`requestFullscreen() resolved (${source}).`, 'evt');
+    } catch (err) {
+      log(`requestFullscreen() REJECTED (${source}): ${err.message}`, 'err');
+    }
+  }
+  async function doExitFullscreen(source) {
+    if (!insideNimiqPay || typeof host.exitFullscreen !== 'function') {
+      log(`exitFullscreen skipped (${source}): no host API available.`, 'warn');
+      return;
+    }
+    log(`Calling exitFullscreen() (${source})…`);
+    try {
+      await host.exitFullscreen();
+      log(`exitFullscreen() resolved (${source}).`, 'evt');
+    } catch (err) {
+      log(`exitFullscreen() REJECTED (${source}): ${err.message}`, 'err');
+    }
+  }
+
+  document.getElementById('btnRequest').addEventListener('click', () => doRequestFullscreen('button tap'));
+  document.getElementById('btnExit').addEventListener('click', () => doExitFullscreen('button tap'));
+  document.getElementById('btnGet').addEventListener('click', () => {
+    if (!insideNimiqPay || typeof host.getFullscreen !== 'function') { log('getFullscreen: no host API available.', 'warn'); return; }
+    host.getFullscreen()
+      .then((val) => log(`getFullscreen() -> ${val}`))
+      .catch((err) => log(`getFullscreen() rejected: ${err.message}`, 'err'));
+  });
+  document.getElementById('btnDump').addEventListener('click', () => {
+    if (!insideNimiqPay) { log('No window.nimiqPay to dump.', 'warn'); return; }
+    const keys = [];
+    for (const k in host) keys.push(`${k}: ${typeof host[k]}`);
+    log(`window.nimiqPay keys (for-in): ${keys.join(', ') || '(none enumerable)'}`);
+    log(`Object.keys(window.nimiqPay): ${Object.keys(host).join(', ') || '(empty)'}`);
+  });
+  document.getElementById('btnClearLog').addEventListener('click', () => { logEl.innerHTML = ''; logLines.length = 0; });
+
+  const btnCopyLog = document.getElementById('btnCopyLog');
+  btnCopyLog.addEventListener('click', async () => {
+    const ok = await copyText(logLines.join('\n'));
+    const original = btnCopyLog.textContent;
+    btnCopyLog.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(() => { btnCopyLog.textContent = original; }, 1200);
+    log(ok ? 'Log copied to clipboard.' : 'Copy to clipboard failed (see console).', ok ? 'evt' : 'err');
+  });
+
+  const chkAutoEnter = document.getElementById('chkAutoEnter');
+
+  // ---- The actual question this harness exists to answer: does rotation
+  // alone (no tap) survive as a valid trigger for requestFullscreen()? ----
+  window.matchMedia('(orientation: portrait)').addEventListener('change', () => {
+    syncOrientationLabel();
+    log(`orientationchange -> ${isPortrait() ? 'portrait' : 'landscape'}`);
+    if (!isPortrait() && chkAutoEnter.checked) {
+      doRequestFullscreen('auto on rotate, NO tap');
+    }
+    renderScenario();
+  });
+
+  // ---- Scenario mock: mirrors the real UX being designed, wired to the
+  // real host calls above, so this doubles as a live preview. ----
+  function renderScenario() {
+    scenarioActions.innerHTML = '';
+    const portrait = isPortrait();
+
+    function addButton(label, onClick, secondary) {
+      const b = document.createElement('button');
+      b.className = 'pill' + (secondary ? ' secondary' : '');
+      b.textContent = label;
+      b.addEventListener('click', onClick);
+      scenarioActions.appendChild(b);
+      return b;
+    }
+
+    if (portrait && isFullscreen === true) {
+      scenarioText.textContent = 'Fullscreen is still ON while portrait (as the docs imply). Rotate back to resume, or exit fullscreen below.';
+      addButton('Rotate to resume', () => log('(passive — just rotate the device back to landscape)'), true);
+      addButton('Exit fullscreen', () => doExitFullscreen('scenario Exit pill'));
+    } else if (portrait) {
+      scenarioText.textContent = insideNimiqPay
+        ? 'Portrait, not fullscreen. Tap to enter (this is the real user gesture requestFullscreen() needs).'
+        : 'Portrait, plain browser — no host API, this is just the layout mock.';
+      addButton('Tap to enter', () => doRequestFullscreen('scenario tap-to-enter'));
+    } else if (isFullscreen === true) {
+      scenarioText.textContent = 'Fullscreen ON, landscape. Rotate to portrait to test whether fullscreen survives the rotation.';
+      addButton('Exit fullscreen', () => doExitFullscreen('scenario Exit (landscape)'), true);
+    } else {
+      scenarioText.textContent = 'Landscape, not fullscreen yet.';
+      addButton('Request fullscreen', () => doRequestFullscreen('scenario button (landscape)'));
+    }
+  }
+  renderScenario();
+
+  log('Ready.');
+})();
+</script>
+</body>
+</html>
