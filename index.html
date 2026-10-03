@@ -1450,6 +1450,10 @@
       <div class="config-header">
         <span class="config-mode-title">League rules</span>
       </div>
+      <!-- loading="lazy": both diagrams live inside a hidden overlay reached
+           only from How To, but the browser fetches an <img src> at parse
+           time regardless — that was ~500KB downloaded on every single page
+           load for a screen most players never open. -->
       <div class="rules-scroll">
         <div class="rules-sentences">
           <p class="rules-sentence"><strong>An ongoing ranking —</strong> the League never resets or ends, so you can join and start climbing at any time.</p>

@@ -106,7 +106,11 @@ function arenaFrameSrc(vibe, skin, mobile) {
       ? (mobile ? ARENA_FRAME_WINTER_MOBILE_SRC : ARENA_FRAME_WINTER_SRC)
       : (mobile ? ARENA_FRAME_MOBILE_SRC : ARENA_FRAME_SRC);
 }
-const BALL_SRC = `${ASSET_BASE}ball/ball.png`;
+// Lossless WebP rather than the original PNG: same pixels exactly, 41%
+// smaller. Deliberately NOT lossy — even at quality 100 WebP shifts hard
+// edges by up to ~45/255, and this is the one sprite the player's eye
+// tracks continuously.
+const BALL_SRC = `${ASSET_BASE}ball/ball.webp`;
 // HUD rock glow — each of the 5 rocks baked into the arena art has a
 // hand-painted "flou"/soft halo + "light"/sharp core pair (Arena V2
 // chat.xcf, see conversation), extracted as their own small sprites rather
@@ -212,7 +216,11 @@ export function preloadCoreAssets(mobile = false, howTo = false, { vibe = 'hocke
     getIdenticonCanvasStoneBust(DEFAULT_IDENTICON_ADDRESS.A),
     getIdenticonCanvasStoneBust(DEFAULT_IDENTICON_ADDRESS.B),
   ]).catch(() => {});
-  const promise = Promise.all([loadImages(urls), preloadTicketAssets(), identiconWarmup]);
+  // The ticket art (~250KB) is only drawn when a match ENDS, so it has a whole
+  // match to arrive — kick it off here to keep it warm, but do NOT hold the
+  // loading overlay on it the way the board's own sprites have to be held.
+  preloadTicketAssets();
+  const promise = Promise.all([loadImages(urls), identiconWarmup]);
   corePreloadCache.set(cacheKey, promise);
   return promise;
 }
