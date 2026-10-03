@@ -52,6 +52,44 @@ function powerForDistance(travelDist, cfg, bounds) {
   return clamp(lo + distFrac * (hi - lo), lo * 0.4, 1);
 }
 
+// ---------- Opening plans ----------
+// The board at the start of a point is always identical — stones in their
+// fixed rack, ball dead centre — and everything below is deterministic given a
+// board, so the AI opened every single point exactly the same way. aimNoise
+// perturbs the trajectory but never the PLAN, which is what made vs-AI matches
+// feel scripted.
+//
+// These are three openings a competent player might actually choose between.
+// None is a handicap: 'rush' is the long-standing behaviour, and the other two
+// are ordinary alternatives, not deliberate mistakes.
+//
+//   rush  — every stone strikes the ball. The original behaviour, and still
+//           the default: `openingPlan` left undefined reproduces it exactly.
+//   hold  — the stone FARTHEST from the ball hangs back as a safety, placed
+//           between the ball and the AI's own net; the rest strike. A hedge:
+//           less early pressure, something behind the play if it goes wrong.
+//   push  — the stone farthest from the ball is sent AHEAD of it instead,
+//           into the opponent's half, to sit where a rebound off the first
+//           exchange is likely to come out. The mirror image of 'hold', and it
+//           reads completely differently on screen.
+//
+// A fourth plan ('wide': compress every attacker's aim into one half of the
+// goal mouth) was built and then dropped: measured against 'rush' over 200
+// openings it changed the aim fan by under 2%, because the mouth is only ~160px
+// tall and the stones aim at a ghost-ball contact point from ~400px away. It
+// looked identical in play, so it was variety on paper only.
+//
+// Only ever applied to a point's FIRST manche (see game.js's prepareAiShots):
+// from the second on, the board has moved and the AI varies on its own.
+export const AI_OPENING_PLANS = ['rush', 'hold', 'push'];
+
+// Where the repositioned stone is sent, as a fraction of the way from the ball
+// toward a goal: 'hold' toward the AI's own (short of halfway — far enough back
+// to cover, not so far it parks in its own crease, and keepOutOfOwnGoalZone is
+// applied on top regardless), 'push' toward the opponent's.
+const HOLD_BACK_FRACTION = 0.34;
+const PUSH_AHEAD_FRACTION = 0.42;
+
 export const DEFAULT_AI_CONFIG = {
   aimNoise: 0.15,           // radians of random perturbation applied to every shot's angle
   powerRange: [0.5, 0.9],   // fraction of max drag strength a shot's power is scaled within (see powerForDistance)
@@ -137,7 +175,10 @@ function headsTowardOwnGoal(stone, target, pushDir) {
 // stopped). ball: { x, y }. bounds: { FX0, FX1, FY0, FY1, GY0, GY1, CY,
 // GOAL_HALF_HEIGHT, MAX_DRAG, POWER_SCALE, STONE_R, BALL_R }.
 // Returns { [stoneId]: { vx, vy } } — one shot per AI stone, always.
-export function computeAiShots({ aiTeam, aiStones, opponentStones, ball, bounds, config }) {
+// `openingPlan` (optional, one of AI_OPENING_PLANS): only ever passed on a
+// point's first manche. Undefined — every other manche, and every caller that
+// doesn't know about plans — behaves exactly as this function always has.
+export function computeAiShots({ aiTeam, aiStones, opponentStones, ball, bounds, config, openingPlan = null }) {
   const cfg = { ...DEFAULT_AI_CONFIG, ...config };
   const ownGoal = { x: aiTeam === 'A' ? bounds.FX0 : bounds.FX1, y: bounds.CY };
   const opponentGoal = { x: aiTeam === 'A' ? bounds.FX1 : bounds.FX0, y: bounds.CY };
@@ -184,7 +225,27 @@ export function computeAiShots({ aiTeam, aiStones, opponentStones, ball, bounds,
   // and given a distinct slot each so their goal-mouth targets spread out
   // instead of clustering wherever independent randomness happens to land
   // them (see pickOffensiveShot's banding).
-  const attackers = aiStones.filter(g => g.id !== defenderId).sort((a, b) => a.y - b.y);
+  let attackers = aiStones.filter(g => g.id !== defenderId).sort((a, b) => a.y - b.y);
+
+  // 'hold'/'push': take the attacker farthest from the ball out of the attack
+  // and reposition it instead — behind the ball as a safety, or ahead of it to
+  // meet a rebound. Skipped whenever it would leave nobody attacking (one stone
+  // left, or a defender already took one): a point nobody contests is exactly
+  // the "stupid" outcome these plans must never produce.
+  if ((openingPlan === 'hold' || openingPlan === 'push') && attackers.length >= 2) {
+    const mover = attackers.reduce((far, g) => dist(g, ball) > dist(far, ball) ? g : far);
+    attackers = attackers.filter(g => g.id !== mover.id);
+    const towardOwn = openingPlan === 'hold';
+    const goal = towardOwn ? ownGoal : opponentGoal;
+    const frac = towardOwn ? HOLD_BACK_FRACTION : PUSH_AHEAD_FRACTION;
+    const rawPoint = { x: ball.x + (goal.x - ball.x) * frac, y: ball.y + (goal.y - ball.y) * frac };
+    // Only the safety can end up drifting into the AI's own crease; a stone
+    // sent at the opponent's end never can.
+    const point = towardOwn ? keepOutOfOwnGoalZone(rawPoint, ownGoal, ownGoalPushDir, bounds) : rawPoint;
+    const dir = aimedDirection(mover, point, cfg.aimNoise);
+    shots[mover.id] = shotFromDirection(dir, powerForDistance(dist(mover, point), cfg, bounds), bounds);
+  }
+
   attackers.forEach((g, i) => {
     // Both this stone's own teammates and every opponent stone can sit in
     // the way of a cross-field shot — see pickOffensiveShot.

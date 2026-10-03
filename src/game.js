@@ -8,7 +8,7 @@
 import { audio } from './audio.js';
 import { getIdenticonCanvasStoneBust, getIdenticonPngDataUrl, getIdenticonBgColor, getTintedMarkCanvas, getStaticMarkPngDataUrl } from './identicons.js';
 import { COLORS } from './colors.js';
-import { computeAiShots, DEFAULT_AI_CONFIG } from './ai.js';
+import { computeAiShots, DEFAULT_AI_CONFIG, AI_OPENING_PLANS } from './ai.js';
 import { computeCurlingAiShots, DEFAULT_CURLING_AI_CONFIG } from './aiCurling.js';
 import { isBasicLaser } from './settings.js';
 import { preloadTicketAssets, renderTicket, drawLeagueStamp, drawPrizeStamp } from './ticket.js';
@@ -1463,6 +1463,27 @@ export function startGame(opts = {}) {
   // closure has finished its synchronous setup — same reason net/aiTeam's
   // own beginMatchIntro() call sites never hit this.
   let resumeManchesApplied = false;
+  // Which manche of the current point the AI is about to play, and the opening
+  // plan drawn for that point. A point always starts from the identical rack
+  // and the planner is deterministic given a board, so without this the AI
+  // opened every point exactly the same way (see ai.js's AI_OPENING_PLANS).
+  //
+  // Hockey only, deliberately. The same was attempted for Pure Curling and
+  // measured not to work: its planner is a simulate-and-score search, and on
+  // the opening rack it converges on the same answer no matter what you feed
+  // it. Widening its draw-target menu moved the average stopping point from
+  // 1.47 to 1.55 stone radii from the button; reversing the order stones decide
+  // in, 1.52 to 1.58; swinging the existing takeoutBias knob from 0.6 to 1.6,
+  // 1.60 to 1.52. All indistinguishable in play. Real variety there needs its
+  // objective function changed, which risks making it play worse — not worth it
+  // without playtesting, so Pure Curling's AI is untouched.
+  // Declared up here, not next to prepareAiShots(): resetPositions() clears
+  // aiMancheInPoint and is itself called from functions defined earlier in
+  // this closure, so a `let` further down would be a temporal-dead-zone
+  // ReferenceError waiting to happen — the same trap documented at
+  // beginAimPhase() above.
+  let aiMancheInPoint = 0;
+  let aiOpeningPlan = null;
   let phase = 'start';
   // Turn timer for the score panel LED bar — resets whenever aiming starts for
   // either team. NOT passive, despite what this comment used to claim: when it
@@ -2158,6 +2179,14 @@ export function startGame(opts = {}) {
     onExit?.();
   }, { signal });
   function prepareAiShots() {
+    // Drawn once per point, on its first manche only. From the second manche
+    // on the board has genuinely moved and the planners vary on their own, so
+    // no plan is passed and their behaviour is exactly what it always was.
+    // Hockey only. The curling planner was measured and left alone — see the
+    // note on aiOpeningPlan's declaration.
+    const isOpening = vibe !== 'curling' && aiMancheInPoint === 0;
+    if (isOpening) aiOpeningPlan = AI_OPENING_PLANS[Math.floor(Math.random() * AI_OPENING_PLANS.length)];
+    aiMancheInPoint++;
     const opponentTeam = aiTeam === 'A' ? 'B' : 'A';
     const stones = entities[aiTeam].filter(g => !g.out && !g.dead);
     const opponentStones = entities[opponentTeam].filter(g => !g.out && !g.dead);
@@ -2182,6 +2211,7 @@ export function startGame(opts = {}) {
       ball: { x: entities.ball.x, y: entities.ball.y },
       bounds: { FX0, FX1, FY0, FY1, GY0, GY1, CY, GOAL_HALF_HEIGHT, MAX_DRAG, POWER_SCALE, STONE_R, BALL_R },
       config: AI_CONFIG,
+      openingPlan: isOpening ? aiOpeningPlan : null,
     });
     stones.forEach(g => {
       const shot = shots[g.id];
@@ -2208,6 +2238,11 @@ export function startGame(opts = {}) {
     };
   }
   function resetPositions() {
+    // A fresh rack is a fresh point, so the AI draws a new opening plan on its
+    // next turn (see aiMancheInPoint). Reset here rather than at a scoring
+    // callback because this is the one function every "board is back to its
+    // start" path goes through.
+    aiMancheInPoint = 0;
     // Only the active slots (matchConfig.stonesPerTeam) get a stone — each
     // one keeps its real rack-slot number as its id (e.g. team B's single
     // stone at stonesPerTeam=1 is still "B1", the center slot), so every
