@@ -121,9 +121,8 @@
            itself (that logo is now purely decorative branding, no click
            handler of its own anymore) — moved here so there's a persistent,
            labeled nav entry for it instead of only the logo being
-           clickable. League already had a real destination (the shared
-           #constructionOverlay placeholder, wired via wireConstructionNav
-           below) — just relocated out of the old "More" accordion (removed:
+           clickable. League has its own dedicated panel (#leagueOverlay) —
+           just relocated out of the old "More" accordion (removed:
            Replay and My Matches both moved onto their own mode-select tiles
            instead, see conversation, leaving nothing else to group under
            it). -->
@@ -670,9 +669,9 @@
          (single row here, not 2x2) so these tiles keep the exact same visual
          language as the top-level ones. #modeLocal/#modeMatch keep their
          original ids/click handlers from before this feature; #modeAi is
-         per-vibe and Classic-only (Hockey launches straight in, Curling
-         isn't trained yet and shows the shared "under construction" panel
-         instead, main.js). #modeWeek (see conversation — moved in from
+         per-vibe and Classic-only; both vibes launch straight in now
+         (src/ai.js for Hockey, src/aiCurling.js for Curling — the latter
+         used to land on a "coming soon" panel that no longer exists). #modeWeek (see conversation — moved in from
          under the More tile, which now only keeps Custom/Replay) is the
          one exception to "every tile here is Classic-only": it still opens
          the Classic/Custom fork, same as it always has, just with the vibe
@@ -1061,25 +1060,6 @@
          (#game-card, which it lives in, is deliberately kept behind
          #menuStage on desktop). -->
     <div id="weekTicketOverlay" class="hidden"></div>
-    <!-- Curling's "not plugged in yet" placeholder (see conversation) — its
-         own small .config-panel rather than reusing #overlay/showLobby:
-         #overlay lives inside #game-card, which desktop's menuHost move
-         (main.js) deliberately keeps BEHIND #menuStage (see #menuStage's own
-         comment in style.css) while the whole point of this screen is to
-         show up on top of #modeOverlay's still-visible backdrop, same as
-         every other pre-match menu panel — a .config-panel already gets
-         moved to #menuStage alongside them, so it doesn't fight that
-         stacking. Reached from both P&P and Remote's curling paths (see
-         main.js's showComingSoonScreen), so its header is filled in via the
-         same fillModeHeader-style logic, not fixed text like Remote Match's
-         panel above. -->
-    <div id="comingSoonOverlay" class="config-panel hidden">
-      <div class="config-header">
-        <span class="config-mode-icon" id="csoIcon"></span>
-      </div>
-      <p class="sub">Coming soon — this vibe isn't plugged in yet.</p>
-      <button class="bigbtn" id="csoOkBtn">OK</button>
-    </div>
     <!-- "Join with a code" + "My Matches" (see conversation, nimicurl
          arborescence rework — the two used to be separate screens,
          #joinCodeOverlay reached off the mode grid and #myMatchesOverlay off
@@ -1163,8 +1143,7 @@
          reached from the sidebar identity pill, never a mode tile — no back
          arrow/mode icon needed, every step already has its own Cancel/Fermer
          button). Its own .config-panel/#menuStage element rather than
-         #overlay/showLobby(), same reasoning as #comingSoonOverlay's own
-         comment above: #overlay lives inside #game-card, which desktop's
+         #overlay/showLobby(): #overlay lives inside #game-card, which desktop's
          menuHost move deliberately keeps behind #menuStage, so it can never
          paint over #modeOverlay's still-visible arena backdrop — this panel
          needs to, so it joins the #menuStage set instead. mode-connect: the
@@ -1367,25 +1346,6 @@
       <span class="league-title">Book a week</span>
       <div class="config-lobby-content partnership-book-content" id="partnershipBookContent"></div>
     </div>
-    <!-- Shared placeholder panel for every other unbuilt nav item (index.html's
-         #navPartnership used to be one of these — see that panel's own
-         comment, it now has its own dedicated flow above) — same
-         config-panel/mode-connect shell + toggle-on-reclick principle as
-         #aboutOverlay. League itself moved to its own dedicated panel
-         (#leagueOverlay), and its "Rules" pill has its own dedicated panel
-         too now (#leagueRulesOverlay, further below) — neither reuses this
-         shared placeholder any more. -->
-    <div id="constructionOverlay" class="config-panel white-panel hidden">
-      <button class="config-back" id="constructionBackBtn" type="button" aria-label="Back">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5"/><path d="M20 12H9.5"/></svg>
-      </button>
-      <div class="config-header">
-        <span class="config-mode-title" id="constructionTitle"></span>
-      </div>
-      <div class="config-lobby-content">
-        <p>Under construction.</p>
-      </div>
-    </div>
     <!-- League (index.html's #navLeague, wired in main.js) — reuses
          .config-panel's shell/positioning/entrance animation as-is
          (.league-panel in style.css only overrides surface color/radius/
@@ -1443,8 +1403,8 @@
       </div>
     </div>
     <!-- League rules (index.html's #leagueOverlay "Rules" pill, wired in
-         main.js) — its own panel now (used to reuse Partnership's "Under
-         construction" placeholder, see that panel's own comment), same
+         main.js) — its own panel now (it used to reuse a shared "Under
+         construction" placeholder that has since been removed), same
          .config-panel/.league-panel shell + .rules-scroll/.rules-sentence
          convention as #nimicurlRulesOverlay above, just re-tinted for this
          light surface (see style.css). Reached only from #leagueOverlay and

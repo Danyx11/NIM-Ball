@@ -201,7 +201,7 @@ if (IS_MOBILE) document.body.classList.add('mobile-layout');
   // running) stays with #game-card above, same as #overlay/#syncToast — it's
   // gameplay chrome, not a menu screen, so this change doesn't touch it.
   const menuHost = document.getElementById('menuStage');
-  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'comingSoonOverlay', 'joinCodeOverlay', 'weekMatchDialogOverlay', 'claimAliasOverlay', 'replayUploadOverlay', 'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'partnershipOverlay', 'partnershipBookOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
+  ['modeOverlay', 'vibeSubOverlay', 'moreSubOverlay', 'moreVibeOverlay', 'moreLaunchOverlay', 'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay', 'matchNetworkOverlay', 'weekTicketOverlay', 'joinCodeOverlay', 'weekMatchDialogOverlay', 'claimAliasOverlay', 'replayUploadOverlay', 'aboutOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay', 'partnershipOverlay', 'partnershipBookOverlay', 'howToHubOverlay', 'nimicurlRulesOverlay', 'pureCurlingRulesOverlay'].forEach((id) => {
     menuHost.appendChild(document.getElementById(id));
   });
 }
@@ -1627,35 +1627,6 @@ moreLaunchBackBtn.addEventListener('click', (e) => {
 moreLaunchLocal.addEventListener('click', () => { audio.play('button'); moreLaunchOverlay.classList.add('hidden'); launchPassPlayMatch(moreLaunchConfig); });
 moreLaunchRemote.addEventListener('click', () => { audio.play('button'); moreLaunchOverlay.classList.add('hidden'); hostMatch(moreLaunchConfig); });
 
-// ---- Curling: tiles/menus are live (see conversation), the actual match
-// engine isn't plugged in yet — every path that would otherwise call
-// startGame()/hostMatch() lands here instead. Its own small .config-panel
-// (see index.html's #comingSoonOverlay comment) rather than showLobby/
-// #overlay, which desktop's menuHost move keeps behind #menuStage — this
-// needs to sit on top of #modeOverlay's still-visible backdrop like every
-// other pre-match menu panel.
-const comingSoonOverlay = document.getElementById('comingSoonOverlay');
-const csoIcon = document.getElementById('csoIcon');
-const csoOkBtn = document.getElementById('csoOkBtn');
-function showComingSoonScreen() {
-  // Defensive: reached from more than one screen (Classic/Custom's own
-  // launch callback, which already hides itself first — but also straight
-  // off Match réseau's "Rejoindre", which hasn't hidden matchNetworkOverlay
-  // yet) — hiding both here regardless of which path called in keeps
-  // returnToModeSelect() below from leaving a stale panel behind it.
-  classicCustomOverlay.classList.add('hidden');
-  hideNetPanel();
-  csoIcon.replaceChildren(VIBE_TILES[activeVibe].querySelector('.mode-icon').cloneNode(true));
-  csoIcon.setAttribute('aria-label', VIBE_LABELS[activeVibe]);
-  comingSoonOverlay.classList.remove('mode-hockey', 'mode-curling');
-  comingSoonOverlay.classList.add(vibeTintClass());
-  comingSoonOverlay.classList.remove('hidden');
-}
-csoOkBtn.addEventListener('click', () => {
-  audio.play('button');
-  comingSoonOverlay.classList.add('hidden');
-  returnToModeSelect();
-});
 
 const OVERLAY_TINT_CLASSES = ['mode-hockey', 'mode-curling', 'mode-solo', 'mode-replay'];
 // mode: 'passplay'/'remote' (tint follows activeVibe — hockey/curling), or
@@ -2501,44 +2472,6 @@ navAbout.addEventListener('click', () => {
   else hideAboutScreen();
 });
 aboutBackBtn.addEventListener('click', hideAboutScreen);
-// Partnership (index.html's #navPartnership) — no real destination yet, so
-// it gets the shared "Under construction" panel (#constructionOverlay),
-// same toggle-on-reclick principle as #aboutOverlay above. (League's own
-// "Rules" pill used to reuse this panel too — it has its own dedicated one
-// now, #leagueRulesOverlay, see showLeagueRulesScreen below.) Tracks which
-// label is currently showing so re-clicking a DIFFERENT caller while this
-// panel is open switches topic instead of closing.
-const constructionOverlay = document.getElementById('constructionOverlay');
-const constructionBackBtn = document.getElementById('constructionBackBtn');
-const constructionTitle = document.getElementById('constructionTitle');
-let activeConstructionLabel = null;
-function showConstructionScreen(label) {
-  audio.play('button');
-  hideSidebarPanels();
-  modeOverlay.classList.remove('hidden');
-  modeDrawer.classList.add('hidden');
-  hideRemoteMatchStack(); // see that function's own comment
-  constructionTitle.textContent = label;
-  constructionOverlay.classList.remove('hidden');
-  activeConstructionLabel = label;
-}
-function hideConstructionScreen() {
-  audio.play('button');
-  constructionOverlay.classList.add('hidden');
-  activeConstructionLabel = null;
-  returnToModeSelect();
-}
-constructionBackBtn.addEventListener('click', hideConstructionScreen);
-function wireConstructionNav(id, label) {
-  document.getElementById(id).addEventListener('click', () => {
-    if (activeStopGame) return;
-    if (constructionOverlay.classList.contains('hidden') || activeConstructionLabel !== label) {
-      showConstructionScreen(label);
-    } else {
-      hideConstructionScreen();
-    }
-  });
-}
 // Partnership (index.html's #navPartnership/#partnershipOverlay +
 // #partnershipBookOverlay) — its own two-panel flow, same show/hide shape as
 // About/Nimiq/League above. "Book a week" now shows the real week list from
@@ -3340,8 +3273,8 @@ const htCurlingBtn = document.getElementById('htCurlingBtn');
 // hideMatchChrome pairing elsewhere in this file.
 const OTHER_MENU_OVERLAY_IDS = [
   'connectGateOverlay', 'introHowToOverlay', 'classicCustomOverlay', 'customSettingsOverlay',
-  'comingSoonOverlay', 'joinCodeOverlay', 'replayUploadOverlay',
-  'aboutOverlay', 'constructionOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay',
+  'joinCodeOverlay', 'replayUploadOverlay',
+  'aboutOverlay', 'nimiqOverlay', 'leagueOverlay', 'leagueRulesOverlay',
   'partnershipOverlay', 'partnershipBookOverlay', 'howToHubOverlay',
   'nimicurlRulesOverlay', 'pureCurlingRulesOverlay',
 ];
