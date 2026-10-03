@@ -241,12 +241,25 @@ export class WeekArbiter extends Server {
   }
 
   // League Beta (party/leagueSeason.js) — same RPC shape as radarNotify
-  // above, pointed at the season's own Durable Object instead.
+  // above, pointed at the season's own Durable Object instead. Unlike
+  // radarNotify this one's RESULT matters (see prizeNotify just below, and
+  // completeRound/awardWeekForfeit's call sites): WEEK has no live push, so
+  // the LP a match awarded can only reach the player through the response
+  // this returns, persisted into this.match.leagueResult.
+  //
+  // That `return` was missing, so this always resolved to `undefined` while
+  // the RPC itself ran fine — meaning every `const result = await
+  // this.leagueNotify(...)` saw undefined, this.match.leagueResult was never
+  // set for ANY week match, and snapshotFor's leagueLp was always null. LP was
+  // being awarded correctly server-side and simply never shown. Exactly the
+  // bug party/arbiter.js's own leagueNotify comment records having been found
+  // live on that side; this is the same fix, and the same shape as prizeNotify
+  // below (which got it right).
   leagueNotify(method, payload) {
-    if (!this.env?.LeagueSeason) return;
-    getServerByName(this.env.LeagueSeason, CURRENT_SEASON_ID)
+    if (!this.env?.LeagueSeason) return Promise.resolve(undefined);
+    return getServerByName(this.env.LeagueSeason, CURRENT_SEASON_ID)
       .then((league) => league[method](payload))
-      .catch((err) => console.error(`[league] ${method} failed:`, err));
+      .catch((err) => { console.error(`[league] ${method} failed:`, err); return undefined; });
   }
 
   // NIM prizes (party/prize.js) — same RPC shape as leagueNotify above.
