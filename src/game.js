@@ -2328,7 +2328,6 @@ export function startGame(opts = {}) {
       g.pendingVx = dx * POWER_SCALE;
       g.pendingVy = dy * POWER_SCALE;
       g.used = true;
-      audio.play('shot', { volume: 0.4 + 0.6 * Math.min(1, dist / MAX_DRAG), rate: 0.95 + Math.random() * 0.1 });
     } else {
       g.used = false;
     }
@@ -2445,7 +2444,7 @@ export function startGame(opts = {}) {
       const pos = getPointerPos(evt);
       drag.curX = pos.x; drag.curY = pos.y;
       // the tick itself never fires on release — releaseDrag plays
-      // 'stoneSelect'/'shot' instead.
+      // 'stoneSelect' instead.
       const dist = Math.min(MAX_DRAG, Math.hypot(drag.startX - drag.curX, drag.startY - drag.curY));
       updateDragTickAudio(dist);
       return;
@@ -4401,8 +4400,10 @@ export function startGame(opts = {}) {
     // wanders into the goal mouth is just silently put back on the ice
     // instead of running the real scoring/victory flow.
     if (howTo) { resetPositions(); beginAimPhase(); return; }
-    if (isWipeout) audio.play('wipeout');
-    else audio.play('goal', { volume: 0.447 }); // -7dB
+    // A goal gets its own cue; a wipeout has none of its own and leans on the
+    // stones' stoneFall/stoneDead as they drop, then pointOk on the +1 panel
+    // (see src/audio.js's note on the removed `wipeout` entry).
+    if (!isWipeout) audio.play('goal', { volume: 0.447 }); // -7dB
     // Fire the reward request (League/Prize) the instant a match-winning goal
     // lands, rather than after resolveGoal()'s own GOAL_PAUSE_MS settle wait —
     // the final score is already known here, so this overlaps the server
@@ -4884,7 +4885,8 @@ export function startGame(opts = {}) {
   // same assembled points from the top instead of a brand-new match.
   async function showReplayEndTicket() {
     phase = 'gameover';
-    audio.play('win');
+    // No cue here — see src/audio.js's note on the removed `win` entry, which was
+    // only ever wired to this one spot and never had a file behind it.
     hideReplayBar();
     // A ticket-upload replay already has the real, original ticket image
     // (see originalTicketDataUrl's own comment above) — show that as-is

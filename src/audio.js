@@ -8,18 +8,34 @@
 // them — mutating REVERB_SEND from such a tool only affects that page's own
 // module instance, never this file's real in-game singleton below.
 const ASSET_BASE = import.meta.env.BASE_URL;
+// Three entries used to sit in here — `shot`, `wipeout` and `win` — pointing at
+// shot.wav / wipeout.wav / win.wav. Those files never existed: not on disk, not
+// anywhere in git history. They were written down before the audio was actually
+// produced, and the clips that did get made were named differently. So all three
+// only ever cost three failed fetches and three console warnings per page load,
+// while play() returned silently on the missing buffer (see its own guard).
+// Removed rather than repointed at an existing clip, per explicit request.
+// What that means in practice, so nobody re-adds them by accident:
+//  - `shot` was redundant anyway. releaseDrag plays `stoneSelect` on release
+//    unconditionally, deliberately ("echoes the pickup cue on release too"), and
+//    its volume is calibrated for being the only cue there.
+//  - `wipeout` means a wipeout point has no ponctuation of its own, where a goal
+//    gets goal.m4a. It is NOT silent — the stones' own stoneFall/stoneDead fire as
+//    they drop, then pointOk on the +1 panel — just thinner than a goal.
+//  - `win` was only ever wired to the END OF A REPLAY (showReplayEndTicket), never
+//    to a real victory, which has always played pointOk then ticketReveal. So a
+//    replay now ends on its ticket with no cue at all.
+// Neither of those last two is a regression: both were already silent, since the
+// files were missing. Producing real clips for them is a live follow-up.
 export const SFX_SRC = {
   hitWall: `${ASSET_BASE}sfx/golf layer/golf wall.m4a`,   // stone/ball bouncing off a rail
   hitStone: `${ASSET_BASE}sfx/golf layer/golf stone.m4a`,   // stone-stone collision
   hitStoneBall: `${ASSET_BASE}sfx/golf layer/golf ball.m4a`,   // stone-ball collision
-  shot: `${ASSET_BASE}sfx/shot.wav`,          // drag released, a stone launches
   stoneSelect: `${ASSET_BASE}sfx/stone select.m4a`, // a stone is grabbed to start a drag
   dragTick: `${ASSET_BASE}sfx/drag tick.m4a`, // retriggered while dragging, see onPointerMove in game.js
   goal: `${ASSET_BASE}sfx/goal.m4a`,          // ball crosses into the goal mouth
-  wipeout: `${ASSET_BASE}sfx/wipeout.wav`,    // a whole team has fallen in
   button: `${ASSET_BASE}sfx/button.m4a`,      // PLAY cap pressed
   exitPanel: `${ASSET_BASE}sfx/exit-panel.m4a`, // "Oui" on a live-match quit confirm (not replay)
-  win: `${ASSET_BASE}sfx/win.wav`,            // match point reached
   matchStart: `${ASSET_BASE}sfx/Match start.m4a`, // played once, right as a live match begins
   whistle: `${ASSET_BASE}sfx/whistle 2.m4a`,  // played right before each turn timer starts (not the match's very first one, see beginAimPhase in game.js)
   launchEngine: `${ASSET_BASE}sfx/launch engine.m4a`, // small machinery cue, first sound in the reveal — before the glide whoosh and the stones' departure
